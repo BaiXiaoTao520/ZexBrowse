@@ -178,7 +178,6 @@ fun ZexBrowseApp() {
         "light" -> false
         else -> androidx.compose.foundation.isSystemInDarkTheme()
     }
-    browserViewModel.forceDarkWeb = useDarkTheme
     LaunchedEffect(useDarkTheme) { browserViewModel.applyForceDark(useDarkTheme) }
     val colorScheme = if (settings.dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (useDarkTheme) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)

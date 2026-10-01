@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
@@ -37,7 +38,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
     var browserSettings = BrowserSettings()
-    var forceDarkWeb: Boolean = false
     private var incognitoContextId: String? = null
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init { newTab() }
@@ -50,10 +50,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build()); val id = UUID.randomUUID().toString()
         session.open(runtime)
-        if (forceDarkWeb) runCatching {
-            val cs = session.javaClass.getMethod("getContentSettings").invoke(session)
-            cs.javaClass.getMethod("setForceDark", Boolean.TYPE).invoke(cs, true)
-        }
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) = update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
@@ -99,12 +95,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun applyForceDark(enabled: Boolean) {
-        forceDarkWeb = enabled
-        _tabs.value.forEach { tab ->
-            runCatching {
-                val cs = tab.session.javaClass.getMethod("getContentSettings").invoke(tab.session)
-                cs.javaClass.getMethod("setForceDark", Boolean.TYPE).invoke(cs, enabled)
-            }
+        runCatching {
+            runtime.settings.setPreferredColorScheme(
+                if (enabled) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+            )
         }
     }
 
