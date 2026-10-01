@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.HistoryEntity
+import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,7 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.WebResponse
+import org.mozilla.geckoview.StorageController
 import java.net.URLEncoder
 import java.util.UUID
 
@@ -29,6 +31,8 @@ data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val runtime = (application as ZexBrowseApplication).runtime
     private val database = BrowserDatabase.create(application)
+    private val downloadScheduler = DownloadScheduler(application)
+    val downloads = database.downloadDao().observeAll()
     private val _tabs = MutableStateFlow<List<BrowserTab>>(emptyList()); val tabs = _tabs.asStateFlow()
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
@@ -62,15 +66,43 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun closeAll() { _tabs.value.forEach { it.session.close() }; _tabs.value = emptyList(); _selectedId.value = null; newTab() }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }
+    fun enqueueDownload(url: String, target: android.net.Uri, fileName: String, expectedHash: String) {
+        viewModelScope.launch { downloadScheduler.enqueue(url, target, fileName, expectedHash) }
+    }
+    fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
+    fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
+        var flags = 0L
+        if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES
+        if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
+        if (flags != 0L) runtime.storageController.clearData(flags)
+        if (history) viewModelScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
+    }
     private fun update(id: String, transform: (BrowserTab) -> BrowserTab) { _tabs.value = _tabs.value.map { if (it.id == id) transform(it) else it } }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
-    private fun userAgentOverride(settings: BrowserSettings): String? = when (settings.userAgentMode) {
-        "android_chrome" -> "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
-        "desktop_chrome" -> "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-        "desktop_firefox" -> "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
-        "custom" -> settings.customUserAgent.trim().takeIf(String::isNotEmpty)
-        else -> null
+    private fun userAgentOverride(settings: BrowserSettings): String? {
+        if (settings.simplifiedUserAgent) return "Mozilla/5.0 (Android) Gecko/131 Firefox/131"
+        val userAgent = when (settings.userAgentMode) {
+            "android_chrome" -> "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+            "desktop_chrome" -> "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            "desktop_firefox" -> "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+            "custom" -> settings.customUserAgent.trim().takeIf(String::isNotEmpty)
+            else -> null
+        }
+        return userAgent
     }
-    private fun normalize(value: String): String { val text = value.trim(); return if (text.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))) text else if (text.startsWith("www.") || text.matches(Regex("^[^\\s/]+\\.[^\\s/]+.*"))) "https://$text" else "https://www.google.com/search?q=${URLEncoder.encode(text, "UTF-8")}" }
+    private fun normalize(value: String): String {
+        val text = value.trim()
+        if (text.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))) return text
+        if (text.startsWith("www.") || text.matches(Regex("^[^\\s/]+\\.[^\\s/]+.*"))) return "https://$text"
+        val encoded = URLEncoder.encode(text, "UTF-8")
+        val template = when (browserSettings.searchEngine) {
+            "baidu" -> "https://www.baidu.com/s?wd={query}"
+            "bing" -> "https://www.bing.com/search?q={query}"
+            "duckduckgo" -> "https://duckduckgo.com/?q={query}"
+            "custom" -> browserSettings.customSearchUrl
+            else -> "https://www.google.com/search?q={query}"
+        }
+        return (template.takeIf { it.contains("{query}") } ?: "https://www.google.com/search?q={query}").replace("{query}", encoded)
+    }
     override fun onCleared() { _tabs.value.forEach { it.session.close() }; super.onCleared() }
 }
