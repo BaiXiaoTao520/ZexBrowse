@@ -16,11 +16,6 @@ ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack
 
 ## 构建与发布
 
-项目提供 [GitHub Actions 工作流](.github/workflows/android-release.yml)。推送 `v*` 标签或手动运行工作流后，工作流会使用以下 GitHub Secrets 构建并签名 Release APK：
-
-- `ANDROID_KEYSTORE_BASE64`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_PASSWORD`
+项目提供 [GitHub Actions 工作流](.github/workflows/android-release.yml)。
 
 Release 会附带 `SHA256SUMS.txt`。本地 ARM64 容器不构建 Release APK；请使用 GitHub Actions 完成远程 Release 构建。
