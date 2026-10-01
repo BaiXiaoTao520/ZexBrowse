@@ -13,7 +13,7 @@ import okhttp3.Request
 import org.json.JSONObject
 
 data class ReleaseInfo(val version: String, val notes: String, val downloadUrl: String)
-data class Contributor(val name: String, val contributions: Int)
+data class Contributor(val name: String, val avatarUrl: String, val contributions: Int)
 
 class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
     suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
@@ -49,7 +49,7 @@ class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
             val array = org.json.JSONArray(body.string())
             (0 until array.length()).map { index ->
                 val item = array.getJSONObject(index)
-                Contributor(item.optString("login"), item.optInt("contributions"))
+                Contributor(item.optString("login"), item.optString("avatar_url"), item.optInt("contributions"))
             }
         }
     }

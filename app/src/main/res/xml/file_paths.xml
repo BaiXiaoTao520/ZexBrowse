@@ -2,4 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-files-path name="external_downloads" path="Download/" />
     <files-path name="internal_downloads" path="downloads/" />
+    <external-files-path name="update_downloads" path="Download/" />
 </paths>

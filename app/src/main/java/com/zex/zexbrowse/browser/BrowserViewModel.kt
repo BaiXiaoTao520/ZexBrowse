@@ -37,10 +37,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
     var browserSettings = BrowserSettings()
+    private var incognitoContextId: String? = null
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init { newTab() }
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
+        if (incognito) {
+            val contextId = incognitoContextId ?: UUID.randomUUID().toString().also { incognitoContextId = it }
+            sessionSettings.contextId(contextId)
+        }
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build()); val id = UUID.randomUUID().toString()
         session.open(runtime)
@@ -64,8 +69,25 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun select(id: String) { _selectedId.value = id }
-    fun close(id: String) { _tabs.value.firstOrNull { it.id == id }?.session?.close(); _tabs.value = _tabs.value.filterNot { it.id == id }; _selectedId.value = _tabs.value.lastOrNull()?.id; if (_tabs.value.isEmpty()) newTab() }
-    fun closeAll() { _tabs.value.forEach { it.session.close() }; _tabs.value = emptyList(); _selectedId.value = null; newTab() }
+    fun close(id: String) {
+        _tabs.value.firstOrNull { it.id == id }?.session?.close()
+        _tabs.value = _tabs.value.filterNot { it.id == id }
+        clearIncognitoContextIfEmpty()
+        _selectedId.value = _tabs.value.lastOrNull()?.id
+        if (_tabs.value.isEmpty()) newTab()
+    }
+    fun closeAll() { _tabs.value.forEach { it.session.close() }; _tabs.value = emptyList(); _selectedId.value = null; incognitoContextId?.let(runtime.storageController::clearDataForSessionContext); incognitoContextId = null; newTab() }
+    fun closeAllIncognito() {
+        _tabs.value.filter { it.incognito }.forEach { it.session.close() }
+        _tabs.value = _tabs.value.filterNot { it.incognito }
+        incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
+        incognitoContextId = null
+        _selectedId.value = _tabs.value.lastOrNull()?.id ?: run { newTab(); _selectedId.value }
+    }
+    fun switchCurrentToDesktopUserAgent() {
+        selected?.session?.settings?.setUserAgentOverride("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+        selected?.session?.reload()
+    }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }
     fun enqueueDownload(url: String, fileName: String, expectedHash: String) {
@@ -85,6 +107,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
         if (flags != 0L) runtime.storageController.clearData(flags)
         if (history) viewModelScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
+    }
+    private fun clearIncognitoContextIfEmpty() {
+        if (_tabs.value.none { it.incognito }) {
+            incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
+            incognitoContextId = null
+        }
     }
     private fun update(id: String, transform: (BrowserTab) -> BrowserTab) { _tabs.value = _tabs.value.map { if (it.id == id) transform(it) else it } }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }

@@ -80,6 +80,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.25")
     implementation(platform("org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.8.1"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")

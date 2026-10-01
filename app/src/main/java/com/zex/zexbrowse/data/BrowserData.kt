@@ -136,7 +136,8 @@ data class BrowserSettings(
     val clearHistoryOnExit: Boolean = true,
     val downloadDirectoryMode: String = "internal",
     val externalDownloadTreeUri: String = "",
-    val externalDownloadDisplayPath: String = "/storage/emulated/0/Download/"
+    val externalDownloadDisplayPath: String = "/storage/emulated/0/Download/",
+    val autoCheckUpdates: Boolean = true
 )
 
 class SettingsStore(private val context: Context) {
@@ -158,6 +159,7 @@ class SettingsStore(private val context: Context) {
     private val downloadDirectoryModeKey = stringPreferencesKey("download_directory_mode")
     private val externalDownloadTreeUriKey = stringPreferencesKey("external_download_tree_uri")
     private val externalDownloadDisplayPathKey = stringPreferencesKey("external_download_display_path")
+    private val autoCheckUpdatesKey = booleanPreferencesKey("auto_check_updates")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -178,7 +180,8 @@ class SettingsStore(private val context: Context) {
             clearHistoryOnExit = preferences[clearHistoryOnExitKey] ?: true,
             downloadDirectoryMode = preferences[downloadDirectoryModeKey] ?: "internal",
             externalDownloadTreeUri = preferences[externalDownloadTreeUriKey] ?: "",
-            externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "/storage/emulated/0/Download/"
+            externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "/storage/emulated/0/Download/",
+            autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true
         )
     }
 
@@ -205,6 +208,7 @@ class SettingsStore(private val context: Context) {
         preferences[externalDownloadTreeUriKey] = treeUri
         preferences[externalDownloadDisplayPathKey] = displayPath
     }
+    suspend fun autoCheckUpdates(value: Boolean) = update { it[autoCheckUpdatesKey] = value }
     suspend fun clearOnExit(enabled: Boolean, cookies: Boolean, cache: Boolean, history: Boolean) = update { preferences ->
         preferences[clearOnExitKey] = enabled
         preferences[clearCookiesOnExitKey] = cookies
