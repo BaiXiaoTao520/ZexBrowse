@@ -43,7 +43,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     init { newTab() }
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
-        if (forceDarkWeb) sessionSettings.forceDark(true)
         if (incognito) {
             val contextId = incognitoContextId ?: UUID.randomUUID().toString().also { incognitoContextId = it }
             sessionSettings.contextId(contextId)
@@ -51,6 +50,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build()); val id = UUID.randomUUID().toString()
         session.open(runtime)
+        if (forceDarkWeb) runCatching {
+            val cs = session.javaClass.getMethod("getContentSettings").invoke(session)
+            cs.javaClass.getMethod("setForceDark", Boolean.TYPE).invoke(cs, true)
+        }
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) = update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
@@ -93,6 +96,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             s.setUserAgentOverride(if (isDesktop) userAgentOverride(browserSettings) else desktopUA)
         }
         selected?.session?.reload()
+    }
+
+    fun applyForceDark(enabled: Boolean) {
+        forceDarkWeb = enabled
+        _tabs.value.forEach { tab ->
+            runCatching {
+                val cs = tab.session.javaClass.getMethod("getContentSettings").invoke(tab.session)
+                cs.javaClass.getMethod("setForceDark", Boolean.TYPE).invoke(cs, enabled)
+            }
+        }
     }
 
     fun applyCurrentUserAgentToSelected() {
