@@ -32,7 +32,8 @@ jobs:
         id: version
         run: |
           VERSION_NAME=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"/\1/p' app/build.gradle.kts | head -n 1)
-          test -n "$VERSION_NAME" || { echo "无法从 app/build.gradle.kts 读取 versionName"; exit 1; }
+          VERSION_CODE=$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)/\1/p' app/build.gradle.kts | head -n 1)
+          test -n "$VERSION_NAME" && test -n "$VERSION_CODE" || { echo "无法从 app/build.gradle.kts 读取版本号"; exit 1; }
           echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
 
       - name: 配置 SSH 标签签名环境
@@ -51,21 +52,6 @@ jobs:
           git config gpg.format ssh
           git config user.signingkey "$RUNNER_TEMP/signing_key"
           git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
-
-      - name: 自动创建或验证 SSH 签名版本标签
-        id: tag
-        env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
-            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-            git verify-tag "$RELEASE_TAG"
-          else
-            git tag -s "$RELEASE_TAG" -m "ZexBrowse ${RELEASE_TAG#v}"
-            git verify-tag "$RELEASE_TAG"
-            git push origin "refs/tags/$RELEASE_TAG"
-          fi
-          echo "name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: 验证 Android SDK
         run: |
@@ -96,6 +82,22 @@ jobs:
         run: |
           cd app/build/outputs/apk/release
           sha256sum app-release.apk > SHA256SUMS.txt
+
+      - name: 自动创建或验证 SSH 签名版本标签
+        id: tag
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            git verify-tag "$RELEASE_TAG"
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$GITHUB_SHA" || { echo "已有版本标签未指向当前成功构建提交"; exit 1; }
+          else
+            git tag -s "$RELEASE_TAG" -m "ZexBrowse ${RELEASE_TAG#v}"
+            git verify-tag "$RELEASE_TAG"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+          echo "name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: 自动创建 GitHub Release 并上传产物
         uses: softprops/action-gh-release@v2
