@@ -136,7 +136,7 @@ data class BrowserSettings(
     val clearHistoryOnExit: Boolean = true,
     val downloadDirectoryMode: String = "internal",
     val externalDownloadTreeUri: String = "",
-    val externalDownloadDisplayPath: String = "/storage/emulated/0/Download/",
+    val externalDownloadDisplayPath: String = "",
     val autoCheckUpdates: Boolean = true
 )
 
@@ -180,7 +180,7 @@ class SettingsStore(private val context: Context) {
             clearHistoryOnExit = preferences[clearHistoryOnExitKey] ?: true,
             downloadDirectoryMode = preferences[downloadDirectoryModeKey] ?: "internal",
             externalDownloadTreeUri = preferences[externalDownloadTreeUriKey] ?: "",
-            externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "/storage/emulated/0/Download/",
+            externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "",
             autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true
         )
     }
@@ -203,7 +203,7 @@ class SettingsStore(private val context: Context) {
         preferences[customSearchTitleKey] = title
         preferences[customSearchUrlKey] = url
     }
-    suspend fun downloadDirectory(mode: String, treeUri: String = "", displayPath: String = "/storage/emulated/0/Download/") = update { preferences ->
+    suspend fun downloadDirectory(mode: String, treeUri: String = "", displayPath: String = "") = update { preferences ->
         preferences[downloadDirectoryModeKey] = mode
         preferences[externalDownloadTreeUriKey] = treeUri
         preferences[externalDownloadDisplayPathKey] = displayPath

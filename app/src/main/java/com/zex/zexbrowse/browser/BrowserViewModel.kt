@@ -84,9 +84,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         incognitoContextId = null
         _selectedId.value = _tabs.value.lastOrNull()?.id ?: run { newTab(); _selectedId.value }
     }
-    fun switchCurrentToDesktopUserAgent() {
-        selected?.session?.settings?.setUserAgentOverride("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+    fun toggleDesktopUserAgent() {
+        val desktopUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        val isDesktop = selected?.session?.settings?.userAgentOverride?.contains("X11") == true
+        selected?.session?.settings?.let { s ->
+            s.setUserAgentOverride(if (isDesktop) userAgentOverride(browserSettings) else desktopUA)
+        }
         selected?.session?.reload()
+    }
+
+    fun applyCurrentUserAgentToSelected() {
+        val ua = userAgentOverride(browserSettings)
+        selected?.session?.let { session ->
+            session.settings?.setUserAgentOverride(ua)
+            session.reload()
+        }
     }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }

@@ -40,7 +40,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
-        setForeground(createForegroundInfo(fileName, 0, false))
+        setForeground(createForegroundInfo(id, fileName, 0, false))
 
         try {
             val call = client.newCall(Request.Builder().url(url).build())
@@ -73,7 +73,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                                 lastProgress = progress
                                 database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
                                 setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
-                                setForeground(createForegroundInfo(fileName, progress, total <= 0))
+                                setForeground(createForegroundInfo(id, fileName, progress, total <= 0))
                             }
                         }
                     }
@@ -81,7 +81,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
                 val status = if (expectedHash.isNotBlank() && !hash.equals(expectedHash, true)) "hash_mismatch" else "completed"
                 database.downloadDao().complete(id, status, hash)
-                notifyFinished(fileName, status == "completed")
+                notifyFinished(id, fileName, status == "completed")
                 cancellationHandle.dispose()
                 Result.success()
             }
@@ -90,12 +90,12 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             throw cancelled
         } catch (error: Throwable) {
             database.downloadDao().finishWithMessage(id, "failed", error.message ?: "未知错误")
-            notifyFinished(fileName, false)
+            notifyFinished(id, fileName, false)
             Result.failure()
         }
     }
 
-    private fun createForegroundInfo(fileName: String, progress: Int, indeterminate: Boolean): ForegroundInfo {
+    private fun createForegroundInfo(id: String, fileName: String, progress: Int, indeterminate: Boolean): ForegroundInfo {
         ensureChannel()
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
@@ -112,7 +112,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         }
     }
 
-    private fun notifyFinished(fileName: String, success: Boolean) {
+    private fun notifyFinished(id: String, fileName: String, success: Boolean) {
         ensureChannel()
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
