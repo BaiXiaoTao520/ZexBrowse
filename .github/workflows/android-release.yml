@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -83,20 +83,26 @@ jobs:
           cd app/build/outputs/apk/release
           sha256sum app-release.apk > SHA256SUMS.txt
 
-      - name: 自动创建或验证 SSH 签名版本标签
+      - name: 删除同版本 GitHub Release 与 SSH 签名标签
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --yes
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
+            git push origin ":refs/tags/$RELEASE_TAG"
+          fi
+
+      - name: 创建并验证 SSH 签名版本标签
         id: tag
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
-            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-            git verify-tag "$RELEASE_TAG"
-            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$GITHUB_SHA" || { echo "已有版本标签未指向当前成功构建提交"; exit 1; }
-          else
-            git tag -s "$RELEASE_TAG" -m "ZexBrowse ${RELEASE_TAG#v}"
-            git verify-tag "$RELEASE_TAG"
-            git push origin "refs/tags/$RELEASE_TAG"
-          fi
+          git tag -s "$RELEASE_TAG" -m "ZexBrowse ${RELEASE_TAG#v}"
+          git verify-tag "$RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"
           echo "name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: 自动创建 GitHub Release 并上传产物

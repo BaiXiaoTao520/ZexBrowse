@@ -4,6 +4,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.zex.zexbrowse.ui
 
 import android.content.Intent
@@ -24,10 +26,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -72,7 +77,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,7 +92,8 @@ import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.download.DownloadManager
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoView
 
@@ -217,7 +223,7 @@ private fun AddressInput(value: String, onValueChange: (String) -> Unit, onSubmi
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.width(300.dp),
             placeholder = { Text("搜索或输入网址") },
             singleLine = true,
             trailingIcon = {
@@ -238,14 +244,14 @@ private fun QuickSiteGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onRe
         items(sites.chunked(2)) { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { site ->
-                    ElevatedCard(Modifier.weight(1f).height(92.dp).clickable { onOpen(site.url) }) {
+                    ElevatedCard(Modifier.width(160.dp).height(92.dp).clickable { onOpen(site.url) }) {
                         Column(Modifier.padding(14.dp)) {
                             Text(site.icon, style = MaterialTheme.typography.headlineSmall)
                             Text(site.title)
                         }
                     }
                 }
-                repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
+                repeat(2 - row.size) { Spacer(Modifier.width(160.dp)) }
             }
         }
         item { TextButton(onClick = onRestore, modifier = Modifier.fillMaxWidth()) { Text("恢复默认快捷站点") } }
@@ -286,14 +292,19 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSet
         val url = downloadUrl
         if (target != null && url != null) {
             scope.launch {
-                val actual = DownloadManager(context).download(url, target)
-                hashResult = if (expectedHash.isBlank()) {
-                    "SHA-256：$actual"
-                } else if (actual.equals(expectedHash.trim(), ignoreCase = true)) {
-                    "SHA-256 匹配"
-                } else {
-                    "SHA-256 不匹配（文件损坏/篡改）"
-                }
+                hashResult = runCatching { DownloadManager(context).download(url, target) }
+                    .fold(
+                        onSuccess = { actual ->
+                            if (expectedHash.isBlank()) {
+                                "SHA-256：$actual"
+                            } else if (actual.equals(expectedHash.trim(), ignoreCase = true)) {
+                                "SHA-256 匹配"
+                            } else {
+                                "SHA-256 不匹配（文件损坏/篡改）"
+                            }
+                        },
+                        onFailure = { error -> "下载失败：${error.message ?: "未知错误"}" }
+                    )
             }
         }
     }
@@ -389,7 +400,7 @@ private fun TabOverview(viewModel: BrowserViewModel, onBack: () -> Unit) {
                             Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Language, null) }
                         }
                         Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.width(180.dp)) {
                             Text(tab.title, maxLines = 1)
                             Text(tab.url.ifEmpty { "新标签页" }, maxLines = 1, style = MaterialTheme.typography.bodySmall)
                         }
@@ -521,6 +532,8 @@ private fun AboutScreen(onBack: () -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<com.zex.zexbrowse.data.ReleaseInfo?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var downloadProgress by remember { mutableStateOf(0) }
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -535,12 +548,12 @@ private fun AboutScreen(onBack: () -> Unit) {
             OutlinedButton(
                 onClick = {
                     checking = true
-                    scope.launch(Dispatchers.IO) {
+                    scope.launch {
                         runCatching { UpdateChecker().latest() }
                             .onSuccess { release ->
                                 if (release != null && UpdateChecker().isNewer(release.version)) update = release else message = "当前已是最新版本"
                             }
-                            .onFailure { message = "更新检查失败，请稍后重试" }
+                            .onFailure { error -> message = "更新检查失败：${error.message ?: "请稍后重试"}" }
                         checking = false
                     }
                 },
@@ -550,17 +563,78 @@ private fun AboutScreen(onBack: () -> Unit) {
     }
 
     update?.let { release ->
+        val downloading = downloadJob?.isActive == true
         AlertDialog(
-            onDismissRequest = { update = null },
-            title = { Text("发现新版本 ${release.version}") },
-            text = { Text(release.notes.ifBlank { "暂无更新说明" }) },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (release.downloadUrl.isNotBlank()) context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.downloadUrl)))
-                    update = null
-                }) { Text("下载") }
+            onDismissRequest = {
+                downloadJob?.cancel()
+                downloadJob = null
+                update = null
             },
-            dismissButton = { TextButton(onClick = { update = null }) { Text("稍后") } }
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "推荐更新",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("发现新版本 ${release.version}")
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(release.notes.ifBlank { "暂无更新说明" })
+                    }
+                    if (downloading) {
+                        LinearProgressIndicator(
+                            progress = { downloadProgress / 100f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("正在应用内下载：$downloadProgress%")
+                    }
+                }
+            },
+            confirmButton = {
+                if (!downloading) {
+                    TextButton(
+                        enabled = release.downloadUrl.isNotBlank(),
+                        onClick = {
+                            downloadProgress = 0
+                            downloadJob = scope.launch {
+                                try {
+                                    val result = DownloadManager(context).downloadUpdateApk(
+                                        url = release.downloadUrl,
+                                        fileName = "ZexBrowse-${release.version}.apk",
+                                        onProgress = { downloadProgress = it }
+                                    )
+                                    message = "下载完成\n保存位置：${result.file.absolutePath}\nSHA-256：${result.sha256}"
+                                    update = null
+                                } catch (_: CancellationException) {
+                                    message = "下载已取消"
+                                    update = null
+                                } catch (error: Throwable) {
+                                    message = "下载失败：${error.message ?: "未知错误"}"
+                                } finally {
+                                    downloadJob = null
+                                }
+                            }
+                        }
+                    ) { Text("应用内下载") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    downloadJob?.cancel()
+                    downloadJob = null
+                    update = null
+                }) { Text("取消") }
+            }
         )
     }
     message?.let { content ->

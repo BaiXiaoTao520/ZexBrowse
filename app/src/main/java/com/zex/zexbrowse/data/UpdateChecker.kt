@@ -13,7 +13,48 @@ import okhttp3.Request
 import org.json.JSONObject
 
 data class ReleaseInfo(val version: String, val notes: String, val downloadUrl: String)
+
 class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
-    suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) { val request = Request.Builder().url("https://api.github.com/repos/BaiXiaoTao520/ZexBrowse/releases/latest").header("Accept", "application/vnd.github+json").build(); client.newCall(request).execute().use { response -> if (response.code == 404) return@use null; if (!response.isSuccessful) error("更新检查失败：${response.code}"); val json = JSONObject(response.body.string()); val asset = json.optJSONArray("assets")?.let { assets -> (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") } }; ReleaseInfo(json.optString("tag_name").removePrefix("v"), json.optString("body"), asset?.optString("browser_download_url").orEmpty()) } }
-    fun isNewer(remote: String, local: String = "1.0.1"): Boolean = remote.split('.').map { it.toIntOrNull() ?: 0 }.zip(local.split('.').map { it.toIntOrNull() ?: 0 }).firstOrNull { it.first != it.second }?.let { it.first > it.second } ?: remote.split('.').size > local.split('.').size
+    suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("https://api.github.com/repos/BaiXiaoTao520/ZexBrowse/releases/latest")
+            .header("Accept", "application/vnd.github+json")
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (response.code == 404) return@use null
+            check(response.isSuccessful) { "更新检查失败：${response.code}" }
+            val responseBody = response.body ?: error("GitHub Release API 返回空响应")
+            val json = JSONObject(responseBody.string())
+            val assets = json.optJSONArray("assets")
+            val apkAsset = assets?.let { array ->
+                (0 until array.length())
+                    .map { array.getJSONObject(it) }
+                    .firstOrNull { it.optString("name").endsWith(".apk", ignoreCase = true) }
+            }
+            ReleaseInfo(
+                version = json.optString("tag_name").removePrefix("v"),
+                notes = json.optString("body"),
+                downloadUrl = apkAsset?.optString("browser_download_url").orEmpty()
+            )
+        }
+    }
+
+    fun isNewer(remote: String, local: String = "1.0.1"): Boolean {
+        val remoteParts = versionParts(remote)
+        val localParts = versionParts(local)
+        val count = maxOf(remoteParts.size, localParts.size)
+        for (index in 0 until count) {
+            val remotePart = remoteParts.getOrElse(index) { 0 }
+            val localPart = localParts.getOrElse(index) { 0 }
+            if (remotePart != localPart) return remotePart > localPart
+        }
+        return false
+    }
+
+    private fun versionParts(version: String): List<Int> =
+        version.substringBefore('+')
+            .substringBefore('-')
+            .split('.')
+            .map { part -> part.toIntOrNull() ?: 0 }
 }

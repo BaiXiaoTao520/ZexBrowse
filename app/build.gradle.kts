@@ -43,6 +43,20 @@ android {
 
 kapt { correctErrorTypes = true }
 
+configurations.configureEach {
+    resolutionStrategy {
+        force(
+            "org.jetbrains.kotlin:kotlin-stdlib:1.9.25",
+            "org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25",
+            "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1",
+            "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.1",
+            "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+        )
+    }
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.core:core-ktx:1.13.1")
@@ -58,6 +72,10 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.25")
+    implementation(platform("org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.8.1"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.mozilla.geckoview:geckoview:131.0.20241011205646")
     debugImplementation("androidx.compose.ui:ui-tooling")
