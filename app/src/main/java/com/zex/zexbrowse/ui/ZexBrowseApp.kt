@@ -65,7 +65,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -407,6 +406,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, forceDarkWeb: Boolean, on
 
     viewModel.onExternalDownload = { downloadUrl = it }
 
+    LaunchedEffect(forceDarkWeb) { viewModel.setForceDark(forceDarkWeb) }
+
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
@@ -461,10 +462,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, forceDarkWeb: Boolean, on
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
                         factory = { GeckoView(it) },
-                        update = { view ->
-                            view.setSession(selectedTab.session)
-                            runCatching { view.settings.forceDark = forceDarkWeb }
-                        },
+                        update = { view -> view.setSession(selectedTab.session) },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -747,7 +745,7 @@ private fun DownloadDirectoryScreen(settings: BrowserSettings, onSave: (String, 
         if (uri != null) {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             externalUri = uri.toString()
-            externalPath = uri.path?.substringAfterLast(":")?.let { "/storage/emulated/0/$it/" } ?: "/storage/emulated/0/Download/"
+            externalPath = uri.path?.substringAfterLast(":")?.let { "/storage/emulated/0/$it/" } ?: ""
         }
     }
     Scaffold(topBar = { TopAppBar(title = { Text("下载文件路径") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = {

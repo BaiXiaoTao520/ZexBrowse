@@ -100,6 +100,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             session.reload()
         }
     }
+
+    fun setForceDark(enabled: Boolean) {
+        runCatching { runtime.settings.forceDark = enabled }
+    }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }
     fun enqueueDownload(url: String, fileName: String, expectedHash: String) {
