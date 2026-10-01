@@ -3,18 +3,12 @@ name: Android 自动构建与发布
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "要发布的版本标签，例如 v1.0.0"
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 jobs:
-  发布正式版:
+  release:
     name: 构建、签名并发布 APK
     runs-on: ubuntu-latest
     env:
@@ -42,7 +36,6 @@ jobs:
           git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
 
       - name: 验证 SSH 签名版本标签
-        if: github.event_name == 'push'
         run: git verify-tag "$GITHUB_REF_NAME"
 
       - name: 验证 Android SDK
@@ -78,8 +71,8 @@ jobs:
       - name: 自动创建 GitHub Release 并上传产物
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             app/build/outputs/apk/release/app-release.apk
