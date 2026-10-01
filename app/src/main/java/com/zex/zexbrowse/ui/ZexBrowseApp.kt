@@ -178,6 +178,7 @@ fun ZexBrowseApp() {
         "light" -> false
         else -> androidx.compose.foundation.isSystemInDarkTheme()
     }
+    browserViewModel.forceDarkWeb = useDarkTheme
     val colorScheme = if (settings.dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (useDarkTheme) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
     } else if (useDarkTheme) {
@@ -196,7 +197,6 @@ fun ZexBrowseApp() {
                     )
                     Page.BROWSER -> BrowserScreen(
                         viewModel = browserViewModel,
-                        forceDarkWeb = useDarkTheme,
                         onTabs = { navigate(Page.TABS) },
                         onDownloads = { navigate(Page.DOWNLOADS) },
                         onSettings = { navigate(Page.SETTINGS) }
@@ -389,7 +389,7 @@ private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, forceDarkWeb: Boolean, onTabs: () -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -405,8 +405,6 @@ private fun BrowserScreen(viewModel: BrowserViewModel, forceDarkWeb: Boolean, on
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     viewModel.onExternalDownload = { downloadUrl = it }
-
-    LaunchedEffect(forceDarkWeb) { viewModel.setForceDark(forceDarkWeb) }
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),

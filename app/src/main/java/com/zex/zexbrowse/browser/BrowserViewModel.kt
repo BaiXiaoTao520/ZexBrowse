@@ -37,11 +37,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
     var browserSettings = BrowserSettings()
+    var forceDarkWeb: Boolean = false
     private var incognitoContextId: String? = null
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init { newTab() }
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
+        if (forceDarkWeb) sessionSettings.forceDark(true)
         if (incognito) {
             val contextId = incognitoContextId ?: UUID.randomUUID().toString().also { incognitoContextId = it }
             sessionSettings.contextId(contextId)
@@ -99,10 +101,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             session.settings?.setUserAgentOverride(ua)
             session.reload()
         }
-    }
-
-    fun setForceDark(enabled: Boolean) {
-        runCatching { runtime.settings.forceDark = enabled }
     }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }
