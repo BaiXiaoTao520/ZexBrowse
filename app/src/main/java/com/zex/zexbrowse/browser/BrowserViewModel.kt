@@ -39,7 +39,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var browserSettings = BrowserSettings()
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init { newTab() }
-    fun newTab(incognito: Boolean = false, initialUrl: String? = null) {
+    fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build()); val id = UUID.randomUUID().toString()
@@ -57,19 +57,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) update(id) { it.copy(url = url) } }
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) = update(id) { it.copy(canGoBack = canGoBack) }
             override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) = update(id) { it.copy(canGoForward = canGoForward) }
-            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? = null
+            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? = GeckoResult.fromValue(newTab(initialUrl = uri))
         })
         _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id; initialUrl?.let(::load)
+        return session
     }
+
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) { _tabs.value.firstOrNull { it.id == id }?.session?.close(); _tabs.value = _tabs.value.filterNot { it.id == id }; _selectedId.value = _tabs.value.lastOrNull()?.id; if (_tabs.value.isEmpty()) newTab() }
     fun closeAll() { _tabs.value.forEach { it.session.close() }; _tabs.value = emptyList(); _selectedId.value = null; newTab() }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }
-    fun enqueueDownload(url: String, target: android.net.Uri, fileName: String, expectedHash: String) {
-        viewModelScope.launch { downloadScheduler.enqueue(url, target, fileName, expectedHash) }
+    fun enqueueDownload(url: String, fileName: String, expectedHash: String) {
+        viewModelScope.launch {
+            downloadScheduler.enqueue(
+                url, fileName, expectedHash,
+                browserSettings.downloadDirectoryMode == "external",
+                browserSettings.externalDownloadTreeUri
+            )
+        }
     }
     fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
+    fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
     fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
         var flags = 0L
         if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES

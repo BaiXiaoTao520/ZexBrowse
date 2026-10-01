@@ -12,8 +12,13 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
+        ndk { abiFilters += "arm64-v8a" }
+    }
+
+    splits {
+        abi { isEnable = false }
     }
 
     signingConfigs {
@@ -60,6 +65,7 @@ configurations.configureEach {
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")

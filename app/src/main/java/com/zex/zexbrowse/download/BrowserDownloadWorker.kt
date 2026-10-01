@@ -25,6 +25,9 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.security.MessageDigest
 
 class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
@@ -50,7 +53,11 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 var downloaded = 0L
                 var lastProgress = -1
                 val digest = MessageDigest.getInstance("SHA-256")
-                val output = applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选位置")
+                val output: OutputStream = if (uri.scheme == "file") {
+                    FileOutputStream(File(uri.path.orEmpty()))
+                } else {
+                    applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选位置")
+                }
                 body.byteStream().use { input ->
                     output.buffered().use { stream ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)

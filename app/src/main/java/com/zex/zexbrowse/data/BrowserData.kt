@@ -75,6 +75,9 @@ interface DownloadDao {
 
     @Query("UPDATE downloads SET status = :status, errorMessage = :message WHERE id = :id")
     suspend fun finishWithMessage(id: String, status: String, message: String)
+
+    @Query("DELETE FROM downloads WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -130,7 +133,10 @@ data class BrowserSettings(
     val clearOnExit: Boolean = false,
     val clearCookiesOnExit: Boolean = true,
     val clearCacheOnExit: Boolean = true,
-    val clearHistoryOnExit: Boolean = true
+    val clearHistoryOnExit: Boolean = true,
+    val downloadDirectoryMode: String = "internal",
+    val externalDownloadTreeUri: String = "",
+    val externalDownloadDisplayPath: String = "/storage/emulated/0/Download/"
 )
 
 class SettingsStore(private val context: Context) {
@@ -149,6 +155,9 @@ class SettingsStore(private val context: Context) {
     private val clearCookiesOnExitKey = booleanPreferencesKey("clear_cookies_on_exit")
     private val clearCacheOnExitKey = booleanPreferencesKey("clear_cache_on_exit")
     private val clearHistoryOnExitKey = booleanPreferencesKey("clear_history_on_exit")
+    private val downloadDirectoryModeKey = stringPreferencesKey("download_directory_mode")
+    private val externalDownloadTreeUriKey = stringPreferencesKey("external_download_tree_uri")
+    private val externalDownloadDisplayPathKey = stringPreferencesKey("external_download_display_path")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -166,7 +175,10 @@ class SettingsStore(private val context: Context) {
             clearOnExit = preferences[clearOnExitKey] ?: false,
             clearCookiesOnExit = preferences[clearCookiesOnExitKey] ?: true,
             clearCacheOnExit = preferences[clearCacheOnExitKey] ?: true,
-            clearHistoryOnExit = preferences[clearHistoryOnExitKey] ?: true
+            clearHistoryOnExit = preferences[clearHistoryOnExitKey] ?: true,
+            downloadDirectoryMode = preferences[downloadDirectoryModeKey] ?: "internal",
+            externalDownloadTreeUri = preferences[externalDownloadTreeUriKey] ?: "",
+            externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "/storage/emulated/0/Download/"
         )
     }
 
@@ -187,6 +199,11 @@ class SettingsStore(private val context: Context) {
     suspend fun customSearch(title: String, url: String) = update { preferences ->
         preferences[customSearchTitleKey] = title
         preferences[customSearchUrlKey] = url
+    }
+    suspend fun downloadDirectory(mode: String, treeUri: String = "", displayPath: String = "/storage/emulated/0/Download/") = update { preferences ->
+        preferences[downloadDirectoryModeKey] = mode
+        preferences[externalDownloadTreeUriKey] = treeUri
+        preferences[externalDownloadDisplayPathKey] = displayPath
     }
     suspend fun clearOnExit(enabled: Boolean, cookies: Boolean, cache: Boolean, history: Boolean) = update { preferences ->
         preferences[clearOnExitKey] = enabled

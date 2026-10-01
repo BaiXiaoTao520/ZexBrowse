@@ -10,9 +10,11 @@ package com.zex.zexbrowse.ui
 
 import android.Manifest
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.os.Build
 import android.widget.Toast
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,12 +57,15 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tab
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -82,6 +87,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -111,8 +117,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoView
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
+enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -148,7 +157,7 @@ fun ZexBrowseApp() {
         when (page) {
             Page.BROWSER -> if (browserViewModel.selected?.canGoBack == true) browserViewModel.back() else page = Page.HOME
             Page.TABS -> page = Page.BROWSER
-            Page.ABOUT, Page.DOWNLOADS, Page.SEARCH_ENGINE, Page.USER_AGENT -> page = Page.SETTINGS
+            Page.ABOUT, Page.DOWNLOADS, Page.DOWNLOAD_DIRECTORY, Page.SEARCH_ENGINE, Page.USER_AGENT -> page = Page.SETTINGS
             Page.CUSTOM_SEARCH -> page = Page.SEARCH_ENGINE
             Page.CUSTOM_USER_AGENT -> page = Page.USER_AGENT
             Page.SETTINGS -> page = Page.HOME
@@ -180,6 +189,7 @@ fun ZexBrowseApp() {
                     Page.BROWSER -> BrowserScreen(
                         viewModel = browserViewModel,
                         onTabs = { page = Page.TABS },
+                        onDownloads = { page = Page.DOWNLOADS },
                         onSettings = { page = Page.SETTINGS }
                     )
                     Page.TABS -> TabOverview(viewModel = browserViewModel, onBack = { page = Page.BROWSER })
@@ -195,12 +205,22 @@ fun ZexBrowseApp() {
                             Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
                         },
                         onDownloads = { page = Page.DOWNLOADS },
+                        onDownloadDirectory = { page = Page.DOWNLOAD_DIRECTORY },
                         onSearchEngine = { page = Page.SEARCH_ENGINE },
                         onUserAgent = { page = Page.USER_AGENT },
                         onAbout = { page = Page.ABOUT },
                         onBack = { page = Page.HOME }
                     )
                     Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = { page = Page.SETTINGS })
+                    Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
+                        settings = settings,
+                        onSave = { mode, uri, path ->
+                            scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
+                            Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
+                            page = Page.SETTINGS
+                        },
+                        onBack = { page = Page.SETTINGS }
+                    )
                     Page.SEARCH_ENGINE -> SearchEngineScreen(
                         settings = settings,
                         onSelect = { scope.launch { settingsStore.searchEngine(it) } },
@@ -254,13 +274,15 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 @Composable
 private fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
+    var now by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) { while (true) { now = Date(); kotlinx.coroutines.delay(1_000) } }
     var quickSites by remember { mutableStateOf(defaultQuickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("ZexBrowse", fontWeight = FontWeight.Bold) },
+                title = { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ZexBrowse", fontWeight = FontWeight.Bold); Text(SimpleDateFormat("yyyy年MM月dd日  HH:mm:ss", Locale.getDefault()).format(now), style = MaterialTheme.typography.labelSmall) } },
                 actions = { IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "设置") } }
             )
         }
@@ -322,16 +344,16 @@ private fun AddressInput(value: String, onValueChange: (String) -> Unit, onSubmi
 private fun QuickSiteGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onRestore: () -> Unit) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(sites.chunked(2)) { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 row.forEach { site ->
-                    ElevatedCard(Modifier.weight(1f).height(92.dp).clickable { onOpen(site.url) }) {
+                    ElevatedCard(Modifier.fillMaxWidth(0.48f).height(92.dp).clickable { onOpen(site.url) }) {
                         Column(Modifier.padding(14.dp)) {
                             Text(site.icon, style = MaterialTheme.typography.headlineSmall)
                             Text(site.title)
                         }
                     }
                 }
-                repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
+                repeat(2 - row.size) { Spacer(Modifier.fillMaxWidth(0.48f)) }
             }
         }
         item { TextButton(onClick = onRestore, modifier = Modifier.fillMaxWidth()) { Text("恢复默认快捷站点") } }
@@ -357,7 +379,7 @@ private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSettings: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -370,15 +392,6 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSet
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val targetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { target ->
-        val url = downloadUrl
-        if (target != null && url != null) {
-            viewModel.enqueueDownload(url, target, selectedFileName, expectedHash)
-            Toast.makeText(context, "已开始下载", Toast.LENGTH_SHORT).show()
-            if (Build.VERSION.SDK_INT >= 33) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            downloadUrl = null
-        }
-    }
 
     viewModel.onExternalDownload = { downloadUrl = it }
 
@@ -394,11 +407,13 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSet
                 IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, "后退") }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, "前进") }
                 IconButton(onClick = viewModel::reload) { Icon(Icons.Default.Refresh, "刷新") }
+                IconButton(onClick = { viewModel.browserSettings = viewModel.browserSettings.copy(userAgentMode = "desktop_chrome"); viewModel.newTab(initialUrl = selectedTab?.url) }) { Icon(Icons.Default.Computer, "电脑 UA 新标签") }
                 IconButton(onClick = { showNewTabDialog = true }) { Icon(Icons.Default.Add, "新建标签") }
                 IconButton(onClick = onTabs) {
                     BadgedBox(badge = { Badge { Text(tabs.size.toString()) } }) { Icon(Icons.Default.Tab, "标签") }
                 }
                 IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, "菜单") }
+                IconButton(onClick = onDownloads) { Icon(Icons.Default.Download, "下载记录") }
             }
         }
     ) { padding ->
@@ -407,13 +422,18 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSet
                 items(tabs, key = { it.id }) { tab ->
                     AssistChip(
                         onClick = { viewModel.select(tab.id) },
-                        label = { Text(tab.title, maxLines = 1) },
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(tab.title, maxLines = 1)
+                                Icon(Icons.Default.Close, "关闭标签", Modifier.size(16.dp).clickable { viewModel.close(tab.id) })
+                            }
+                        },
                         leadingIcon = { if (tab.id == selectedId) Icon(Icons.Default.Check, null) }
                     )
                 }
             }
             if (selectedTab != null) {
-                if (selectedTab.loading) LinearProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(6.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
                         factory = { GeckoView(it) },
@@ -444,7 +464,14 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSet
     if (downloadUrl != null) {
         DownloadDialog(
             url = downloadUrl!!,
-            onDownload = { fileName, expected -> expectedHash = expected; selectedFileName = fileName; targetLauncher.launch(fileName) },
+            onDownload = { fileName, expected ->
+                expectedHash = expected
+                selectedFileName = fileName
+                viewModel.enqueueDownload(downloadUrl!!, selectedFileName, expectedHash)
+                Toast.makeText(context, "已开始下载，可前往下载记录或通知栏查看", Toast.LENGTH_SHORT).show()
+                if (Build.VERSION.SDK_INT >= 33) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                downloadUrl = null
+            },
             onDismiss = { downloadUrl = null }
         )
     }
@@ -461,6 +488,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onSet
 @Composable
 private fun TabOverview(viewModel: BrowserViewModel, onBack: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
+    var incognitoOnly by remember { mutableStateOf(false) }
+    val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -471,14 +500,16 @@ private fun TabOverview(viewModel: BrowserViewModel, onBack: () -> Unit) {
         }
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(tabs, key = { it.id }) { tab ->
+            item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text("普通标签") }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text("无痕标签") }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
+            if (incognitoOnly && displayedTabs.isEmpty()) item { Text("你已进入无痕浏览模式。浏览记录、Cookie 与缓存不会保存；按 Android 返回键即可退出无痕页面。") }
+            items(displayedTabs, key = { it.id }) { tab ->
                 ElevatedCard(Modifier.fillMaxWidth().clickable { viewModel.select(tab.id); onBack() }) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(Modifier.size(52.dp), color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
                             Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Language, null) }
                         }
                         Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.fillMaxWidth(0.72f)) {
                             Text(tab.title, maxLines = 1)
                             Text(tab.url.ifEmpty { "新标签页" }, maxLines = 1, style = MaterialTheme.typography.bodySmall)
                         }
@@ -492,32 +523,68 @@ private fun TabOverview(viewModel: BrowserViewModel, onBack: () -> Unit) {
 
 @Composable
 private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val downloads by viewModel.downloads.collectAsState(initial = emptyList())
-    Scaffold(topBar = { TopAppBar(title = { Text("下载记录") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var deleteFiles by remember { mutableStateOf(false) }
+    Scaffold(topBar = { TopAppBar(title = { Text(if (selectedIds.isEmpty()) "下载记录" else "已选 ${selectedIds.size} 项") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { if (selectedIds.isNotEmpty()) IconButton(onClick = { showDeleteConfirmation = true }) { Icon(Icons.Default.Delete, "删除选中项") } }) }) { padding ->
         if (downloads.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("暂无下载记录") }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(downloads, key = { it.id }) { item -> DownloadRecordCard(item, onCancel = { viewModel.cancelDownload(item.id) }) }
+                item { TextButton(onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() }) { Text(if (selectedIds.size == downloads.size) "取消全选" else "全选") } }
+                items(downloads, key = { it.id }) { item -> DownloadRecordCard(item, item.id in selectedIds, { selectedIds = selectedIds.toggle(item.id) }, { viewModel.cancelDownload(item.id) }, { openDownload(context, item) }, { showDeleteConfirmation = true; selectedIds = setOf(item.id) }) }
             }
         }
+    }
+    if (showDeleteConfirmation) AlertDialog(onDismissRequest = { showDeleteConfirmation = false }, title = { Text("删除下载记录？") }, text = { Column { Text("将删除 ${selectedIds.size} 条下载记录。") ; CheckRow("同时删除本地下载文件", deleteFiles) { deleteFiles = it } } }, confirmButton = { TextButton(onClick = { downloads.filter { it.id in selectedIds }.forEach { viewModel.deleteDownload(it.id, it.targetUri, deleteFiles) }; Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show(); selectedIds = emptySet(); showDeleteConfirmation = false }) { Text("删除") } }, dismissButton = { TextButton(onClick = { showDeleteConfirmation = false }) { Text("取消") } })
+}
+
+private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
+
+private fun openDownload(context: android.content.Context, item: DownloadEntity) {
+    val source = Uri.parse(item.targetUri)
+    val uri = if (source.scheme == "file") FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(source.path.orEmpty())) else source
+    val type = when {
+        item.fileName.endsWith(".apk", true) -> "application/vnd.android.package-archive"
+        item.fileName.endsWith(".pdf", true) -> "application/pdf"
+        item.fileName.endsWith(".zip", true) -> "application/zip"
+        else -> "application/octet-stream"
+    }
+    val action = if (item.fileName.endsWith(".apk", true)) Intent(Intent.ACTION_VIEW).setDataAndType(uri, type) else Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
+    action.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        context.startActivity(Intent.createChooser(action, "打开文件"))
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "未找到可打开此文件的应用", Toast.LENGTH_SHORT).show()
     }
 }
 
 @Composable
-private fun DownloadRecordCard(item: DownloadEntity, onCancel: () -> Unit) {
+private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit) {
     val running = item.status == "queued" || item.status == "downloading"
+    var menuExpanded by remember { mutableStateOf(false) }
     ElevatedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(item.fileName, style = MaterialTheme.typography.titleMedium)
-            Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
-            if (running) {
-                LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
-                Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
-                TextButton(onClick = onCancel) { Text("取消下载") }
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+            Checkbox(checked = selected, onCheckedChange = { onSelect() })
+            Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(item.fileName, style = MaterialTheme.typography.titleMedium)
+                Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
+                if (running) {
+                    LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
+                    TextButton(onClick = onCancel) { Text("取消下载") }
+                } else if (item.status == "completed" || item.status == "hash_mismatch") {
+                    IconButton(onClick = onOpen) { Icon(Icons.Default.OpenInNew, "打开文件") }
+                }
+                if (item.errorMessage.isNotBlank()) Text(item.errorMessage, color = MaterialTheme.colorScheme.error)
+                if (item.sha256.isNotBlank()) Text("SHA-256：${item.sha256}", style = MaterialTheme.typography.bodySmall)
             }
-            if (item.errorMessage.isNotBlank()) Text(item.errorMessage, color = MaterialTheme.colorScheme.error)
-            if (item.sha256.isNotBlank()) Text("SHA-256：${item.sha256}", style = MaterialTheme.typography.bodySmall)
+            Box {
+                IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "更多") }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) { DropdownMenuItem(text = { Text("删除") }, onClick = { menuExpanded = false; onDelete() }) }
+            }
         }
     }
 }
@@ -548,6 +615,7 @@ private fun SettingsScreen(
     setClearOnExit: (Boolean, Boolean, Boolean, Boolean) -> Unit,
     clearBrowserData: () -> Unit,
     onDownloads: () -> Unit,
+    onDownloadDirectory: () -> Unit,
     onSearchEngine: () -> Unit,
     onUserAgent: () -> Unit,
     onAbout: () -> Unit,
@@ -570,6 +638,7 @@ private fun SettingsScreen(
             item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit) { showExitOptions = true } }
             item { HorizontalDivider() }
             item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
+            item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(if (settings.downloadDirectoryMode == "external") settings.externalDownloadDisplayPath else "内部应用目录") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
             item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
             item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
             item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
@@ -629,6 +698,31 @@ private fun userAgentLabel(settings: BrowserSettings) = when (settings.userAgent
     "desktop_firefox" -> "桌面 Firefox"
     "custom" -> settings.customUserAgentTitle
     else -> "默认 GeckoView"
+}
+
+@Composable
+private fun DownloadDirectoryScreen(settings: BrowserSettings, onSave: (String, String, String) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var externalUri by remember(settings.externalDownloadTreeUri) { mutableStateOf(settings.externalDownloadTreeUri) }
+    var externalPath by remember(settings.externalDownloadDisplayPath) { mutableStateOf(settings.externalDownloadDisplayPath) }
+    var useExternal by remember(settings.downloadDirectoryMode) { mutableStateOf(settings.downloadDirectoryMode == "external") }
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            externalUri = uri.toString()
+            externalPath = uri.path?.substringAfterLast(":")?.let { "/storage/emulated/0/$it/" } ?: "/storage/emulated/0/Download/"
+        }
+    }
+    Scaffold(topBar = { TopAppBar(title = { Text("下载文件路径") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { TextButton(onClick = { if (!useExternal || externalUri.isNotBlank()) onSave(if (useExternal) "external" else "internal", externalUri, externalPath) }) { Text("确定") } }) }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ChoiceItem("内部应用目录", !useExternal) { useExternal = false }
+            Text("内部目录不可修改，卸载应用后会一并清理。", style = MaterialTheme.typography.bodySmall)
+            ChoiceItem("外部目录", useExternal) { useExternal = true }
+            Text(externalPath, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(enabled = useExternal, onClick = { treeLauncher.launch(null) }) { Text("修改外部目录") }
+            Text("选择目录时将由系统授予访问权限，支持任意可授权的外部目录。", style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable
@@ -758,17 +852,19 @@ private fun AboutScreen(onBack: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var downloadProgress by remember { mutableStateOf(0) }
     var downloadJob by remember { mutableStateOf<Job?>(null) }
+    var contributors by remember { mutableStateOf<List<com.zex.zexbrowse.data.Contributor>?>(null) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.0.3（构建号 4）")
+            Text("版本 1.0.4（5）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
                 Spacer(Modifier.width(8.dp))
                 Text("GitHub 仓库")
             }
+            OutlinedButton(onClick = { scope.launch { contributors = runCatching { UpdateChecker().contributors() }.getOrElse { emptyList() } } }) { Text("贡献者") }
             OutlinedButton(
                 onClick = {
                     checking = true
@@ -786,6 +882,8 @@ private fun AboutScreen(onBack: () -> Unit) {
         }
     }
 
+    contributors?.let { list -> AlertDialog(onDismissRequest = { contributors = null }, title = { Text("贡献者") }, text = { Text(list.joinToString("\n") { "${it.name} · ${it.contributions} 次提交" }.ifBlank { "暂无贡献者信息" }) }, confirmButton = { TextButton(onClick = { contributors = null }) { Text("确定") } }) }
+
     update?.let { release ->
         val downloading = downloadJob?.isActive == true
         AlertDialog(
@@ -797,8 +895,8 @@ private fun AboutScreen(onBack: () -> Unit) {
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "推荐更新",
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "升级更新",
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.width(8.dp))
@@ -849,7 +947,7 @@ private fun AboutScreen(onBack: () -> Unit) {
                                 }
                             }
                         }
-                    ) { Text("应用内下载") }
+                    ) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载") }
                 }
             },
             dismissButton = {

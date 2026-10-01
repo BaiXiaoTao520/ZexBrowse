@@ -13,6 +13,7 @@ import okhttp3.Request
 import org.json.JSONObject
 
 data class ReleaseInfo(val version: String, val notes: String, val downloadUrl: String)
+data class Contributor(val name: String, val contributions: Int)
 
 class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
     suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
@@ -40,7 +41,20 @@ class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    fun isNewer(remote: String, local: String = "1.0.3"): Boolean {
+    suspend fun contributors(): List<Contributor> = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url("https://api.github.com/repos/BaiXiaoTao520/ZexBrowse/contributors").build()
+        client.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "贡献者加载失败：${response.code}" }
+            val body = response.body ?: error("贡献者响应为空")
+            val array = org.json.JSONArray(body.string())
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                Contributor(item.optString("login"), item.optInt("contributions"))
+            }
+        }
+    }
+
+    fun isNewer(remote: String, local: String = "1.0.4"): Boolean {
         val remoteParts = versionParts(remote)
         val localParts = versionParts(local)
         val count = maxOf(remoteParts.size, localParts.size)
