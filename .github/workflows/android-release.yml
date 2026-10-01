@@ -3,6 +3,7 @@ name: Android 自动构建与发布
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -34,6 +35,13 @@ jobs:
           printf '%s %s\n' "$SSH_SIGNING_PRINCIPAL" "$SSH_SIGNING_PUBLIC_KEY" > "$RUNNER_TEMP/allowed_signers"
           git config gpg.format ssh
           git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
+
+      - name: 验证版本标签格式
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v*) ;;
+            *) echo "请选择 v 开头的版本标签作为工作流引用"; exit 1 ;;
+          esac
 
       - name: 验证 SSH 签名版本标签
         run: git verify-tag "$GITHUB_REF_NAME"
