@@ -55,10 +55,8 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -112,7 +110,9 @@ import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.UpdateChecker
+import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.download.DownloadManager
+import com.zex.zexbrowse.download.UpdateDownloadResult
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -144,7 +144,8 @@ fun ZexBrowseApp() {
     val page = navStack.last()
     val navigate: (Page) -> Unit = { navStack = navStack + it }
     val goBack: () -> Unit = { if (navStack.size > 1) navStack = navStack.dropLast(1) }
-    var startupUpdate by remember { mutableStateOf<com.zex.zexbrowse.data.ReleaseInfo?>(null) }
+    var tabsIncognito by remember { mutableStateOf(false) }
+    var startupUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
 
     browserViewModel.browserSettings = settings
     LaunchedEffect(settings.autoCheckUpdates) {
@@ -178,7 +179,7 @@ fun ZexBrowseApp() {
         "light" -> false
         else -> androidx.compose.foundation.isSystemInDarkTheme()
     }
-    LaunchedEffect(useDarkTheme) { browserViewModel.applyForceDark(useDarkTheme) }
+    LaunchedEffect(useDarkTheme, settings.forceDarkWeb) { browserViewModel.applyForceDark(useDarkTheme, settings.forceDarkWeb) }
     val colorScheme = if (settings.dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (useDarkTheme) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
     } else if (useDarkTheme) {
@@ -197,14 +198,15 @@ fun ZexBrowseApp() {
                     )
                     Page.BROWSER -> BrowserScreen(
                         viewModel = browserViewModel,
-                        onTabs = { navigate(Page.TABS) },
+                        onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
                         onDownloads = { navigate(Page.DOWNLOADS) },
                         onSettings = { navigate(Page.SETTINGS) }
                     )
-                    Page.TABS -> TabOverview(viewModel = browserViewModel, onBack = goBack)
+                    Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
                     Page.SETTINGS -> SettingsScreen(
                         settings = settings,
                         setMode = { scope.launch { settingsStore.mode(it) } },
+                        setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
                         setDynamic = { scope.launch { settingsStore.dynamic(it) } },
                         setCookie = { scope.launch { settingsStore.cookies(it) } },
                         setApkHash = { scope.launch { settingsStore.apkHash(it) } },
@@ -264,7 +266,7 @@ fun ZexBrowseApp() {
                     Page.ABOUT -> AboutScreen(settings = settings, setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } }, onBack = goBack)
                 }
             }
-            startupUpdate?.let { release -> AlertDialog(onDismissRequest = { startupUpdate = null }, title = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.SystemUpdate, null); Spacer(Modifier.width(8.dp)); Text("发现新版本 ${release.version}") } }, text = { Text(release.notes.ifBlank { "暂无更新说明" }) }, confirmButton = { TextButton(onClick = { startupUpdate = null; navigate(Page.ABOUT) }) { Text("查看") } }, dismissButton = { TextButton(onClick = { startupUpdate = null }) { Text("稍后") } }) }
+            startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
         }
     }
 }
@@ -389,7 +391,7 @@ private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -409,7 +411,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDow
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 2.dp)) {
                 AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) })
             }
         },
@@ -419,7 +421,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDow
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, "前进") }
                 IconButton(onClick = viewModel::reload) { Icon(Icons.Default.Refresh, "刷新") }
                 IconButton(onClick = { showNewTabDialog = true }) { Icon(Icons.Default.Add, "新建标签") }
-                IconButton(onClick = onTabs) {
+                IconButton(onClick = { onTabs(false) }) {
                     BadgedBox(badge = { Badge { Text(tabs.size.toString()) } }) { Icon(Icons.Default.Tab, "标签") }
                 }
                 Box {
@@ -480,8 +482,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDow
             onDismissRequest = { showNewTabDialog = false },
             title = { Text("新建标签") },
             text = { Text("无痕标签不会保存浏览历史、Cookie 或缓存。") },
-            confirmButton = { TextButton(onClick = { viewModel.newTab(); showNewTabDialog = false; onTabs() }) { Text("普通标签") } },
-            dismissButton = { TextButton(onClick = { viewModel.newTab(incognito = true); showNewTabDialog = false; onTabs() }) { Text("无痕标签") } }
+            confirmButton = { TextButton(onClick = { viewModel.newTab(); showNewTabDialog = false; onTabs(false) }) { Text("普通标签") } },
+            dismissButton = { TextButton(onClick = { viewModel.newTab(incognito = true); showNewTabDialog = false; onTabs(true) }) { Text("无痕标签") } }
         )
     }
     if (downloadUrl != null) {
@@ -509,9 +511,9 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: () -> Unit, onDow
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, onBack: () -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
-    var incognitoOnly by remember { mutableStateOf(false) }
+    var incognitoOnly by remember { mutableStateOf(initialIncognito) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
     Scaffold(
         topBar = {
@@ -568,8 +570,15 @@ private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this -
 
 private fun openUpdateApk(context: android.content.Context, file: java.io.File) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    context.startActivity(Intent.createChooser(intent, "安装更新"))
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, "application/vnd.android.package-archive")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "未找到系统安装器", Toast.LENGTH_SHORT).show()
+    }
 }
 
 private fun openDownload(context: android.content.Context, item: DownloadEntity) {
@@ -638,6 +647,7 @@ private fun formatBytes(value: Long): String = when {
 private fun SettingsScreen(
     settings: BrowserSettings,
     setMode: (String) -> Unit,
+    setForceDarkWeb: (Boolean) -> Unit,
     setDynamic: (Boolean) -> Unit,
     setCookie: (Boolean) -> Unit,
     setApkHash: (Boolean) -> Unit,
@@ -659,6 +669,7 @@ private fun SettingsScreen(
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item { ThemeSelector(settings.darkMode, setMode) }
+            item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页；关闭后仅传入深色偏好，由网页自行适配", settings.forceDarkWeb, setForceDarkWeb) }
             item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic) }
             item { HorizontalDivider() }
             item { SwitchRow("启用 Cookie", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie) }
@@ -885,17 +896,14 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
-    var update by remember { mutableStateOf<com.zex.zexbrowse.data.ReleaseInfo?>(null) }
+    var update by remember { mutableStateOf<ReleaseInfo?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
-    var downloadProgress by remember { mutableStateOf(0) }
-    var downloadJob by remember { mutableStateOf<Job?>(null) }
-    var updateDownloadResult by remember { mutableStateOf<com.zex.zexbrowse.download.UpdateDownloadResult?>(null) }
     var contributors by remember { mutableStateOf<List<com.zex.zexbrowse.data.Contributor>?>(null) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.0.5（6）")
+            Text("版本 1.0.6（7）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
@@ -923,84 +931,109 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
 
     contributors?.let { list -> AlertDialog(onDismissRequest = { contributors = null }, title = { Text("贡献者") }, text = { if (list.isEmpty()) Text("暂无贡献者信息") else LazyColumn { items(list) { contributor -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = contributor.avatarUrl, contentDescription = contributor.name, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop); Spacer(Modifier.width(12.dp)); Text("${contributor.name} · ${contributor.contributions} 次提交") } } } }, confirmButton = { TextButton(onClick = { contributors = null }) { Text("确定") } }) }
 
-    update?.let { release ->
-        val downloading = downloadJob?.isActive == true
+    update?.let { release -> UpdateDialog(release = release, onDismiss = { update = null }) }
+    message?.let { content ->
         AlertDialog(
-            onDismissRequest = {
-                downloadJob?.cancel()
-                downloadJob = null
-                update = null
-            },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = "升级更新",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("发现新版本 ${release.version}")
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 220.dp)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        Text(release.notes.ifBlank { "暂无更新说明" })
-                    }
-                    if (downloading) {
-                        LinearProgressIndicator(
-                            progress = { downloadProgress / 100f },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text("正在应用内下载：$downloadProgress%")
-                    }
-                }
-            },
-            confirmButton = {
-                if (!downloading) {
-                    TextButton(
-                        enabled = release.downloadUrl.isNotBlank(),
-                        onClick = {
-                            downloadProgress = 0
-                            downloadJob = scope.launch {
-                                try {
-                                    val result = DownloadManager(context).downloadUpdateApk(
-                                        url = release.downloadUrl,
-                                        fileName = "ZexBrowse-${release.version}.apk",
-                                        onProgress = { downloadProgress = it }
-                                    )
-                                    updateDownloadResult = result
-                                    update = null
-                                } catch (_: CancellationException) {
-                                    message = "下载已取消"
-                                    update = null
-                                } catch (error: Throwable) {
-                                    message = "下载失败：${error.message ?: "未知错误"}"
-                                } finally {
-                                    downloadJob = null
-                                }
-                            }
-                        }
-                    ) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载") }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    downloadJob?.cancel()
-                    downloadJob = null
-                    update = null
-                }) { Text("取消") }
-            }
+            onDismissRequest = { message = null },
+            title = { Text("更新") },
+            text = { Text(content) },
+            confirmButton = { TextButton(onClick = { message = null }) { Text("确定") } }
         )
     }
-    updateDownloadResult?.let { result ->
-        AlertDialog(onDismissRequest = { updateDownloadResult = null }, title = { Text("下载完成") }, text = { Column { Text("SHA-256：${result.sha256}"); Text(result.file.absolutePath, style = MaterialTheme.typography.bodySmall) } }, confirmButton = { TextButton(onClick = { openUpdateApk(context, result.file); updateDownloadResult = null }) { Text("立即安装") } }, dismissButton = { TextButton(onClick = { updateDownloadResult = null }) { Text("稍后") } })
+}
+
+@Composable
+private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    var progress by remember { mutableStateOf(0) }
+    var connecting by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<UpdateDownloadResult?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val downloading = downloadJob?.isActive == true
+
+    result?.let { downloadResult ->
+        AlertDialog(
+            onDismissRequest = { result = null; onDismiss() },
+            title = { Text("下载完成") },
+            text = { Column { Text("SHA-256：${downloadResult.sha256}"); Text(downloadResult.file.absolutePath, style = MaterialTheme.typography.bodySmall) } },
+            confirmButton = { TextButton(onClick = { openUpdateApk(context, downloadResult.file); result = null; onDismiss() }) { Text("立即安装") } },
+            dismissButton = { TextButton(onClick = { result = null; onDismiss() }) { Text("稍后") } }
+        )
+        return
     }
+
+    AlertDialog(
+        onDismissRequest = { downloadJob?.cancel(); downloadJob = null; onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.SystemUpdate, "升级更新", tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("发现新版本 ${release.version}")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(release.notes.ifBlank { "暂无更新说明" })
+                }
+                if (downloading) {
+                    if (connecting) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text("正在连接服务器…")
+                    } else {
+                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        Text("正在下载：$progress%")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!downloading) {
+                TextButton(
+                    enabled = release.downloadUrl.isNotBlank(),
+                    onClick = {
+                        progress = 0
+                        connecting = true
+                        downloadJob = scope.launch {
+                            try {
+                                val downloaded = DownloadManager(context).downloadUpdateApk(
+                                    url = release.downloadUrl,
+                                    fileName = "ZexBrowse-${release.version}.apk",
+                                    onProgress = { value ->
+                                        connecting = false
+                                        progress = value
+                                    }
+                                )
+                                result = downloaded
+                            } catch (_: CancellationException) {
+                                message = "下载已取消"
+                            } catch (error: Throwable) {
+                                message = "下载失败：${error.message ?: "未知错误"}"
+                            } finally {
+                                downloadJob = null
+                                connecting = false
+                            }
+                        }
+                    }
+                ) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                downloadJob?.cancel()
+                downloadJob = null
+                onDismiss()
+            }) { Text("取消") }
+        }
+    )
+
     message?.let { content ->
         AlertDialog(
             onDismissRequest = { message = null },

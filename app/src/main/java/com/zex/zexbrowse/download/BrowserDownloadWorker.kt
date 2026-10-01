@@ -62,7 +62,10 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                     output.buffered().use { stream ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {
-                            if (isStopped) throw CancellationException("下载已取消")
+                            if (isStopped) {
+                                call.cancel()
+                                throw CancellationException("下载已取消")
+                            }
                             val count = input.read(buffer)
                             if (count < 0) break
                             stream.write(buffer, 0, count)
@@ -78,6 +81,10 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                         }
                     }
                 }
+                if (isStopped) {
+                    call.cancel()
+                    throw CancellationException("下载已取消")
+                }
                 val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
                 val status = if (expectedHash.isNotBlank() && !hash.equals(expectedHash, true)) "hash_mismatch" else "completed"
                 database.downloadDao().complete(id, status, hash)
@@ -89,8 +96,9 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             withContext(NonCancellable) { database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消") }
             throw cancelled
         } catch (error: Throwable) {
-            database.downloadDao().finishWithMessage(id, "failed", error.message ?: "未知错误")
-            notifyFinished(id, fileName, false)
+            val cancelled = isStopped
+            database.downloadDao().finishWithMessage(id, if (cancelled) "cancelled" else "failed", if (cancelled) "下载已取消" else (error.message ?: "未知错误"))
+            if (!cancelled) notifyFinished(id, fileName, false)
             Result.failure()
         }
     }

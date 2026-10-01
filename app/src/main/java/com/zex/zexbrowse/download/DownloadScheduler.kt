@@ -9,6 +9,7 @@ package com.zex.zexbrowse.download
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
@@ -53,7 +54,15 @@ class DownloadScheduler(private val context: Context) {
     suspend fun delete(id: String, uri: String, deleteFile: Boolean) {
         if (deleteFile) runCatching {
             val target = Uri.parse(uri)
-            if (target.scheme == "file") File(target.path.orEmpty()).delete() else context.contentResolver.delete(target, null, null)
+            if (target.scheme == "file") {
+                File(target.path.orEmpty()).delete()
+            } else {
+                try {
+                    DocumentsContract.deleteDocument(context.contentResolver, target)
+                } catch (_: Throwable) {
+                    context.contentResolver.delete(target, null, null)
+                }
+            }
         }
         database.downloadDao().delete(id)
     }

@@ -94,11 +94,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         selected?.session?.reload()
     }
 
-    fun applyForceDark(enabled: Boolean) {
+    fun applyForceDark(dark: Boolean, force: Boolean) {
         runCatching {
-            runtime.settings.setPreferredColorScheme(
-                if (enabled) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
-            )
+            val scheme = when {
+                !dark -> GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+                force -> GeckoRuntimeSettings.COLOR_SCHEME_DARK
+                else -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+            }
+            runtime.settings.setPreferredColorScheme(scheme)
         }
     }
 
