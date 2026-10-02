@@ -100,6 +100,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -330,11 +331,11 @@ private fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit) {
 }
 
 @Composable
-private fun AddressInput(value: String, onValueChange: (String) -> Unit, onSubmit: () -> Unit) {
+private fun AddressInput(value: String, onValueChange: (String) -> Unit, onSubmit: () -> Unit, onFocusChange: (Boolean) -> Unit = {}) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().onFocusChanged { onFocusChange(it.isFocused) },
         placeholder = { Text("搜索或输入网址") },
         singleLine = true,
         shape = MaterialTheme.shapes.extraLarge,
@@ -399,6 +400,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
     var input by remember(selectedTab?.id) { mutableStateOf(selectedTab?.url.orEmpty()) }
+    var inputFocused by remember { mutableStateOf(false) }
     var downloadUrl by remember { mutableStateOf<String?>(null) }
     var expectedHash by remember { mutableStateOf("") }
     var hashResult by remember { mutableStateOf<String?>(null) }
@@ -409,13 +411,17 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    LaunchedEffect(selectedTab?.url) {
+        if (!inputFocused) input = selectedTab?.url.orEmpty()
+    }
+
     viewModel.onExternalDownload = { downloadUrl = it }
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 2.dp)) {
-                AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) })
+                AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) }, onFocusChange = { inputFocused = it })
             }
         },
         bottomBar = {
@@ -618,19 +624,31 @@ private fun openUpdateApk(context: android.content.Context, file: java.io.File) 
 private fun openDownload(context: android.content.Context, item: DownloadEntity) {
     val source = Uri.parse(item.targetUri)
     val uri = if (source.scheme == "file") FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(source.path.orEmpty())) else source
-    val type = when {
-        item.fileName.endsWith(".apk", true) -> "application/vnd.android.package-archive"
+    val isApk = item.fileName.endsWith(".apk", true)
+    val type = if (isApk) "application/vnd.android.package-archive" else when {
         item.fileName.endsWith(".pdf", true) -> "application/pdf"
         item.fileName.endsWith(".zip", true) -> "application/zip"
         else -> "application/octet-stream"
     }
-    val action = if (item.fileName.endsWith(".apk", true)) Intent(Intent.ACTION_VIEW).setDataAndType(uri, type) else Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
+    val action = Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
     action.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try {
-        context.startActivity(Intent.createChooser(action, "打开文件"))
+        if (isApk) {
+            action.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(action)
+        } else {
+            context.startActivity(Intent.createChooser(action, "打开文件"))
+        }
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "未找到可打开此文件的应用", Toast.LENGTH_SHORT).show()
+    } catch (_: SecurityException) {
+        Toast.makeText(context, "请在系统设置中允许安装未知应用", Toast.LENGTH_SHORT).show()
     }
+}
+
+private fun copyDownloadLink(context: android.content.Context, url: String) {
+    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("下载链接", url))
 }
 
 @Composable
@@ -904,6 +922,7 @@ private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheck
 
 @Composable
 private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     val isApk = url.substringBefore('?').endsWith(".apk", ignoreCase = true)
     var expectedHash by rememberSaveable { mutableStateOf("") }
     val fileName = url.substringAfterLast('/').substringBefore('?').ifBlank { "download" }
@@ -913,6 +932,8 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
         text = {
             Column {
                 Text(fileName)
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { copyDownloadLink(context, url); Toast.makeText(context, "已复制下载链接", Toast.LENGTH_SHORT).show() }) { Text("复制下载链接") }
                 if (isApk) {
                     Spacer(Modifier.height(12.dp))
                     Text("APK 下载完成后将自动计算 SHA-256。", style = MaterialTheme.typography.bodySmall)
@@ -937,7 +958,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.0.7（8）")
+            Text("版本 1.0.8（9）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)

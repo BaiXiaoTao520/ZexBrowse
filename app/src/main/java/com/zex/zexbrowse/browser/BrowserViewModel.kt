@@ -40,8 +40,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var onExternalDownload: (String) -> Unit = {}
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
+    private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
-    init { newTab() }
+    init {
+        lastColorScheme = runtime.settings.getPreferredColorScheme()
+        newTab()
+    }
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
         if (incognito) {
@@ -103,6 +107,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 else -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
             }
             runtime.settings.setPreferredColorScheme(scheme)
+            if (lastColorScheme != scheme) {
+                lastColorScheme = scheme
+                _tabs.value.forEach { it.session.reload() }
+            }
         }
     }
 

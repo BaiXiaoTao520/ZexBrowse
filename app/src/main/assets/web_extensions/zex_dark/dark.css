@@ -1,0 +1,40 @@
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    background-color: #14161a !important;
+  }
+
+  body {
+    background-color: #14161a !important;
+    color: #e3e3e6 !important;
+  }
+
+  * {
+    background-color: transparent !important;
+    color: inherit !important;
+    border-color: #3d4045 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  a,
+  a * {
+    color: #8ab4f8 !important;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    background-color: #22252a !important;
+    color: #e3e3e6 !important;
+  }
+
+  img,
+  video {
+    filter: brightness(0.9) contrast(1.02);
+  }
+}
