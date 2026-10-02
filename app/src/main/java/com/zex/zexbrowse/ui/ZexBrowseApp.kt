@@ -170,6 +170,14 @@ fun ZexBrowseApp() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    var startupCleared by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.clearOnExit) {
+        if (settings.clearOnExit && !startupCleared) {
+            startupCleared = true
+            browserViewModel.clearBrowserData(settings.clearCookiesOnExit, settings.clearCacheOnExit, settings.clearHistoryOnExit)
+        }
+    }
+
     BackHandler(enabled = navStack.size > 1) {
         if (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true) {
             browserViewModel.back()
@@ -201,6 +209,8 @@ fun ZexBrowseApp() {
             AnimatedContent(targetState = page, label = "page") { destination ->
                 when (destination) {
                     Page.HOME -> HomeScreen(
+                        settings = settings,
+                        setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
                         onOpen = { address -> browserViewModel.load(address); navigate(Page.BROWSER) },
                         onSettings = { navigate(Page.SETTINGS) }
                     )
@@ -294,11 +304,11 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 @Composable
-private fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit) {
+private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { now = Date(); kotlinx.coroutines.delay(1_000) } }
-    var quickSites by remember { mutableStateOf(defaultQuickSites) }
+    val quickSites = remember(settings.quickSites) { decodeQuickSites(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -323,17 +333,30 @@ private fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit) {
             QuickSiteGrid(
                 sites = quickSites,
                 onOpen = onOpen,
-                onRestore = { quickSites = defaultQuickSites }
+                onRestore = { setQuickSites(defaultQuickSites.joinToString("\n") { "${it.title}|${it.url}" }) }
             )
         }
     }
 
     if (showQuickSiteDialog) {
         QuickSiteDialog(
-            onAdd = { site -> quickSites = quickSites + site; showQuickSiteDialog = false },
+            onAdd = { site ->
+                setQuickSites((quickSites + site).joinToString("\n") { "${it.title}|${it.url}" })
+                showQuickSiteDialog = false
+            },
             onDismiss = { showQuickSiteDialog = false }
         )
     }
+}
+
+private fun decodeQuickSites(raw: String): List<QuickSite> {
+    if (raw.isBlank()) return defaultQuickSites
+    val parsed = raw.split("\n").mapNotNull { line ->
+        val title = line.substringBefore('|').trim()
+        val url = line.substringAfter('|', "").trim()
+        if (title.isEmpty() || url.isEmpty()) null else QuickSite(title, url, title.take(1))
+    }
+    return parsed.ifEmpty { defaultQuickSites }
 }
 
 @Composable
@@ -964,7 +987,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.1.0（12）")
+            Text("版本 1.1.1（13）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)

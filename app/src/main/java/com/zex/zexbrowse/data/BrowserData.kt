@@ -138,6 +138,7 @@ data class BrowserSettings(
     val downloadDirectoryMode: String = "internal",
     val externalDownloadTreeUri: String = "",
     val externalDownloadDisplayPath: String = "",
+    val quickSites: String = "",
     val autoCheckUpdates: Boolean = true
 )
 
@@ -161,6 +162,7 @@ class SettingsStore(private val context: Context) {
     private val downloadDirectoryModeKey = stringPreferencesKey("download_directory_mode")
     private val externalDownloadTreeUriKey = stringPreferencesKey("external_download_tree_uri")
     private val externalDownloadDisplayPathKey = stringPreferencesKey("external_download_display_path")
+    private val quickSitesKey = stringPreferencesKey("quick_sites")
     private val autoCheckUpdatesKey = booleanPreferencesKey("auto_check_updates")
 
     val settings = context.dataStore.data.map { preferences ->
@@ -184,6 +186,7 @@ class SettingsStore(private val context: Context) {
             downloadDirectoryMode = preferences[downloadDirectoryModeKey] ?: "internal",
             externalDownloadTreeUri = preferences[externalDownloadTreeUriKey] ?: "",
             externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "",
+            quickSites = preferences[quickSitesKey] ?: "",
             autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true
         )
     }
@@ -192,6 +195,7 @@ class SettingsStore(private val context: Context) {
 
     suspend fun mode(value: String) = update { it[modeKey] = value }
     suspend fun forceDarkWeb(value: Boolean) = update { it[forceDarkWebKey] = value }
+    suspend fun quickSites(value: String) = update { it[quickSitesKey] = value }
     suspend fun dynamic(value: Boolean) = update { it[dynamicColorKey] = value }
     suspend fun cookies(value: Boolean) = update { it[cookiesKey] = value }
     suspend fun apkHash(value: Boolean) = update { it[apkHashKey] = value }

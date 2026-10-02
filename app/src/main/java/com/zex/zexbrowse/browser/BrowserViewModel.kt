@@ -48,14 +48,30 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         newTab()
     }
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
+        val (session, id) = createSession(incognito)
+        _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
+        session.open(runtime)
+        initialUrl?.let(::load)
+        return session
+    }
+
+    // GeckoView requires onNewSession to return a session that has NOT been opened yet;
+    // GeckoView opens it itself. Opening it here throws AssertionError.
+    private fun createNewSessionForUri(uri: String, incognito: Boolean): GeckoSession {
+        val (session, id) = createSession(incognito)
+        _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
+        return session
+    }
+
+    private fun createSession(incognito: Boolean): Pair<GeckoSession, String> {
         val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
         if (incognito) {
             val contextId = incognitoContextId ?: UUID.randomUUID().toString().also { incognitoContextId = it }
             sessionSettings.contextId(contextId)
         }
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
-        val session = GeckoSession(sessionSettings.build()); val id = UUID.randomUUID().toString()
-        session.open(runtime)
+        val session = GeckoSession(sessionSettings.build())
+        val id = UUID.randomUUID().toString()
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) = update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
@@ -75,25 +91,38 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 }
                 return null
             }
+            override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
+                val uri = request.uri
+                if (uri.isDownloadUrl()) {
+                    onExternalDownload(uri)
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+                return null
+            }
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) = update(id) { it.copy(canGoBack = canGoBack) }
             override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) = update(id) { it.copy(canGoForward = canGoForward) }
-            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? = GeckoResult.fromValue(newTab(initialUrl = uri))
+            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
+                if (uri.isDownloadUrl()) {
+                    onExternalDownload(uri)
+                    return null
+                }
+                return GeckoResult.fromValue(createNewSessionForUri(uri, incognito))
+            }
         })
-        _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id; initialUrl?.let(::load)
-        return session
+        return session to id
     }
 
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
-        _tabs.value.firstOrNull { it.id == id }?.session?.close()
+        runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
         _selectedId.value = _tabs.value.lastOrNull()?.id
         if (_tabs.value.isEmpty()) newTab()
     }
-    fun closeAll() { _tabs.value.forEach { it.session.close() }; _tabs.value = emptyList(); _selectedId.value = null; incognitoContextId?.let(runtime.storageController::clearDataForSessionContext); incognitoContextId = null; newTab() }
+    fun closeAll() { _tabs.value.forEach { tab -> runCatching { tab.session.close() } }; _tabs.value = emptyList(); _selectedId.value = null; incognitoContextId?.let(runtime.storageController::clearDataForSessionContext); incognitoContextId = null; newTab() }
     fun closeAllIncognito() {
-        _tabs.value.filter { it.incognito }.forEach { it.session.close() }
+        _tabs.value.filter { it.incognito }.forEach { tab -> runCatching { tab.session.close() } }
         _tabs.value = _tabs.value.filterNot { it.incognito }
         incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
         incognitoContextId = null
@@ -143,14 +172,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
     fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
     fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
-    fun clearHistory() { viewModelScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
+    fun clearHistory() { applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
     fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
         var flags = 0L
         if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES
         if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
-        if (flags != 0L) runtime.storageController.clearData(flags)
-        if (history) viewModelScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
+        if (flags != 0L) runCatching { runtime.storageController.clearData(flags) }
+        if (history) applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
     }
+    // 退出清理需要不随 ViewModel 销毁而取消的协程，否则进程结束时历史可能未清完
+    private val applicationScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+    )
     private fun clearIncognitoContextIfEmpty() {
         if (_tabs.value.none { it.incognito }) {
             incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
