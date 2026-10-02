@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
@@ -122,7 +123,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
+enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -170,16 +171,16 @@ fun ZexBrowseApp() {
         }
     }
 
-    LaunchedEffect(settings.userAgentMode, settings.customUserAgent, settings.simplifiedUserAgent) {
-        browserViewModel.applyCurrentUserAgentToSelected()
-    }
-
     val useDarkTheme = when (settings.darkMode) {
         "dark" -> true
         "light" -> false
         else -> androidx.compose.foundation.isSystemInDarkTheme()
     }
-    LaunchedEffect(useDarkTheme, settings.forceDarkWeb) { browserViewModel.applyForceDark(useDarkTheme, settings.forceDarkWeb) }
+
+    LaunchedEffect(useDarkTheme, settings.forceDarkWeb, settings.userAgentMode, settings.customUserAgent, settings.simplifiedUserAgent) {
+        browserViewModel.applyForceDark(useDarkTheme, settings.forceDarkWeb)
+        browserViewModel.applyCurrentUserAgentToSelected()
+    }
     val colorScheme = if (settings.dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (useDarkTheme) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
     } else if (useDarkTheme) {
@@ -216,6 +217,7 @@ fun ZexBrowseApp() {
                             Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
                         },
                         onDownloads = { navigate(Page.DOWNLOADS) },
+                        onHistory = { navigate(Page.HISTORY) },
                         onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
                         onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
                         onUserAgent = { navigate(Page.USER_AGENT) },
@@ -223,6 +225,7 @@ fun ZexBrowseApp() {
                         onBack = goBack
                     )
                     Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
+                    Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
                     Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
                         settings = settings,
                         onSave = { mode, uri, path ->
@@ -568,6 +571,37 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
 
 private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
 
+@Composable
+private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val history by viewModel.history.collectAsState(initial = emptyList())
+    var showClearConfirmation by remember { mutableStateOf(false) }
+    Scaffold(topBar = { TopAppBar(title = { Text("浏览历史") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { if (history.isNotEmpty()) TextButton(onClick = { showClearConfirmation = true }) { Text("清除") } }) }) { padding ->
+        if (history.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("暂无浏览历史") }
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(history, key = { it.id }) { item ->
+                    ElevatedCard(Modifier.fillMaxWidth().clickable { onOpen(item.url) }) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(item.title.ifBlank { item.url }, maxLines = 1)
+                            Text(item.url, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+                            Text(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(item.visitedAt)), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (showClearConfirmation) {
+        ConfirmDialog("清除浏览历史？", "此操作无法撤销。", {
+            viewModel.clearHistory()
+            Toast.makeText(context, "已清除", Toast.LENGTH_SHORT).show()
+            showClearConfirmation = false
+        }, { showClearConfirmation = false })
+    }
+}
+
 private fun openUpdateApk(context: android.content.Context, file: java.io.File) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_VIEW)
@@ -654,6 +688,7 @@ private fun SettingsScreen(
     setClearOnExit: (Boolean, Boolean, Boolean, Boolean) -> Unit,
     clearBrowserData: () -> Unit,
     onDownloads: () -> Unit,
+    onHistory: () -> Unit,
     onDownloadDirectory: () -> Unit,
     onSearchEngine: () -> Unit,
     onUserAgent: () -> Unit,
@@ -665,7 +700,6 @@ private fun SettingsScreen(
     var exitCookies by remember(settings.clearCookiesOnExit) { mutableStateOf(settings.clearCookiesOnExit) }
     var exitCache by remember(settings.clearCacheOnExit) { mutableStateOf(settings.clearCacheOnExit) }
     var exitHistory by remember(settings.clearHistoryOnExit) { mutableStateOf(settings.clearHistoryOnExit) }
-    val context = LocalContext.current
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item { ThemeSelector(settings.darkMode, setMode) }
@@ -678,6 +712,7 @@ private fun SettingsScreen(
             item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit) { showExitOptions = true } }
             item { HorizontalDivider() }
             item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
+            item { ListItem(headlineContent = { Text("浏览历史") }, supportingContent = { Text("查看最近访问的网页") }, leadingContent = { Icon(Icons.Default.History, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onHistory)) }
             item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(when {
                 settings.downloadDirectoryMode == "external" && settings.externalDownloadDisplayPath.isBlank() -> "外部目录（未设置）"
                 settings.downloadDirectoryMode == "external" -> settings.externalDownloadDisplayPath
@@ -706,7 +741,6 @@ private fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     setClearOnExit(exitCookies || exitCache || exitHistory, exitCookies, exitCache, exitHistory)
-                    Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
                     showExitOptions = false
                 }) { Text("确定") }
             },
@@ -903,7 +937,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.0.6（7）")
+            Text("版本 1.0.7（8）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)

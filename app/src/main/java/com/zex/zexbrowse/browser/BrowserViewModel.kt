@@ -34,6 +34,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val database = BrowserDatabase.create(application)
     private val downloadScheduler = DownloadScheduler(application)
     val downloads = database.downloadDao().observeAll()
+    val history = database.dao().history()
     private val _tabs = MutableStateFlow<List<BrowserTab>>(emptyList()); val tabs = _tabs.asStateFlow()
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
@@ -125,6 +126,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
     fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
     fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
+    fun clearHistory() { viewModelScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
     fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
         var flags = 0L
         if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES
