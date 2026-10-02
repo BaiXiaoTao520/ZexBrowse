@@ -120,7 +120,7 @@ abstract class BrowserDatabase : RoomDatabase() {
 
 data class BrowserSettings(
     val darkMode: String = "system",
-    val forceDarkWeb: Boolean = true,
+    val forceDarkWeb: Boolean = false,
     val dynamicColor: Boolean = true,
     val cookiesEnabled: Boolean = true,
     val apkHashEnabled: Boolean = true,
@@ -168,7 +168,7 @@ class SettingsStore(private val context: Context) {
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
             darkMode = preferences[modeKey] ?: "system",
-            forceDarkWeb = preferences[forceDarkWebKey] ?: true,
+            forceDarkWeb = preferences[forceDarkWebKey] ?: false,
             dynamicColor = preferences[dynamicColorKey] ?: true,
             cookiesEnabled = preferences[cookiesKey] ?: true,
             apkHashEnabled = preferences[apkHashKey] ?: true,

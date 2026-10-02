@@ -42,6 +42,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+    private var lastForceDark = false
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
@@ -145,10 +146,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 else -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
             }
             runtime.settings.setPreferredColorScheme(scheme)
-            if (lastColorScheme != scheme) {
-                lastColorScheme = scheme
+            val shouldForce = dark && force
+            if (lastForceDark != shouldForce) {
+                lastForceDark = shouldForce
+                val app = getApplication<Application>() as ZexBrowseApplication
+                app.setDarkExtensionEnabled(shouldForce)
+                _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
+            } else if (lastColorScheme != scheme) {
                 _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
             }
+            lastColorScheme = scheme
         }
     }
 

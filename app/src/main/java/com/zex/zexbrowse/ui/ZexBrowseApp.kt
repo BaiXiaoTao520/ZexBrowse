@@ -750,7 +750,7 @@ private fun SettingsScreen(
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item { ThemeSelector(settings.darkMode, setMode) }
-            item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页；关闭后仅传入深色偏好，由网页自行适配", settings.forceDarkWeb, setForceDarkWeb) }
+            item { SwitchRow("强制适配深色模式", "默认关闭，仅向网页传入深色偏好由其自行适配；开启后对本网页注入暗色样式", settings.forceDarkWeb, setForceDarkWeb) }
             item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic) }
             item { HorizontalDivider() }
             item { SwitchRow("启用 Cookie", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie) }
@@ -987,7 +987,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.1.1（13）")
+            Text("版本 1.1.2（14）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
