@@ -17,5 +17,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { ZexBrowseApp() }
+        (application as ZexBrowseApplication).ensureDarkExtension()
     }
 }

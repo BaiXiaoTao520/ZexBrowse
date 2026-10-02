@@ -109,7 +109,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             runtime.settings.setPreferredColorScheme(scheme)
             if (lastColorScheme != scheme) {
                 lastColorScheme = scheme
-                _tabs.value.forEach { it.session.reload() }
+                _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
             }
         }
     }
@@ -117,8 +117,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun applyCurrentUserAgentToSelected() {
         val ua = userAgentOverride(browserSettings)
         selected?.session?.let { session ->
-            session.settings?.setUserAgentOverride(ua)
-            session.reload()
+            runCatching { session.settings?.setUserAgentOverride(ua) }
+            runCatching { session.reload() }
         }
     }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }

@@ -13,12 +13,11 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 class ZexBrowseApplication : Application() {
     val runtime: GeckoRuntime by lazy { GeckoRuntime.create(this, GeckoRuntimeSettings.Builder().build()) }
 
-    override fun onCreate() {
-        super.onCreate()
+    fun ensureDarkExtension() {
         runCatching {
             runtime.webExtensionController
                 .ensureBuiltIn("resource://android/assets/web_extensions/zex_dark/", "zex-dark@zexbrowse")
-                .accept({}, {})
+                .accept({ _ -> }, { _ -> })
         }
     }
 }
