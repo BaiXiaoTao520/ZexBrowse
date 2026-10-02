@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "ZexBrowse Dark",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Force dark content styling for ZexBrowse.",
   "browser_specific_settings": {
     "gecko": {
@@ -12,6 +12,7 @@
     {
       "matches": ["http://*/*", "https://*/*"],
       "css": ["dark.css"],
+      "js": ["dark.js"],
       "run_at": "document_start",
       "all_frames": true
     }

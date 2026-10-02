@@ -1,20 +1,19 @@
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-  }
+/* 仅在 <html> 被内容脚本标记为 zex-force-dark 时才生效：
+   仅对“本身为浅色主题”的网页强制暗化，已适配深色的网页不做处理。 */
+html.zex-force-dark {
+  color-scheme: dark;
+  background-color: #ffffff !important;
+  filter: invert(1) hue-rotate(180deg) !important;
+}
 
-  /* 整页反色以彻底消除刺眼白底；不对元素逐个覆盖，避免层叠/文字重叠 */
-  html {
-    background-color: #ffffff !important;
-    filter: invert(1) hue-rotate(180deg) !important;
-  }
-
-  /* 图片/视频等媒体再反转一次，保持原始外观 */
-  img,
-  picture,
-  video,
-  canvas,
-  svg {
-    filter: invert(1) hue-rotate(180deg) !important;
-  }
+/* 还原媒体，避免图片/视频/图标变反色 */
+html.zex-force-dark img,
+html.zex-force-dark picture,
+html.zex-force-dark video,
+html.zex-force-dark canvas,
+html.zex-force-dark svg,
+html.zex-force-dark iframe,
+html.zex-force-dark embed,
+html.zex-force-dark object {
+  filter: invert(1) hue-rotate(180deg) !important;
 }
