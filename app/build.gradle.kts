@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.zex.zexbrowse"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.zex.zexbrowse"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 21
         versionName = "2.0.0"
         ndk { abiFilters += "arm64-v8a" }
