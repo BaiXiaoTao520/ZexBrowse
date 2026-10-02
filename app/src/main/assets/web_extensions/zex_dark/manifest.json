@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "ZexBrowse Dark",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Force dark content styling for ZexBrowse.",
   "browser_specific_settings": {
     "gecko": {

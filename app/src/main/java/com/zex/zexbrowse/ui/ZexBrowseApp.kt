@@ -72,7 +72,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -142,6 +141,14 @@ fun ZexBrowseApp() {
     val settings by settingsStore.settings.collectAsState(initial = BrowserSettings())
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    // Android 17 (API 37) 起，访问局域网需 ACCESS_LOCAL_NETWORK 运行时权限
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 37 && androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+        }
+    }
     var navStack by rememberSaveable { mutableStateOf(listOf(Page.HOME)) }
     val page = navStack.last()
     val navigate: (Page) -> Unit = { navStack = navStack + it }
@@ -495,7 +502,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                     }
                 }
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    LinearProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    WavyLinearProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
@@ -691,7 +698,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
                 Text(item.fileName, style = MaterialTheme.typography.titleMedium)
                 Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
                 if (running) {
-                    LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    WavyLinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
                     Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
                     TextButton(onClick = onCancel) { Text("取消下载") }
                 } else if (item.status == "completed" || item.status == "hash_mismatch") {
@@ -750,7 +757,7 @@ private fun SettingsScreen(
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item { ThemeSelector(settings.darkMode, setMode) }
-            item { SwitchRow("强制适配深色模式", "默认关闭，仅向网页传入深色偏好由其自行适配；开启后对本网页注入暗色样式", settings.forceDarkWeb, setForceDarkWeb) }
+            item { SwitchRow("强制适配深色模式", "仅在深色模式下生效，全局暗化网页去除白底；浅色模式不受影响，关闭后仅传入深色偏好由网页自行适配", settings.forceDarkWeb, setForceDarkWeb) }
             item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic) }
             item { HorizontalDivider() }
             item { SwitchRow("启用 Cookie", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie) }
@@ -987,7 +994,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 1.1.2（14）")
+            Text("版本 2.0.0（21）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
@@ -1069,10 +1076,10 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                 }
                 if (downloading) {
                     if (connecting) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        WavyLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         Text("正在连接服务器…")
                     } else {
-                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        WavyLinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
                         Text("正在下载：$progress%")
                     }
                 }

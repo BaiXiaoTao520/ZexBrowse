@@ -61,7 +61,7 @@ jobs:
       - name: 安装项目所需 Android SDK 组件
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0"
 
       - name: 解码 APK 签名密钥
         env:
@@ -106,7 +106,7 @@ jobs:
           echo "name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: 自动创建 GitHub Release 并上传产物
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ steps.tag.outputs.name }}

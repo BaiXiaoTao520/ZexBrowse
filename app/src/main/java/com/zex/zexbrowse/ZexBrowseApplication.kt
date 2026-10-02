@@ -17,6 +17,7 @@ class ZexBrowseApplication : Application() {
 
     private var darkExtension: WebExtension? = null
     private var darkExtensionDesired = false
+    private var darkExtensionReady = false
 
     fun ensureDarkExtension() {
         runCatching {
@@ -24,24 +25,30 @@ class ZexBrowseApplication : Application() {
                 .ensureBuiltIn("resource://android/assets/web_extensions/zex_dark/", "zex-dark@zexbrowse")
                 .accept({ extension ->
                     darkExtension = extension
+                    darkExtensionReady = true
                     applyDarkExtensionState()
                 }, { _ -> })
         }
     }
 
-    fun setDarkExtensionEnabled(enabled: Boolean) {
+    fun setDarkExtensionEnabled(enabled: Boolean, onApplied: () -> Unit = {}) {
         darkExtensionDesired = enabled
-        applyDarkExtensionState()
+        if (!darkExtensionReady) {
+            onApplied()
+            return
+        }
+        applyDarkExtensionState(onApplied)
     }
 
-    private fun applyDarkExtensionState() {
-        val extension = darkExtension ?: return
+    private fun applyDarkExtensionState(onApplied: () -> Unit = {}) {
+        val extension = darkExtension ?: run { onApplied(); return }
         runCatching {
-            if (darkExtensionDesired) {
+            val result = if (darkExtensionDesired) {
                 runtime.webExtensionController.enable(extension, WebExtensionController.EnableSource.USER)
             } else {
                 runtime.webExtensionController.disable(extension, WebExtensionController.EnableSource.USER)
             }
-        }
+            result.accept({ _ -> onApplied() }, { _ -> onApplied() })
+        }.onFailure { onApplied() }
     }
 }
