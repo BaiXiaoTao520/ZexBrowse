@@ -54,7 +54,7 @@ class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    fun isNewer(remote: String, local: String = "2.0.1"): Boolean {
+    fun isNewer(remote: String, local: String = "2.0.2"): Boolean {
         val remoteParts = versionParts(remote)
         val localParts = versionParts(local)
         val count = maxOf(remoteParts.size, localParts.size)

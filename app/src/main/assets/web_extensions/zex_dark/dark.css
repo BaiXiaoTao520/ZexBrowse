@@ -1,19 +1,40 @@
-/* 仅在 <html> 被内容脚本标记为 zex-force-dark 时才生效：
-   仅对“本身为浅色主题”的网页强制暗化，已适配深色的网页不做处理。 */
-html.zex-force-dark {
-  color-scheme: dark;
-  background-color: #ffffff !important;
-  filter: invert(1) hue-rotate(180deg) !important;
-}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
 
-/* 还原媒体，避免图片/视频/图标变反色 */
-html.zex-force-dark img,
-html.zex-force-dark picture,
-html.zex-force-dark video,
-html.zex-force-dark canvas,
-html.zex-force-dark svg,
-html.zex-force-dark iframe,
-html.zex-force-dark embed,
-html.zex-force-dark object {
-  filter: invert(1) hue-rotate(180deg) !important;
+  html {
+    background-color: #14161a !important;
+  }
+
+  body {
+    background-color: #14161a !important;
+    color: #e3e3e6 !important;
+  }
+
+  * {
+    background-color: transparent !important;
+    color: inherit !important;
+    border-color: #3d4045 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  a,
+  a * {
+    color: #8ab4f8 !important;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    background-color: #22252a !important;
+    color: #e3e3e6 !important;
+  }
+
+  img,
+  video {
+    filter: brightness(0.9) contrast(1.02);
+  }
 }

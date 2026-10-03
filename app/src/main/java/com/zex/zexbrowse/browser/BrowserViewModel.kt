@@ -8,8 +8,6 @@ package com.zex.zexbrowse.browser
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.ZexBrowseApplication
@@ -44,8 +42,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
-    private var lastForceDark = false
-    private var forceDarkInitialized = false
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
@@ -143,30 +139,17 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun applyForceDark(dark: Boolean, force: Boolean) {
         runCatching {
-            // 深色模式下始终向网页传入深色偏好（由网页自行适配）；扩展是否注入暗色样式仅由 force 控制
-            val scheme = if (dark) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
-            runCatching { runtime.settings.setPreferredColorScheme(scheme) }
-            val shouldForce = dark && force
-            val forceChanged = lastForceDark != shouldForce || !forceDarkInitialized
-            val schemeChanged = lastColorScheme != scheme
-            lastForceDark = shouldForce
-            lastColorScheme = scheme
-            forceDarkInitialized = true
-            val app = getApplication<Application>() as? ZexBrowseApplication
-            if (forceChanged && app != null) {
-                // 关闭强制适配时，跟随禁用暗色扩展；重新开启时再启用
-                app.setDarkExtensionEnabled(shouldForce) { reloadAllTabs() }
-            } else if (schemeChanged) {
-                reloadAllTabs()
+            val scheme = when {
+                !dark -> GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+                force -> GeckoRuntimeSettings.COLOR_SCHEME_DARK
+                else -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+            }
+            runtime.settings.setPreferredColorScheme(scheme)
+            if (lastColorScheme != scheme) {
+                lastColorScheme = scheme
+                _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
             }
         }
-    }
-
-    private fun reloadAllTabs() {
-        val run = Runnable {
-            _tabs.value.toList().forEach { tab -> runCatching { tab.session.reload() } }
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) run.run() else Handler(Looper.getMainLooper()).post(run)
     }
 
     fun applyCurrentUserAgentToSelected() {

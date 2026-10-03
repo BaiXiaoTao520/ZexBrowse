@@ -15,6 +15,7 @@ import android.os.Build
 import android.widget.Toast
 import android.net.Uri
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,6 +86,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -95,6 +97,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -209,6 +212,18 @@ fun ZexBrowseApp() {
         androidx.compose.material3.darkColorScheme()
     } else {
         androidx.compose.material3.lightColorScheme()
+    }
+
+    // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !useDarkTheme
+                isAppearanceLightNavigationBars = !useDarkTheme
+            }
+        }
     }
 
     MaterialTheme(colorScheme = colorScheme) {
@@ -757,7 +772,7 @@ private fun SettingsScreen(
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item { ThemeSelector(settings.darkMode, setMode) }
-            item { SwitchRow("强制适配深色模式", "仅在深色模式下生效，全局暗化网页去除白底；浅色模式不受影响，关闭后仅传入深色偏好由网页自行适配", settings.forceDarkWeb, setForceDarkWeb) }
+            item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后仅传入深色偏好，由网页自行适配", settings.forceDarkWeb, setForceDarkWeb) }
             item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic) }
             item { HorizontalDivider() }
             item { SwitchRow("启用 Cookie", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie) }
@@ -994,7 +1009,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 2.0.1（22）")
+            Text("版本 2.0.2（23）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)

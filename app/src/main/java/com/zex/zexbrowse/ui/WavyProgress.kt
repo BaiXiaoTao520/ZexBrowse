@@ -9,6 +9,7 @@ package com.zex.zexbrowse.ui
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -30,11 +31,28 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 private val WavelengthPx = 44f
-private val AmplitudePx = 4f
+private val MaxAmplitudePx = 5f
 private val TrackStrokePx = 8f
 private val CanvasHeight = 16.dp
+private const val WaveCycleMillis = 1400
 
-/** Material 3 Expressive 风格的波浪线性进度条（确定进度）。 */
+// 波峰相位随时间匀速推进，让确定进度的波浪也持续流动，而不是静止的曲线
+@Composable
+private fun rememberWavePhase(): Float {
+    val transition = rememberInfiniteTransition(label = "wavy")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = WaveCycleMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "phase"
+    )
+    return phase
+}
+
+/** Material 3 Expressive 风格的波浪线性进度条（确定进度，起止自动拉直并持续流动）。 */
 @Composable
 fun WavyLinearProgressIndicator(
     progress: () -> Float,
@@ -42,14 +60,23 @@ fun WavyLinearProgressIndicator(
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
 ) {
-    val fraction = progress().coerceIn(0f, 1f)
+    val target = progress().coerceIn(0f, 1f)
+    // 平滑跟随目标进度，避免进度跳变时波形突变
+    val fraction by animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(durationMillis = 360, easing = LinearEasing),
+        label = "fraction"
+    )
+    val phase = rememberWavePhase()
+    // 两端收拢：0 和 1 附近振幅趋近 0（直线），中段最大振幅
+    val amplitude = MaxAmplitudePx * sin(PI.toFloat() * fraction).coerceAtLeast(0f)
     Canvas(modifier.fillMaxWidth().height(CanvasHeight)) {
         val stroke = Stroke(width = TrackStrokePx, cap = StrokeCap.Round)
         val centerY = size.height / 2f
-        drawPath(wavePath(size.width, centerY, 0f), trackColor, style = stroke)
+        drawPath(wavePath(size.width, centerY, phase, amplitude), trackColor, style = stroke)
         if (fraction > 0f) {
             clipRect(right = size.width * fraction) {
-                drawPath(wavePath(size.width, centerY, 0f), color, style = stroke)
+                drawPath(wavePath(size.width, centerY, phase, amplitude), color, style = stroke)
             }
         }
     }
@@ -62,20 +89,11 @@ fun WavyLinearProgressIndicator(
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
 ) {
-    val transition = rememberInfiniteTransition(label = "wavy")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "phase"
-    )
+    val phase = rememberWavePhase()
     Canvas(modifier.fillMaxWidth().height(CanvasHeight)) {
         val stroke = Stroke(width = TrackStrokePx, cap = StrokeCap.Round)
         val centerY = size.height / 2f
-        drawPath(wavePath(size.width, centerY, 0f), trackColor, style = stroke)
+        drawPath(wavePath(size.width, centerY, phase, MaxAmplitudePx), trackColor, style = stroke)
 
         val segment = size.width * 0.45f
         val travel = size.width + segment
@@ -84,15 +102,14 @@ fun WavyLinearProgressIndicator(
         val end = (start + segment).coerceIn(0f, size.width)
         if (end > 0f && start < size.width) {
             clipRect(left = start.coerceAtLeast(0f), right = end) {
-                drawPath(wavePath(size.width, centerY, phase), color, style = stroke)
+                drawPath(wavePath(size.width, centerY, phase, MaxAmplitudePx), color, style = stroke)
             }
         }
     }
 }
 
-private fun DrawScope.wavePath(width: Float, centerY: Float, phase: Float): Path {
+private fun DrawScope.wavePath(width: Float, centerY: Float, phase: Float, amplitude: Float): Path {
     val path = Path()
-    val amplitude = AmplitudePx
     val wavelength = WavelengthPx
     if (width <= 0f) return path
     path.moveTo(0f, centerY + amplitude * sin(phase))

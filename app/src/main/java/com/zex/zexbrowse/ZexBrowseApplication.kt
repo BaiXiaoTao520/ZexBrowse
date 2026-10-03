@@ -9,46 +9,23 @@ package com.zex.zexbrowse
 import android.app.Application
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
-import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtensionController
 
 class ZexBrowseApplication : Application() {
     val runtime: GeckoRuntime by lazy { GeckoRuntime.create(this, GeckoRuntimeSettings.Builder().build()) }
-
-    private var darkExtension: WebExtension? = null
-    private var darkExtensionDesired = false
-    private var darkExtensionReady = false
 
     fun ensureDarkExtension() {
         runCatching {
             runtime.webExtensionController
                 .ensureBuiltIn("resource://android/assets/web_extensions/zex_dark/", "zex-dark@zexbrowse")
                 .accept({ extension ->
-                    darkExtension = extension
-                    darkExtensionReady = true
-                    applyDarkExtensionState()
+                    // 旧版曾按开关禁用扩展，这里强制启用，避免回退后暗色样式不生效
+                    runCatching {
+                        runtime.webExtensionController
+                            .enable(extension, WebExtensionController.EnableSource.USER)
+                            .accept({ _ -> }, { _ -> })
+                    }
                 }, { _ -> })
         }
-    }
-
-    fun setDarkExtensionEnabled(enabled: Boolean, onApplied: () -> Unit = {}) {
-        darkExtensionDesired = enabled
-        if (!darkExtensionReady) {
-            onApplied()
-            return
-        }
-        applyDarkExtensionState(onApplied)
-    }
-
-    private fun applyDarkExtensionState(onApplied: () -> Unit = {}) {
-        val extension = darkExtension ?: run { onApplied(); return }
-        runCatching {
-            val result = if (darkExtensionDesired) {
-                runtime.webExtensionController.enable(extension, WebExtensionController.EnableSource.USER)
-            } else {
-                runtime.webExtensionController.disable(extension, WebExtensionController.EnableSource.USER)
-            }
-            result.accept({ _ -> onApplied() }, { _ -> onApplied() })
-        }.onFailure { onApplied() }
     }
 }
