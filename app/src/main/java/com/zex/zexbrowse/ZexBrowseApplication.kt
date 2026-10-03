@@ -20,10 +20,12 @@ class ZexBrowseApplication : Application() {
                 .ensureBuiltIn("resource://android/assets/web_extensions/zex_dark/", "zex-dark@zexbrowse")
                 .accept({ extension ->
                     // 旧版曾按开关禁用扩展，这里强制启用，避免回退后暗色样式不生效
-                    runCatching {
-                        runtime.webExtensionController
-                            .enable(extension, WebExtensionController.EnableSource.USER)
-                            .accept({ _ -> }, { _ -> })
+                    if (extension != null) {
+                        runCatching {
+                            runtime.webExtensionController
+                                .enable(extension, WebExtensionController.EnableSource.USER)
+                                .accept({ _ -> }, { _ -> })
+                        }
                     }
                 }, { _ -> })
         }

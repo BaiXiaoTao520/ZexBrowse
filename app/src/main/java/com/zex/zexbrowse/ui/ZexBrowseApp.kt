@@ -9,6 +9,7 @@
 package com.zex.zexbrowse.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.ActivityNotFoundException
 import android.os.Build
@@ -137,6 +138,15 @@ private val defaultQuickSites = listOf(
     QuickSite("Wikipedia", "https://www.wikipedia.org", "W")
 )
 
+private fun Context.findActivity(): android.app.Activity? {
+    var current: Context? = this
+    while (current is android.content.ContextWrapper) {
+        if (current is android.app.Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
 @Composable
 fun ZexBrowseApp() {
     val context = LocalContext.current
@@ -218,7 +228,7 @@ fun ZexBrowseApp() {
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = !useDarkTheme
                 isAppearanceLightNavigationBars = !useDarkTheme
