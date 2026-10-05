@@ -30,13 +30,17 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.sin
 
-private val WavelengthPx = 44f
-private val MaxAmplitudePx = 5f
-private val TrackStrokePx = 8f
-private val CanvasHeight = 16.dp
+private val Wavelength = 18.dp
+private val MaxAmplitude = 2.dp
+private val TrackStroke = 4.dp
+private val CanvasHeight = 14.dp
 private const val WaveCycleMillis = 1400
 
-// 波峰相位随时间匀速推进，让确定进度的波浪也持续流动，而不是静止的曲线
+// 起止收拢比例：进度很小或接近满时振幅趋近 0，使亮色线在两端变直
+private const val RampUpFraction = 0.16f
+private const val RampDownFraction = 0.12f
+
+// 波峰相位随时间匀速推进，让波浪持续流动，而不是静止的曲线
 @Composable
 private fun rememberWavePhase(): Float {
     val transition = rememberInfiniteTransition(label = "wavy")
@@ -52,7 +56,7 @@ private fun rememberWavePhase(): Float {
     return phase
 }
 
-/** Material 3 Expressive 风格的波浪线性进度条（确定进度，起止自动拉直并持续流动）。 */
+/** Material 3 Expressive 风格的波浪线性进度条（确定进度，轨道恒为直线，亮色波线两端自动收拢并持续流动）。 */
 @Composable
 fun WavyLinearProgressIndicator(
     progress: () -> Float,
@@ -68,21 +72,24 @@ fun WavyLinearProgressIndicator(
         label = "fraction"
     )
     val phase = rememberWavePhase()
-    // 两端收拢：0 和 1 附近振幅趋近 0（直线），中段最大振幅
-    val amplitude = MaxAmplitudePx * sin(PI.toFloat() * fraction).coerceAtLeast(0f)
+    // 前端收拢：刚开始一小段由直线渐变成波浪；接近满时快速拉直
+    val rampUp = (fraction / RampUpFraction).coerceIn(0f, 1f)
+    val rampDown = ((1f - fraction) / RampDownFraction).coerceIn(0f, 1f)
+    val amplitudeFactor = minOf(rampUp, rampDown)
     Canvas(modifier.fillMaxWidth().height(CanvasHeight)) {
-        val stroke = Stroke(width = TrackStrokePx, cap = StrokeCap.Round)
+        val stroke = Stroke(width = TrackStroke.toPx(), cap = StrokeCap.Round)
         val centerY = size.height / 2f
-        drawPath(wavePath(size.width, centerY, phase, amplitude), trackColor, style = stroke)
+        // 轨道始终是直线
+        drawPath(straightPath(size.width, centerY), trackColor, style = stroke)
         if (fraction > 0f) {
             clipRect(right = size.width * fraction) {
-                drawPath(wavePath(size.width, centerY, phase, amplitude), color, style = stroke)
+                drawPath(wavePath(size.width, centerY, phase, MaxAmplitude.toPx() * amplitudeFactor), color, style = stroke)
             }
         }
     }
 }
 
-/** Material 3 Expressive 风格的波浪线性进度条（不确定进度，波浪流动）。 */
+/** Material 3 Expressive 风格的波浪线性进度条（不确定进度，轨道直线，波浪流动）。 */
 @Composable
 fun WavyLinearProgressIndicator(
     modifier: Modifier = Modifier,
@@ -91,9 +98,9 @@ fun WavyLinearProgressIndicator(
 ) {
     val phase = rememberWavePhase()
     Canvas(modifier.fillMaxWidth().height(CanvasHeight)) {
-        val stroke = Stroke(width = TrackStrokePx, cap = StrokeCap.Round)
+        val stroke = Stroke(width = TrackStroke.toPx(), cap = StrokeCap.Round)
         val centerY = size.height / 2f
-        drawPath(wavePath(size.width, centerY, phase, MaxAmplitudePx), trackColor, style = stroke)
+        drawPath(straightPath(size.width, centerY), trackColor, style = stroke)
 
         val segment = size.width * 0.45f
         val travel = size.width + segment
@@ -102,15 +109,23 @@ fun WavyLinearProgressIndicator(
         val end = (start + segment).coerceIn(0f, size.width)
         if (end > 0f && start < size.width) {
             clipRect(left = start.coerceAtLeast(0f), right = end) {
-                drawPath(wavePath(size.width, centerY, phase, MaxAmplitudePx), color, style = stroke)
+                drawPath(wavePath(size.width, centerY, phase, MaxAmplitude.toPx()), color, style = stroke)
             }
         }
     }
 }
 
+private fun straightPath(width: Float, centerY: Float): Path {
+    val path = Path()
+    if (width <= 0f) return path
+    path.moveTo(0f, centerY)
+    path.lineTo(width, centerY)
+    return path
+}
+
 private fun DrawScope.wavePath(width: Float, centerY: Float, phase: Float, amplitude: Float): Path {
     val path = Path()
-    val wavelength = WavelengthPx
+    val wavelength = Wavelength.toPx()
     if (width <= 0f) return path
     path.moveTo(0f, centerY + amplitude * sin(phase))
     var x = 0f

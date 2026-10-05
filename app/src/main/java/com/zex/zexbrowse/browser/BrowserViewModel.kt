@@ -42,6 +42,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+    private var lastUserAgent: String? = null
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
@@ -64,7 +65,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun createSession(incognito: Boolean): Pair<GeckoSession, String> {
-        val sessionSettings = GeckoSessionSettings.Builder().usePrivateMode(incognito)
+        val sessionSettings = GeckoSessionSettings.Builder()
+            .usePrivateMode(incognito)
+            // 会话转为非活动（切换标签/离开浏览页）时也保持媒体播放，避免音频被打断
+            .suspendMediaWhenInactive(false)
         if (incognito) {
             val contextId = incognitoContextId ?: UUID.randomUUID().toString().also { incognitoContextId = it }
             sessionSettings.contextId(contextId)
@@ -120,13 +124,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _selectedId.value = _tabs.value.lastOrNull()?.id
         if (_tabs.value.isEmpty()) newTab()
     }
-    fun closeAll() { _tabs.value.forEach { tab -> runCatching { tab.session.close() } }; _tabs.value = emptyList(); _selectedId.value = null; incognitoContextId?.let(runtime.storageController::clearDataForSessionContext); incognitoContextId = null; newTab() }
+    // 仅关闭普通标签，不动无痕标签
+    fun closeAllNormal() {
+        _tabs.value.filter { !it.incognito }.forEach { tab -> runCatching { tab.session.close() } }
+        _tabs.value = _tabs.value.filter { it.incognito }
+        if (_tabs.value.isEmpty()) newTab() else _selectedId.value = _tabs.value.last().id
+    }
     fun closeAllIncognito() {
         _tabs.value.filter { it.incognito }.forEach { tab -> runCatching { tab.session.close() } }
         _tabs.value = _tabs.value.filterNot { it.incognito }
         incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
         incognitoContextId = null
         _selectedId.value = _tabs.value.lastOrNull()?.id ?: run { newTab(); _selectedId.value }
+    }
+    // 退出无痕浏览：彻底关闭全部无痕标签并清除其 Cookie/缓存，普通标签不受影响
+    fun exitIncognito() {
+        val incognitoTabs = _tabs.value.filter { it.incognito }
+        if (incognitoTabs.isEmpty()) return
+        incognitoTabs.forEach { tab -> runCatching { tab.session.close() } }
+        _tabs.value = _tabs.value.filterNot { it.incognito }
+        incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
+        incognitoContextId = null
+        if (_tabs.value.isEmpty()) newTab() else _selectedId.value = _tabs.value.last().id
     }
     fun toggleDesktopUserAgent() {
         val desktopUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -154,6 +173,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun applyCurrentUserAgentToSelected() {
         val ua = userAgentOverride(browserSettings)
+        // 仅当 UA 真正变化时才重新加载，避免无谓刷新打断正在播放的音频
+        if (ua == lastUserAgent) return
+        lastUserAgent = ua
         selected?.session?.let { session ->
             runCatching { session.settings?.setUserAgentOverride(ua) }
             runCatching { session.reload() }
@@ -190,7 +212,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             incognitoContextId = null
         }
     }
-    private fun update(id: String, transform: (BrowserTab) -> BrowserTab) { _tabs.value = _tabs.value.map { if (it.id == id) transform(it) else it } }
+    private fun update(id: String, transform: (BrowserTab) -> BrowserTab) {
+        // 内容未变化时不重新赋值，避免 StateFlow 发出等价列表导致无谓重组
+        var changed = false
+        val next = _tabs.value.map { tab ->
+            if (tab.id == id) {
+                val updated = transform(tab)
+                if (updated != tab) changed = true
+                updated
+            } else tab
+        }
+        if (changed) _tabs.value = next
+    }
     private fun String.isDownloadUrl(): Boolean {
         val path = substringBefore('?').substringBefore('#').lowercase()
         return listOf(".apk", ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".pdf", ".exe", ".msi", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".iso", ".img", ".dmg")

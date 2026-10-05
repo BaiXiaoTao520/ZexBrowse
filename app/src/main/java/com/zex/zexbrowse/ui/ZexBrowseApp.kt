@@ -12,9 +12,10 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.ActivityNotFoundException
-import android.os.Build
-import android.widget.Toast
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.activity.compose.BackHandler
@@ -135,7 +136,7 @@ private val defaultQuickSites = listOf(
     QuickSite("GitHub", "https://github.com", "⌘"),
     QuickSite("Google", "https://www.google.com", "G"),
     QuickSite("Mozilla", "https://www.mozilla.org", "M"),
-    QuickSite("Wikipedia", "https://www.wikipedia.org", "W")
+    QuickSite("百度", "https://www.baidu.com", "百")
 )
 
 private fun Context.findActivity(): android.app.Activity? {
@@ -147,8 +148,17 @@ private fun Context.findActivity(): android.app.Activity? {
     return null
 }
 
+// 判断本应用是否为系统默认浏览器：系统会把网页链接的默认 handler 指向默认浏览器
+private fun isAppDefaultBrowser(context: Context): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+        .addCategory(Intent.CATEGORY_BROWSABLE)
+    @Suppress("DEPRECATION")
+    val resolved = context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+    return resolved?.activityInfo?.packageName == context.packageName
+}
+
 @Composable
-fun ZexBrowseApp() {
+fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit = {}) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     val settings by settingsStore.settings.collectAsState(initial = BrowserSettings())
@@ -168,6 +178,27 @@ fun ZexBrowseApp() {
     val goBack: () -> Unit = { if (navStack.size > 1) navStack = navStack.dropLast(1) }
     var tabsIncognito by remember { mutableStateOf(false) }
     var startupUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
+    // 本应用是否已被用户设为默认浏览器（用于决定是否展示设置项入口）
+    var isDefaultBrowser by remember { mutableStateOf(isAppDefaultBrowser(context)) }
+
+    // 外部链接（默认浏览器 / 其它应用打开链接）：自动新建普通标签打开
+    LaunchedEffect(incomingUrl) {
+        val target = incomingUrl ?: return@LaunchedEffect
+        browserViewModel.newTab(initialUrl = target)
+        navStack = listOf(Page.HOME, Page.BROWSER)
+        onIncomingUrlHandled()
+    }
+
+    // 进入应用、切回前台（含从系统默认应用设置返回）时重新检测默认浏览器状态：
+    // 已是默认则不显示入口；用户改选了其它浏览器后入口重新出现
+    val currentPage = navStack.last()
+    DisposableEffect(lifecycleOwner, currentPage) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) isDefaultBrowser = isAppDefaultBrowser(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     browserViewModel.browserSettings = settings
     LaunchedEffect(settings.autoCheckUpdates) {
@@ -182,8 +213,14 @@ fun ZexBrowseApp() {
         settings.clearHistoryOnExit
     ) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && settings.clearOnExit) {
-                browserViewModel.clearBrowserData(settings.clearCookiesOnExit, settings.clearCacheOnExit, settings.clearHistoryOnExit)
+            if (event == Lifecycle.Event.ON_STOP) {
+                // 配置变更（如旋转）不算退出，不应清掉无痕标签
+                if (context.findActivity()?.isChangingConfigurations == true) return@LifecycleEventObserver
+                // 退出无痕浏览：离开应用即彻底关闭全部无痕标签并清除其 Cookie/缓存，普通标签不受影响
+                browserViewModel.exitIncognito()
+                if (settings.clearOnExit) {
+                    browserViewModel.clearBrowserData(settings.clearCookiesOnExit, settings.clearCacheOnExit, settings.clearHistoryOnExit)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -255,6 +292,7 @@ fun ZexBrowseApp() {
                     Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
                     Page.SETTINGS -> SettingsScreen(
                         settings = settings,
+                        isDefaultBrowser = isDefaultBrowser,
                         setMode = { scope.launch { settingsStore.mode(it) } },
                         setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
                         setDynamic = { scope.launch { settingsStore.dynamic(it) } },
@@ -264,6 +302,13 @@ fun ZexBrowseApp() {
                         clearBrowserData = {
                             browserViewModel.clearBrowserData()
                             Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
+                        },
+                        onSetDefaultBrowser = {
+                            // 设为默认浏览器由用户在系统设置中自愿选择
+                            val launched = runCatching {
+                                context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }.isSuccess
+                            if (!launched) Toast.makeText(context, "请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器", Toast.LENGTH_LONG).show()
                         },
                         onDownloads = { navigate(Page.DOWNLOADS) },
                         onHistory = { navigate(Page.HISTORY) },
@@ -460,6 +505,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
+    // 只展示与当前标签同类型的标签，避免无痕与普通标签在同一列混合
+    val visibleTabs = tabs.filter { it.incognito == (selectedTab?.incognito ?: false) }
     var input by remember(selectedTab?.id) { mutableStateOf(selectedTab?.url.orEmpty()) }
     var inputFocused by remember { mutableStateOf(false) }
     var downloadUrl by remember { mutableStateOf<String?>(null) }
@@ -481,7 +528,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 2.dp)) {
+            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 2.dp)) {
                 AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) }, onFocusChange = { inputFocused = it })
             }
         },
@@ -491,8 +538,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, "前进") }
                 IconButton(onClick = viewModel::reload) { Icon(Icons.Default.Refresh, "刷新") }
                 IconButton(onClick = { showNewTabDialog = true }) { Icon(Icons.Default.Add, "新建标签") }
-                IconButton(onClick = { onTabs(false) }) {
-                    BadgedBox(badge = { Badge { Text(tabs.size.toString()) } }) { Icon(Icons.Default.Tab, "标签") }
+                IconButton(onClick = { onTabs(selectedTab?.incognito == true) }) {
+                    BadgedBox(badge = { Badge { Text(visibleTabs.size.toString()) } }) { Icon(Icons.Default.Tab, "标签") }
                 }
                 Box {
                     IconButton(onClick = { showBrowserMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
@@ -507,7 +554,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             LazyRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                items(tabs, key = { it.id }) { tab ->
+                items(visibleTabs, key = { it.id }) { tab ->
                     AssistChip(
                         onClick = { viewModel.select(tab.id) },
                         label = {
@@ -523,7 +570,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
             if (selectedTab != null) {
                 if (selectedTab.incognito) {
                     Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.inverseSurface, shape = MaterialTheme.shapes.small) {
-                        Text("你已进入无痕浏览模式：本次会话数据将在关闭全部无痕标签后清除。", Modifier.padding(8.dp), color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("无痕浏览：退出后将关闭全部无痕标签并清除 Cookie 与缓存，普通标签不受影响。", Modifier.weight(1f), color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { viewModel.exitIncognito() }) { Text("退出无痕", color = MaterialTheme.colorScheme.inversePrimary) }
+                        }
                     }
                 }
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -590,7 +640,7 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
             TopAppBar(
                 title = { Text("全部标签") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
-                actions = { TextButton(onClick = { if (incognitoOnly) viewModel.closeAllIncognito() else viewModel.closeAll() }) { Text(if (incognitoOnly) "关闭无痕" else "关闭全部") } }
+                actions = { TextButton(onClick = { if (incognitoOnly) viewModel.closeAllIncognito() else viewModel.closeAllNormal() }) { Text(if (incognitoOnly) "关闭无痕" else "关闭普通") } }
             )
         }
     ) { padding ->
@@ -766,6 +816,8 @@ private fun SettingsScreen(
     setApkHash: (Boolean) -> Unit,
     setClearOnExit: (Boolean, Boolean, Boolean, Boolean) -> Unit,
     clearBrowserData: () -> Unit,
+    isDefaultBrowser: Boolean,
+    onSetDefaultBrowser: () -> Unit,
     onDownloads: () -> Unit,
     onHistory: () -> Unit,
     onDownloadDirectory: () -> Unit,
@@ -800,6 +852,7 @@ private fun SettingsScreen(
             item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
             item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
             item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
+            if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
             item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
         }
     }
@@ -1019,7 +1072,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 2.0.2（23）")
+            Text("版本 2.1.0（24）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
