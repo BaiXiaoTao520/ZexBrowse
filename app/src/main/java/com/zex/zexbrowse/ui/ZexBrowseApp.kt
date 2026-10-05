@@ -191,8 +191,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
 
     // 进入应用、切回前台（含从系统默认应用设置返回）时重新检测默认浏览器状态：
     // 已是默认则不显示入口；用户改选了其它浏览器后入口重新出现
-    val currentPage = navStack.last()
-    DisposableEffect(lifecycleOwner, currentPage) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, navStack.last()) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) isDefaultBrowser = isAppDefaultBrowser(context)
         }
@@ -204,7 +204,6 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
     LaunchedEffect(settings.autoCheckUpdates) {
         if (settings.autoCheckUpdates) startupUpdate = runCatching { UpdateChecker().latest() }.getOrNull()?.takeIf { UpdateChecker().isNewer(it.version) }
     }
-    val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(
         lifecycleOwner,
         settings.clearOnExit,
