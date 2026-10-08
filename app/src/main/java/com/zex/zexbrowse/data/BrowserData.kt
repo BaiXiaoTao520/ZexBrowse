@@ -139,7 +139,8 @@ data class BrowserSettings(
     val externalDownloadTreeUri: String = "",
     val externalDownloadDisplayPath: String = "",
     val quickSites: String = "",
-    val autoCheckUpdates: Boolean = true
+    val autoCheckUpdates: Boolean = true,
+    val storageHintShown: Boolean = false
 )
 
 class SettingsStore(private val context: Context) {
@@ -164,6 +165,7 @@ class SettingsStore(private val context: Context) {
     private val externalDownloadDisplayPathKey = stringPreferencesKey("external_download_display_path")
     private val quickSitesKey = stringPreferencesKey("quick_sites")
     private val autoCheckUpdatesKey = booleanPreferencesKey("auto_check_updates")
+    private val storageHintShownKey = booleanPreferencesKey("storage_hint_shown")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -187,7 +189,8 @@ class SettingsStore(private val context: Context) {
             externalDownloadTreeUri = preferences[externalDownloadTreeUriKey] ?: "",
             externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "",
             quickSites = preferences[quickSitesKey] ?: "",
-            autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true
+            autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true,
+            storageHintShown = preferences[storageHintShownKey] ?: false
         )
     }
 
@@ -217,6 +220,7 @@ class SettingsStore(private val context: Context) {
         preferences[externalDownloadDisplayPathKey] = displayPath
     }
     suspend fun autoCheckUpdates(value: Boolean) = update { it[autoCheckUpdatesKey] = value }
+    suspend fun storageHintShown(value: Boolean) = update { it[storageHintShownKey] = value }
     suspend fun clearOnExit(enabled: Boolean, cookies: Boolean, cache: Boolean, history: Boolean) = update { preferences ->
         preferences[clearOnExitKey] = enabled
         preferences[clearCookiesOnExitKey] = cookies

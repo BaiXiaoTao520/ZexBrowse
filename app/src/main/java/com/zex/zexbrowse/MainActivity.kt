@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 消费后再清空 data，避免被 Compose 重组时重复读取；onCreate 同理
         extractUrl(intent)?.let { pendingUrl = it }
         intent.data = null
     }

@@ -42,7 +42,7 @@ class DownloadManager(private val context: Context) {
     private val client = OkHttpClient()
 
     suspend fun download(url: String, target: Uri): String = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build()
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "下载失败：${response.code}" }
             val responseBody = response.body ?: error("下载响应内容为空")
@@ -66,7 +66,7 @@ class DownloadManager(private val context: Context) {
         temporary.delete()
 
         try {
-            val request = Request.Builder().url(url).build()
+            val request = Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build()
             val call = client.newCall(request)
             val cancellationHandle = coroutineContext.job.invokeOnCompletion { cause ->
                 if (cause is CancellationException) call.cancel()

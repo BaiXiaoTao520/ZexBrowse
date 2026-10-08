@@ -122,6 +122,7 @@ import com.zex.zexbrowse.download.UpdateDownloadResult
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoView
 import java.text.SimpleDateFormat
@@ -165,6 +166,15 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // 首启提示里「设置外部存储」直接调起系统目录选择器并保存授权
+    val externalDirPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            val displayPath = uri.path?.substringAfterLast(":")?.let { "/storage/emulated/0/$it/" } ?: ""
+            scope.launch { settingsStore.downloadDirectory("external", uri.toString(), displayPath) }
+            Toast.makeText(context, "已设置为外部存储", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Android 17 (API 37) 起，访问局域网需 ACCESS_LOCAL_NETWORK 运行时权限（常量用字面量以避免 compileSdk 36 下不可用）
     LaunchedEffect(Unit) {
@@ -178,15 +188,32 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
     val goBack: () -> Unit = { if (navStack.size > 1) navStack = navStack.dropLast(1) }
     var tabsIncognito by remember { mutableStateOf(false) }
     var startupUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
+    // 首次启动引导：提醒下载目录为内部存储（仅首次，读取已持久化的真实值，避免默认初始值误触发）
+    var showFirstRunStorageHint by remember { mutableStateOf(false) }
     // 本应用是否已被用户设为默认浏览器（用于决定是否展示设置项入口）
     var isDefaultBrowser by remember { mutableStateOf(isAppDefaultBrowser(context)) }
 
     // 外部链接（默认浏览器 / 其它应用打开链接）：自动新建普通标签打开
+    // 兼容两种时序：冷启动时 incomingUrl 已就绪；或在 Compose 首帧前经 onNewIntent 递达
     LaunchedEffect(incomingUrl) {
         val target = incomingUrl ?: return@LaunchedEffect
         browserViewModel.newTab(initialUrl = target)
         navStack = listOf(Page.HOME, Page.BROWSER)
         onIncomingUrlHandled()
+    }
+    LaunchedEffect(Unit) {
+        val activity = context.findActivity() ?: return@LaunchedEffect
+        val activityIntent = activity.intent
+        if (activityIntent?.action == Intent.ACTION_VIEW) {
+            val uri = activityIntent.data
+            if (uri != null && (uri.scheme == "http" || uri.scheme == "https")) {
+                val target = uri.toString()
+                browserViewModel.newTab(initialUrl = target)
+                navStack = listOf(Page.HOME, Page.BROWSER)
+                activityIntent.data = null
+                onIncomingUrlHandled()
+            }
+        }
     }
 
     // 进入应用、切回前台（含从系统默认应用设置返回）时重新检测默认浏览器状态：
@@ -198,6 +225,15 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 首次启动提示：下载目录仍为内部存储时，建议改为外部存储（用户可选稍后）
+    // 稍作延迟，让更新检查先完成，避免与更新弹窗叠加
+    LaunchedEffect(Unit) {
+        val stored = settingsStore.settings.first()
+        if (stored.downloadDirectoryMode != "internal" || stored.storageHintShown) return@LaunchedEffect
+        kotlinx.coroutines.delay(1200)
+        if (startupUpdate == null) showFirstRunStorageHint = true
     }
 
     browserViewModel.browserSettings = settings
@@ -280,6 +316,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
                         settings = settings,
                         setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
                         onOpen = { address -> browserViewModel.load(address); navigate(Page.BROWSER) },
+                        onHistory = { navigate(Page.HISTORY) },
                         onSettings = { navigate(Page.SETTINGS) }
                     )
                     Page.BROWSER -> BrowserScreen(
@@ -363,6 +400,15 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
                 }
             }
             startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
+            if (showFirstRunStorageHint && startupUpdate == null) {
+                AlertDialog(
+                    onDismissRequest = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } },
+                    title = { Text("建议修改下载目录") },
+                    text = { Text("当前下载目录为内部存储（应用私有目录）。为保证大文件与外部存储访问，建议改为外部存储目录。") },
+                    confirmButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) }; externalDirPicker.launch(null) }) { Text("设置外部存储") } },
+                    dismissButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } }) { Text("稍后") } }
+                )
+            }
         }
     }
 }
@@ -380,7 +426,7 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 @Composable
-private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onSettings: () -> Unit) {
+private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { now = Date(); kotlinx.coroutines.delay(1_000) } }
@@ -391,7 +437,10 @@ private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Uni
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ZexBrowse", fontWeight = FontWeight.Bold); Text(SimpleDateFormat("yyyy年MM月dd日  HH:mm:ss", Locale.getDefault()).format(now), style = MaterialTheme.typography.labelSmall) } },
-                actions = { IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "设置") } }
+                actions = {
+                    IconButton(onClick = onHistory) { Icon(Icons.Default.History, "浏览历史") }
+                    IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "设置") }
+                }
             )
         }
     ) { padding ->
@@ -1071,7 +1120,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 2.1.0（24）")
+            Text("版本 2.1.5（25）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)

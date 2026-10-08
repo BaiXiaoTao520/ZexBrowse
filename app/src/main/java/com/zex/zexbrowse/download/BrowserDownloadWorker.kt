@@ -30,6 +30,10 @@ import java.io.FileOutputStream
 import java.io.OutputStream
 import java.security.MessageDigest
 
+// 部分镜像站/服务器会封禁 OkHttp 默认 User-Agent（返回 403/404），需伪装成浏览器 UA 才能下载
+internal const val DOWNLOAD_USER_AGENT =
+    "Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0"
+
 class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     private val database = BrowserDatabase.create(appContext)
     private val client = OkHttpClient()
@@ -43,7 +47,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         setForeground(createForegroundInfo(id, fileName, 0, false))
 
         try {
-            val call = client.newCall(Request.Builder().url(url).build())
+            val call = client.newCall(Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build())
             val cancellationHandle = kotlin.coroutines.coroutineContext.job.invokeOnCompletion { if (it is CancellationException) call.cancel() }
             val response = call.execute()
             response.use {
