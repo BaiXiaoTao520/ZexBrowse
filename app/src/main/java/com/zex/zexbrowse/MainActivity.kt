@@ -11,22 +11,22 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import com.zex.zexbrowse.ui.ZexBrowseApp
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
-    private var pendingUrl by mutableStateOf<String?>(null)
+    // 外部应用跳转过来的链接；用 StateFlow 传递，冷启动与已运行（onNewIntent）两种时序都能可靠送达
+    private val incomingUrl = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        pendingUrl = extractUrl(intent)
-        // 消费后清掉链接数据，避免配置变更（如旋转）重建时重复打开
-        intent?.data = null
+        consumeViewIntent(intent)
         setContent {
-            ZexBrowseApp(incomingUrl = pendingUrl, onIncomingUrlHandled = { pendingUrl = null })
+            val url by incomingUrl.collectAsState()
+            ZexBrowseApp(incomingUrl = url, onIncomingUrlHandled = { incomingUrl.value = null })
         }
         (application as ZexBrowseApplication).ensureDarkExtension()
     }
@@ -34,15 +34,21 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // 消费后再清空 data，避免被 Compose 重组时重复读取；onCreate 同理
-        extractUrl(intent)?.let { pendingUrl = it }
-        intent.data = null
+        consumeViewIntent(intent)
     }
 
     // 仅接收 http/https 外链（用户把本应用设为默认浏览器或从其它应用「用浏览器打开」时触发）
-    private fun extractUrl(intent: Intent?): String? {
-        if (intent?.action != Intent.ACTION_VIEW) return null
-        val uri = intent.data ?: return null
-        return uri.toString().takeIf { uri.scheme == "http" || uri.scheme == "https" }
+    private fun consumeViewIntent(intent: Intent?) {
+        if (intent == null || intent.action != Intent.ACTION_VIEW) return
+        val candidate = intent.data?.toString()?.takeIf(::isHttpUrl)
+            ?: intent.getStringExtra(Intent.EXTRA_TEXT)?.let(::extractHttpUrl)
+            ?: return
+        incomingUrl.value = candidate
+        // 消费后清掉 data，避免配置变更（如旋转）重建时重复打开
+        intent.data = null
     }
+
+    private fun isHttpUrl(value: String): Boolean = value.startsWith("http://") || value.startsWith("https://")
+
+    private fun extractHttpUrl(text: String): String? = Regex("https?://\\S+").find(text)?.value
 }
