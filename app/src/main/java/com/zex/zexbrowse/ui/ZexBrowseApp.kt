@@ -194,26 +194,11 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
     var isDefaultBrowser by remember { mutableStateOf(isAppDefaultBrowser(context)) }
 
     // 外部链接（默认浏览器 / 其它应用打开链接）：自动新建普通标签打开
-    // 兼容两种时序：冷启动时 incomingUrl 已就绪；或在 Compose 首帧前经 onNewIntent 递达
     LaunchedEffect(incomingUrl) {
         val target = incomingUrl ?: return@LaunchedEffect
         browserViewModel.newTab(initialUrl = target)
         navStack = listOf(Page.HOME, Page.BROWSER)
         onIncomingUrlHandled()
-    }
-    LaunchedEffect(Unit) {
-        val activity = context.findActivity() ?: return@LaunchedEffect
-        val activityIntent = activity.intent
-        if (activityIntent?.action == Intent.ACTION_VIEW) {
-            val uri = activityIntent.data
-            if (uri != null && (uri.scheme == "http" || uri.scheme == "https")) {
-                val target = uri.toString()
-                browserViewModel.newTab(initialUrl = target)
-                navStack = listOf(Page.HOME, Page.BROWSER)
-                activityIntent.data = null
-                onIncomingUrlHandled()
-            }
-        }
     }
 
     // 进入应用、切回前台（含从系统默认应用设置返回）时重新检测默认浏览器状态：
@@ -1120,7 +1105,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 2.1.5（25）")
+            Text("版本 2.1.6（26）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
