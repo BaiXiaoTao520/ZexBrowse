@@ -39,10 +39,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _tabs = MutableStateFlow<List<BrowserTab>>(emptyList()); val tabs = _tabs.asStateFlow()
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
+    // 界面层注入：网页请求麦克风时据此申请系统权限并回传结果
+    var mediaPermissionHandler: ((Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
     private var lastUserAgent: String? = null
+    // 待加载地址：因外部链接新建的标签，需等会话挂载到 GeckoView 后再 loadUri，
+    // 否则在 open() 后立即 loadUri 会因会话尚未附加而被丢弃（表现为空白新标签）
+    private val pendingInitialLoads = HashMap<String, String>()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
@@ -52,8 +58,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val (session, id) = createSession(incognito)
         _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
         session.open(runtime)
-        initialUrl?.let(::load)
+        if (initialUrl != null) {
+            val target = normalize(initialUrl)
+            pendingInitialLoads[id] = target
+            // 兑底：若因故未收到挂载回调，稍后仍尝试加载一次
+            mainHandler.postDelayed({ loadPending(id) }, 1200)
+        }
         return session
+    }
+
+    // GeckoView 视图挂载完会话后调用；此时 loadUri 才能可靠生效
+    fun onSessionAttached(id: String) { loadPending(id) }
+
+    private fun loadPending(id: String) {
+        val target = pendingInitialLoads.remove(id) ?: return
+        _tabs.value.firstOrNull { it.id == id }?.session?.let { session -> runCatching { session.loadUri(target) } }
     }
 
     // GeckoView requires onNewSession to return a session that has NOT been opened yet;
@@ -84,6 +103,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) { onExternalDownload(response.uri) }
+        })
+        session.setPermissionDelegate(object : GeckoSession.PermissionDelegate {
+            // 网页发起麦克风/摄像头等媒体请求时触发，转发给界面层去申请系统运行时权限
+            override fun onMediaPermissionRequest(
+                session: GeckoSession,
+                uri: String,
+                video: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                callback: GeckoSession.PermissionDelegate.MediaCallback
+            ) {
+                val handler = mediaPermissionHandler
+                if (handler != null && audio != null && audio.isNotEmpty()) handler(audio, callback) else callback.reject()
+            }
         })
         session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) update(id) { it.copy(url = url) } }
