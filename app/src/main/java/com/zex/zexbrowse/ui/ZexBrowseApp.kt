@@ -600,7 +600,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                 }
                 Box {
                     IconButton(onClick = { showBrowserMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
-                    DropdownMenu(expanded = showBrowserMenu, onDismissRequest = { showBrowserMenu = false }) {
+                    DropdownMenu(expanded = showBrowserMenu, onDismissRequest = { showBrowserMenu = false }, offset = androidx.compose.ui.unit.DpOffset(0.dp, 40.dp)) {
                         DropdownMenuItem(text = { Text("电脑 UA 模式") }, leadingIcon = { if (selectedTab?.session?.settings?.userAgentOverride?.contains("X11") == true) Icon(Icons.Default.Check, null) else Icon(Icons.Default.Computer, null) }, onClick = { viewModel.toggleDesktopUserAgent(); showBrowserMenu = false })
                         DropdownMenuItem(text = { Text("下载记录") }, leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { showBrowserMenu = false; onDownloads() })
                         DropdownMenuItem(text = { Text("浏览器设置") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showBrowserMenu = false; onSettings() })
