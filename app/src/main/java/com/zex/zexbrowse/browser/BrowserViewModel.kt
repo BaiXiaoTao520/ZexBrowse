@@ -43,6 +43,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
     private var lastUserAgent: String? = null
+    // 待加载地址：因外部链接新建的标签，需等会话挂载到 GeckoView 后再 loadUri，
+    // 否则在 open() 后立即 loadUri 会因会话尚未附加而被丢弃（表现为空白新标签）
+    private val pendingInitialLoads = HashMap<String, String>()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
@@ -52,8 +56,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val (session, id) = createSession(incognito)
         _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
         session.open(runtime)
-        initialUrl?.let(::load)
+        if (initialUrl != null) {
+            val target = normalize(initialUrl)
+            pendingInitialLoads[id] = target
+            // 兑底：若因故未收到挂载回调，稍后仍尝试加载一次
+            mainHandler.postDelayed({ loadPending(id) }, 1200)
+        }
         return session
+    }
+
+    // GeckoView 视图挂载完会话后调用；此时 loadUri 才能可靠生效
+    fun onSessionAttached(id: String) { loadPending(id) }
+
+    private fun loadPending(id: String) {
+        val target = pendingInitialLoads.remove(id) ?: return
+        _tabs.value.firstOrNull { it.id == id }?.session?.let { session -> runCatching { session.loadUri(target) } }
     }
 
     // GeckoView requires onNewSession to return a session that has NOT been opened yet;

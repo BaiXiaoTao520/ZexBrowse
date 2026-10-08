@@ -615,7 +615,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
                         factory = { GeckoView(it) },
-                        update = { view -> view.setSession(selectedTab.session) },
+                        update = { view ->
+                            view.setSession(selectedTab.session)
+                            // 会话挂载后再触发待加载地址（外部链接），否则 loadUri 会被丢弃
+                            view.post { viewModel.onSessionAttached(selectedTab.id) }
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
