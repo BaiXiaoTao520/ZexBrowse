@@ -124,6 +124,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -166,6 +167,16 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // 网页语音搜索等请求麦克风时：先弹出系统权限询问，用户允许后才向网页授权（默认不主动申请）
+    val pendingMicCallback = remember { mutableStateOf<GeckoSession.PermissionDelegate.MediaCallback?>(null) }
+    val pendingMicId = remember { mutableStateOf<String?>(null) }
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val callback = pendingMicCallback.value
+        val microphoneId = pendingMicId.value
+        pendingMicCallback.value = null
+        pendingMicId.value = null
+        if (callback != null) { if (granted) callback.grant(null, microphoneId) else callback.reject() }
+    }
     // 首启提示里「设置外部存储」直接调起系统目录选择器并保存授权
     val externalDirPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -222,6 +233,19 @@ fun ZexBrowseApp(incomingUrl: String? = null, onIncomingUrlHandled: () -> Unit =
     }
 
     browserViewModel.browserSettings = settings
+    // 网页请求麦克风的回调：已授权则直接放行，否则弹系统询问
+    browserViewModel.mediaPermissionHandler = { audio, callback ->
+        val activity = context.findActivity()
+        val microphoneId = audio.firstOrNull()?.id
+        val alreadyGranted = activity != null && androidx.core.content.ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (alreadyGranted) {
+            callback.grant(null, microphoneId)
+        } else {
+            pendingMicCallback.value = callback
+            pendingMicId.value = microphoneId
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
     LaunchedEffect(settings.autoCheckUpdates) {
         if (settings.autoCheckUpdates) startupUpdate = runCatching { UpdateChecker().latest() }.getOrNull()?.takeIf { UpdateChecker().isNewer(it.version) }
     }

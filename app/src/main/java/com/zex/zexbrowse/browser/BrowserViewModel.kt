@@ -39,6 +39,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _tabs = MutableStateFlow<List<BrowserTab>>(emptyList()); val tabs = _tabs.asStateFlow()
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
     var onExternalDownload: (String) -> Unit = {}
+    // 界面层注入：网页请求麦克风时据此申请系统权限并回传结果
+    var mediaPermissionHandler: ((Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
@@ -101,6 +103,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) { onExternalDownload(response.uri) }
+        })
+        session.setPermissionDelegate(object : GeckoSession.PermissionDelegate {
+            // 网页发起麦克风/摄像头等媒体请求时触发，转发给界面层去申请系统运行时权限
+            override fun onMediaPermissionRequest(
+                session: GeckoSession,
+                uri: String,
+                video: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                callback: GeckoSession.PermissionDelegate.MediaCallback
+            ) {
+                val handler = mediaPermissionHandler
+                if (handler != null && audio != null && audio.isNotEmpty()) handler(audio, callback) else callback.reject()
+            }
         })
         session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) update(id) { it.copy(url = url) } }
