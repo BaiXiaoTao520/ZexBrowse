@@ -23,12 +23,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 不受支持的系统：直接拦截，弹出不可取消的提示，仅能点「退出应用」后退出
+        UnsupportedSystem.detect()?.let { systemName ->
+            showUnsupportedDialog(systemName)
+            return
+        }
         consumeViewIntent(intent)
         setContent {
             val url by incomingUrl.collectAsState()
             ZexBrowseApp(incomingUrl = url, onIncomingUrlHandled = { incomingUrl.value = null })
         }
         (application as ZexBrowseApplication).ensureDarkExtension()
+    }
+
+    private fun showUnsupportedDialog(systemName: String) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("抱歉，暂不支持此系统")
+            .setMessage("检测到你的设备运行的是 $systemName 系统。由于该系统与当前版本的 ZexBrowse 存在兼容性问题，我们已停止对其提供支持。感谢你的理解。")
+            .setCancelable(false)
+            .setPositiveButton("退出应用") { _, _ -> finish() }
+            .show()
     }
 
     override fun onNewIntent(intent: Intent) {
