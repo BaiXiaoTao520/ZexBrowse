@@ -18,6 +18,11 @@ import com.zex.zexbrowse.ui.ZexBrowseApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.net.URLDecoder
 
+// 外链诊断：保存最近一次外部跳转 Intent 的关键信息，供设置页排查「外链打不开」类问题
+object ExternalLinkDiagnostics {
+    val last = MutableStateFlow("")
+}
+
 class MainActivity : ComponentActivity() {
     // 外部应用跳转过来的链接。用带自增序号的 StateFlow 传递：
     // 即使两次收到完全相同的链接、或在极短时序内连续到达，也能被可靠消费，不会丢失。
@@ -70,10 +75,26 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         val candidate = extractUrl(intent)
         Log.d(TAG, "consumeViewIntent action=${intent.action} data=${intent.data} extras=${intent.extras?.keySet()} extracted=$candidate")
+        recordDiagnostics(intent, candidate)
         if (candidate == null) return
         incomingUrl.value = UriRequest(++uriSeq, candidate)
         // 消费后清掉 data，避免配置变更（如旋转）重建时重复打开
         intent.data = null
+    }
+
+    // 记录本次跳转的原始信息（需在清空 intent.data 之前调用），便于在设置中查看
+    private fun recordDiagnostics(intent: Intent, extracted: String?) {
+        val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val builder = StringBuilder()
+        builder.append("时间：").append(time).append('\n')
+        builder.append("action：").append(intent.action).append('\n')
+        builder.append("data：").append(intent.data).append('\n')
+        builder.append("extras：\n")
+        intent.extras?.let { extras ->
+            for (key in extras.keySet()) builder.append("  ").append(key).append(" = ").append(extras.get(key)).append('\n')
+        }
+        builder.append("提取结果：").append(extracted ?: "（未提取到网址）")
+        ExternalLinkDiagnostics.last.value = builder.toString()
     }
 
     private fun extractUrl(intent: Intent): String? {
