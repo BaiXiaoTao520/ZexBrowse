@@ -120,6 +120,7 @@ import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.download.DownloadManager
 import com.zex.zexbrowse.download.UpdateDownloadResult
+import com.zex.zexbrowse.ExternalLinkDiagnostics
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -209,6 +210,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 以 incomingUrlSeq 为 key，保证即使目标 URL 与上次完全相同也能重新触发，不丢链接
     LaunchedEffect(incomingUrlSeq, incomingUrl) {
         val target = incomingUrl ?: return@LaunchedEffect
+        android.util.Log.d("ZexIntent", "LaunchedEffect external url=$target seq=$incomingUrlSeq")
         browserViewModel.newTab(initialUrl = target)
         navStack = listOf(Page.HOME, Page.BROWSER)
         onIncomingUrlHandled()
@@ -891,6 +893,7 @@ private fun SettingsScreen(
 ) {
     var showClearConfirmation by remember { mutableStateOf(false) }
     var showExitOptions by remember { mutableStateOf(false) }
+    var showLinkDiagnostics by remember { mutableStateOf(false) }
     var exitCookies by remember(settings.clearCookiesOnExit) { mutableStateOf(settings.clearCookiesOnExit) }
     var exitCache by remember(settings.clearCacheOnExit) { mutableStateOf(settings.clearCacheOnExit) }
     var exitHistory by remember(settings.clearHistoryOnExit) { mutableStateOf(settings.clearHistoryOnExit) }
@@ -916,6 +919,7 @@ private fun SettingsScreen(
             item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
             item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
             if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
+            item { ListItem(headlineContent = { Text("外链诊断") }, supportingContent = { Text("查看最近一次外部跳转传入的原始信息") }, leadingContent = { Icon(Icons.Default.Language, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showLinkDiagnostics = true }) }
             item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
         }
     }
@@ -940,6 +944,15 @@ private fun SettingsScreen(
                 }) { Text("确定") }
             },
             dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text("取消") } }
+        )
+    }
+    if (showLinkDiagnostics) {
+        val info by ExternalLinkDiagnostics.last.collectAsState()
+        AlertDialog(
+            onDismissRequest = { showLinkDiagnostics = false },
+            title = { Text("外链诊断") },
+            text = { Text(if (info.isBlank()) "尚未收到任何外部跳转。请从其它应用打开一个链接后再回来查看。" else info) },
+            confirmButton = { TextButton(onClick = { showLinkDiagnostics = false }) { Text("关闭") } }
         )
     }
 }

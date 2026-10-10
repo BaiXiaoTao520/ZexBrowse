@@ -61,6 +61,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         session.open(runtime)
         if (initialUrl != null) {
             pendingInitialLoads[id] = normalize(initialUrl)
+            android.util.Log.d("ZexIntent", "newTab initial url=${pendingInitialLoads[id]} id=$id")
             // 首次尝试由挂载回调触发；这里再排一次，防止回调缺失
             mainHandler.postDelayed({ onSessionAttached(id) }, 0)
         }
@@ -78,10 +79,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private fun loadPending(id: String) {
         val target = pendingInitialLoads[id] ?: return
         val tab = _tabs.value.firstOrNull { it.id == id }
-        if (tab == null || tab.loading || tab.url.isNotEmpty()) { clearPending(id); return }
+        // 不能用 tab.url / tab.loading 判断是否已开始加载：会话初挂载会先产生 about:blank，
+        // 把 tab.url 填成非空、并可能触发一次 onPageStart，从而提前清除待加载地址，
+        // 表现为「打开了浏览器页却是空白标签」。只在真正的 http(s) 页面开始加载时才停止重试。
+        if (tab == null) { clearPending(id); return }
         val attempt = (pendingLoadAttempts[id] ?: 0) + 1
         if (attempt > MaxPendingLoadAttempts) { clearPending(id); return }
         pendingLoadAttempts[id] = attempt
+        android.util.Log.d("ZexIntent", "loadPending id=$id attempt=$attempt url=$target")
         runCatching { tab.session.loadUri(target) }
         mainHandler.postDelayed({ loadPending(id) }, PendingLoadRetryMillis)
     }
@@ -112,7 +117,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val session = GeckoSession(sessionSettings.build())
         val id = UUID.randomUUID().toString()
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
-            override fun onPageStart(session: GeckoSession, url: String) { clearPending(id); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
+            override fun onPageStart(session: GeckoSession, url: String) { if (url.startsWith("http")) clearPending(id); android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url"); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
@@ -134,7 +139,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
         })
         session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {
-            override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) update(id) { it.copy(url = url) } }
+            override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) { android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url"); update(id) { it.copy(url = url) } } }
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 if (uri.isDownloadUrl()) {
@@ -262,7 +267,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     private companion object {
-        const val MaxPendingLoadAttempts = 12
+        const val MaxPendingLoadAttempts = 20
         const val PendingLoadRetryMillis = 400L
     }
     private fun update(id: String, transform: (BrowserTab) -> BrowserTab) {
