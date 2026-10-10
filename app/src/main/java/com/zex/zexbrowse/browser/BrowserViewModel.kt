@@ -48,6 +48,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 待加载地址：因外部链接新建的标签，需等会话挂载到 GeckoView 后再 loadUri，
     // 否则在 open() 后立即 loadUri 会因会话尚未附加而被丢弃（表现为空白新标签）
     private val pendingInitialLoads = HashMap<String, String>()
+    private val pendingLoadAttempts = HashMap<String, Int>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
@@ -59,20 +60,35 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
         session.open(runtime)
         if (initialUrl != null) {
-            val target = normalize(initialUrl)
-            pendingInitialLoads[id] = target
-            // 兑底：若因故未收到挂载回调，稍后仍尝试加载一次
-            mainHandler.postDelayed({ loadPending(id) }, 1200)
+            pendingInitialLoads[id] = normalize(initialUrl)
+            // 首次尝试由挂载回调触发；这里再排一次，防止回调缺失
+            mainHandler.postDelayed({ onSessionAttached(id) }, 0)
         }
         return session
     }
 
-    // GeckoView 视图挂载完会话后调用；此时 loadUri 才能可靠生效
-    fun onSessionAttached(id: String) { loadPending(id) }
+    // GeckoView 视图挂载完会话后调用；此时 loadUri 才能可靠生效。
+    // 仅在尚未开始尝试时触发，后续交给内部重试链，避免重复触发导致重复加载。
+    fun onSessionAttached(id: String) {
+        if (pendingInitialLoads.containsKey(id) && (pendingLoadAttempts[id] ?: 0) == 0) loadPending(id)
+    }
 
+    // 外部链接的待加载地址需重试：视图刚挂载时 display 可能尚未就绪，
+    // loadUri 会被静默丢弃，故在确认页面真正开始加载（onPageStart）前保留待加载项并重试。
     private fun loadPending(id: String) {
-        val target = pendingInitialLoads.remove(id) ?: return
-        _tabs.value.firstOrNull { it.id == id }?.session?.let { session -> runCatching { session.loadUri(target) } }
+        val target = pendingInitialLoads[id] ?: return
+        val tab = _tabs.value.firstOrNull { it.id == id }
+        if (tab == null || tab.loading || tab.url.isNotEmpty()) { clearPending(id); return }
+        val attempt = (pendingLoadAttempts[id] ?: 0) + 1
+        if (attempt > MaxPendingLoadAttempts) { clearPending(id); return }
+        pendingLoadAttempts[id] = attempt
+        runCatching { tab.session.loadUri(target) }
+        mainHandler.postDelayed({ loadPending(id) }, PendingLoadRetryMillis)
+    }
+
+    private fun clearPending(id: String) {
+        pendingInitialLoads.remove(id)
+        pendingLoadAttempts.remove(id)
     }
 
     // GeckoView requires onNewSession to return a session that has NOT been opened yet;
@@ -96,7 +112,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val session = GeckoSession(sessionSettings.build())
         val id = UUID.randomUUID().toString()
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
-            override fun onPageStart(session: GeckoSession, url: String) = update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) }
+            override fun onPageStart(session: GeckoSession, url: String) { clearPending(id); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
@@ -150,6 +166,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
+        clearPending(id)
         runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
@@ -243,6 +260,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
             incognitoContextId = null
         }
+    }
+    private companion object {
+        const val MaxPendingLoadAttempts = 12
+        const val PendingLoadRetryMillis = 400L
     }
     private fun update(id: String, transform: (BrowserTab) -> BrowserTab) {
         // 内容未变化时不重新赋值，避免 StateFlow 发出等价列表导致无谓重组
