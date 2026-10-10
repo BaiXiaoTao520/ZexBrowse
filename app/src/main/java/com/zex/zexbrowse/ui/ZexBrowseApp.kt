@@ -209,6 +209,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 以 incomingUrlSeq 为 key，保证即使目标 URL 与上次完全相同也能重新触发，不丢链接
     LaunchedEffect(incomingUrlSeq, incomingUrl) {
         val target = incomingUrl ?: return@LaunchedEffect
+        android.util.Log.d("ZexIntent", "LaunchedEffect external url=$target seq=$incomingUrlSeq")
         browserViewModel.newTab(initialUrl = target)
         navStack = listOf(Page.HOME, Page.BROWSER)
         onIncomingUrlHandled()
