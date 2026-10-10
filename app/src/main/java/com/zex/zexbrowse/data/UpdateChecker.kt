@@ -6,6 +6,7 @@
 
 package com.zex.zexbrowse.data
 
+import com.zex.zexbrowse.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -54,7 +55,7 @@ class UpdateChecker(private val client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    fun isNewer(remote: String, local: String = "2.1.10"): Boolean {
+    fun isNewer(remote: String, local: String = BuildConfig.VERSION_NAME): Boolean {
         val remoteParts = versionParts(remote)
         val localParts = versionParts(local)
         val count = maxOf(remoteParts.size, localParts.size)
