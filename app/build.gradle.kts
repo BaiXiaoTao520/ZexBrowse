@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.zex.zexbrowse"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.zex.zexbrowse"
