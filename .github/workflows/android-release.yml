@@ -63,7 +63,7 @@ jobs:
           set -e
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           (yes | "$SDKMANAGER" --licenses >/dev/null 2>&1) || true
-          "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0"
+          "$SDKMANAGER" --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
 
       - name: 解码 APK 签名密钥
         env:
