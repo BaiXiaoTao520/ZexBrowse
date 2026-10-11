@@ -12,8 +12,8 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 26
         targetSdk = 36
-        versionCode = 32
-        versionName = "2.5.0"
+        versionCode = 33
+        versionName = "2.5.5"
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -72,7 +72,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material3:material3:1.5.0-beta01")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.datastore:datastore-preferences:1.1.2")
     implementation("androidx.room:room-runtime:2.7.0")
