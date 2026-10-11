@@ -44,6 +44,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+    // 记录已应用到会话的 UA，避免重复设置导致无谓刷新；
+    // 初始化为 null 表示“尚未应用任何 UA”，首次应用时按需设置
     private var lastUserAgent: String? = null
     // 待加载地址：因外部链接新建的标签，需等会话挂载到 GeckoView 后再 loadUri，
     // 否则在 open() 后立即 loadUri 会因会话尚未附加而被丢弃（表现为空白新标签）
@@ -230,9 +232,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 仅当 UA 真正变化时才重新加载，避免无谓刷新打断正在播放的音频
         if (ua == lastUserAgent) return
         lastUserAgent = ua
-        selected?.session?.let { session ->
-            runCatching { session.settings?.setUserAgentOverride(ua) }
-            runCatching { session.reload() }
+        selected?.let { tab ->
+            runCatching { tab.session.settings?.setUserAgentOverride(ua) }
+            // 该标签正等待外部链接首次加载（会话尚未/刚挂载）时不能 reload：
+            // 此时会话内容仍为 about:blank，reload 会打断 pendingInitialLoads 的加载重试，
+            // 表现为自定义 UA 下从外部应用打开链接只停在空白页。
+            if (!pendingInitialLoads.containsKey(tab.id)) runCatching { tab.session.reload() }
         }
     }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }

@@ -22,6 +22,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -84,6 +85,7 @@ import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -646,7 +648,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                     }
                 }
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    LinearWavyProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    WavyProgressBar(progress = selectedTab.progress / 100f, modifier = Modifier.fillMaxWidth())
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
@@ -846,7 +848,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
                 Text(item.fileName, style = MaterialTheme.typography.titleMedium)
                 Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
                 if (running) {
-                    LinearWavyProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    WavyProgressBar(progress = item.progress / 100f, modifier = Modifier.fillMaxWidth())
                     Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
                     TextButton(onClick = onCancel) { Text("取消下载") }
                 } else if (item.status == "completed" || item.status == "hash_mismatch") {
@@ -1158,7 +1160,7 @@ private fun ExpressiveProgressScreen(onBack: () -> Unit) {
                 LinearProgressIndicator(progress = { 0.7f }, modifier = Modifier.fillMaxWidth(), gapSize = 4.dp)
             }
             ExpressiveDemoItem("确定态波浪进度条 · 振幅 0.5、波长 24dp（50%）") {
-                LinearWavyProgressIndicator(progress = { 0.5f }, modifier = Modifier.fillMaxWidth(), amplitude = { 0.5f }, wavelength = 24.dp)
+                WavyProgressBar(progress = 0.5f, modifier = Modifier.fillMaxWidth())
             }
             ExpressiveDemoItem("不确定态波浪进度条 · 无限滚动") {
                 LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
@@ -1168,6 +1170,19 @@ private fun ExpressiveProgressScreen(onBack: () -> Unit) {
             }
         }
     }
+}
+
+// 全局统一的波浪进度条：固定振幅 0.5、波长 24dp，并对进度变化做平滑过渡，
+// 避免每次进度跳变时动效中断产生停顿感（LinearWavyProgressIndicator 默认不做进度过渡动画）
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
+    val animated by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = WavyProgressIndicatorDefaults.ProgressAnimationSpec,
+        label = "wavyProgress"
+    )
+    LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, amplitude = { 0.5f }, wavelength = 24.dp)
 }
 
 @Composable
@@ -1229,6 +1244,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -1272,10 +1288,10 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                 }
                 if (downloading) {
                     if (connecting) {
-                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
                         Text("正在连接服务器…")
                     } else {
-                        LinearWavyProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
                         Text("正在下载：$progress%")
                     }
                 }
