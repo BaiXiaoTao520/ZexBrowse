@@ -80,6 +80,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -326,7 +327,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         }
     }
 
-    MaterialTheme(colorScheme = colorScheme) {
+    MaterialExpressiveTheme(colorScheme = colorScheme) {
         Surface {
             AnimatedContent(targetState = page, label = "page") { destination ->
                 when (destination) {
@@ -645,7 +646,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                     }
                 }
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    LinearProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    LinearWavyProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
@@ -845,7 +846,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
                 Text(item.fileName, style = MaterialTheme.typography.titleMedium)
                 Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
                 if (running) {
-                    LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    LinearWavyProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
                     Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
                     TextButton(onClick = onCancel) { Text("取消下载") }
                 } else if (item.status == "completed" || item.status == "hash_mismatch") {
@@ -1271,10 +1272,10 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                 }
                 if (downloading) {
                     if (connecting) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
                         Text("正在连接服务器…")
                     } else {
-                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        LinearWavyProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
                         Text("正在下载：$progress%")
                     }
                 }
