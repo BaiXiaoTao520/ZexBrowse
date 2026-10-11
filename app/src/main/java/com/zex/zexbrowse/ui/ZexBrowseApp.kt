@@ -71,12 +71,17 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -133,7 +138,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
+enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, EXPRESSIVE_DEMO, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -322,7 +327,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         }
     }
 
-    MaterialTheme(colorScheme = colorScheme) {
+    MaterialExpressiveTheme(colorScheme = colorScheme) {
         Surface {
             AnimatedContent(targetState = page, label = "page") { destination ->
                 when (destination) {
@@ -366,6 +371,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
                         onUserAgent = { navigate(Page.USER_AGENT) },
                         onAbout = { navigate(Page.ABOUT) },
+                        onExpressiveDemo = { navigate(Page.EXPRESSIVE_DEMO) },
                         onBack = goBack
                     )
                     Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
@@ -410,6 +416,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         },
                         onBack = goBack
                     )
+                    Page.EXPRESSIVE_DEMO -> ExpressiveProgressScreen(onBack = goBack)
                     Page.ABOUT -> AboutScreen(settings = settings, setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } }, onBack = goBack)
                 }
             }
@@ -639,7 +646,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
                     }
                 }
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    LinearProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    LinearWavyProgressIndicator(progress = { selectedTab.progress / 100f }, modifier = Modifier.fillMaxWidth())
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
@@ -839,7 +846,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
                 Text(item.fileName, style = MaterialTheme.typography.titleMedium)
                 Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
                 if (running) {
-                    LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    LinearWavyProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
                     Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
                     TextButton(onClick = onCancel) { Text("取消下载") }
                 } else if (item.status == "completed" || item.status == "hash_mismatch") {
@@ -890,6 +897,7 @@ private fun SettingsScreen(
     onSearchEngine: () -> Unit,
     onUserAgent: () -> Unit,
     onAbout: () -> Unit,
+    onExpressiveDemo: () -> Unit,
     onBack: () -> Unit
 ) {
     var showClearConfirmation by remember { mutableStateOf(false) }
@@ -921,6 +929,7 @@ private fun SettingsScreen(
             item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
             if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
             item { ListItem(headlineContent = { Text("外链诊断") }, supportingContent = { Text("查看最近一次外部跳转传入的原始信息") }, leadingContent = { Icon(Icons.Default.Language, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showLinkDiagnostics = true }) }
+            item { ListItem(headlineContent = { Text("Material 3 Expressive 演示") }, supportingContent = { Text("查看四种 Expressive 进度条与加载动效") }, leadingContent = { Icon(Icons.Default.Refresh, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExpressiveDemo)) }
             item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
         }
     }
@@ -1137,6 +1146,38 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
     )
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ExpressiveProgressScreen(onBack: () -> Unit) {
+    Scaffold(topBar = { TopAppBar(title = { Text("Material 3 Expressive") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp)
+        ) {
+            ExpressiveDemoItem("确定态直线进度条 · 带停止指示器与轨道间隙（70%）") {
+                LinearProgressIndicator(progress = { 0.7f }, modifier = Modifier.fillMaxWidth(), gapSize = 4.dp)
+            }
+            ExpressiveDemoItem("确定态波浪进度条 · 振幅 0.5、波长 24dp（50%）") {
+                LinearWavyProgressIndicator(progress = { 0.5f }, modifier = Modifier.fillMaxWidth(), amplitude = { 0.5f }, wavelength = 24.dp)
+            }
+            ExpressiveDemoItem("不确定态波浪进度条 · 无限滚动") {
+                LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
+            }
+            ExpressiveDemoItem("形变加载指示器 · 在 SoftBurst 与 Cookie9Sided 之间形变") {
+                LoadingIndicator(modifier = Modifier.size(48.dp), polygons = listOf(MaterialShapes.SoftBurst, MaterialShapes.Cookie9Sided))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpressiveDemoItem(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        content()
+    }
+}
+
 @Composable
 private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -1231,10 +1272,10 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                 }
                 if (downloading) {
                     if (connecting) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
                         Text("正在连接服务器…")
                     } else {
-                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        LinearWavyProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
                         Text("正在下载：$progress%")
                     }
                 }
