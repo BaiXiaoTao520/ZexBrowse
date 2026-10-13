@@ -10,10 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "com.zex.zexbrowse"
-        minSdk = 26
+        minSdk = 28
         targetSdk = 36
-        versionCode = 34
-        versionName = "2.6.0"
+        versionCode = 35
+        versionName = "2.6.5"
         ndk { abiFilters += "arm64-v8a" }
     }
 

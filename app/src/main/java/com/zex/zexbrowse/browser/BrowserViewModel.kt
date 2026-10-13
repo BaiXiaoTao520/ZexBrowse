@@ -38,7 +38,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     val history = database.dao().history()
     private val _tabs = MutableStateFlow<List<BrowserTab>>(emptyList()); val tabs = _tabs.asStateFlow()
     private val _selectedId = MutableStateFlow<String?>(null); val selectedId = _selectedId.asStateFlow()
-    var onExternalDownload: (String) -> Unit = {}
+    // 界面层注入：网页/外链触发下载时回调（用于弹出下载确认框）。
+    // 冷启动直接打开直链时，该回调可能在界面就绪前就被触发，此时先缓存，待界面注入后补发，避免下载被丢弃。
+    private var externalDownloadHandler: ((String) -> Unit)? = null
+    private val bufferedExternalDownloads = ArrayDeque<String>()
+    var onExternalDownload: (String) -> Unit
+        get() = externalDownloadHandler ?: {}
+        set(value) {
+            externalDownloadHandler = value
+            while (bufferedExternalDownloads.isNotEmpty()) value(bufferedExternalDownloads.removeFirst())
+        }
+    private fun notifyExternalDownload(url: String) {
+        val handler = externalDownloadHandler
+        if (handler != null) handler(url) else bufferedExternalDownloads.addLast(url)
+    }
     // 界面层注入：网页请求麦克风时据此申请系统权限并回传结果
     var mediaPermissionHandler: ((Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
     var browserSettings = BrowserSettings()
@@ -80,6 +93,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // loadUri 会被静默丢弃，故在确认页面真正开始加载（onPageStart）前保留待加载项并重试。
     private fun loadPending(id: String) {
         val target = pendingInitialLoads[id] ?: return
+        // 直链下载地址不会被加载成页面：交由下载流程处理一次即可。
+        // 否则每次重试都会被 onLoadRequest 判定为下载并再次弹窗，导致弹窗反复出现、无法关闭。
+        if (target.isDownloadUrl()) {
+            clearPending(id)
+            notifyExternalDownload(target)
+            return
+        }
         val tab = _tabs.value.firstOrNull { it.id == id }
         // 不能用 tab.url / tab.loading 判断是否已开始加载：会话初挂载会先产生 about:blank，
         // 把 tab.url 填成非空、并可能触发一次 onPageStart，从而提前清除待加载地址，
@@ -125,7 +145,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         })
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
-            override fun onExternalResponse(session: GeckoSession, response: WebResponse) { onExternalDownload(response.uri) }
+            override fun onExternalResponse(session: GeckoSession, response: WebResponse) { clearPending(id); notifyExternalDownload(response.uri) }
         })
         session.setPermissionDelegate(object : GeckoSession.PermissionDelegate {
             // 网页发起麦克风/摄像头等媒体请求时触发，转发给界面层去申请系统运行时权限
@@ -145,7 +165,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 if (uri.isDownloadUrl()) {
-                    onExternalDownload(uri)
+                    clearPending(id)
+                    notifyExternalDownload(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -153,7 +174,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 if (uri.isDownloadUrl()) {
-                    onExternalDownload(uri)
+                    clearPending(id)
+                    notifyExternalDownload(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -162,7 +184,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) = update(id) { it.copy(canGoForward = canGoForward) }
             override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
                 if (uri.isDownloadUrl()) {
-                    onExternalDownload(uri)
+                    notifyExternalDownload(uri)
                     return null
                 }
                 return GeckoResult.fromValue(createNewSessionForUri(uri, incognito))
