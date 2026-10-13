@@ -140,7 +140,9 @@ data class BrowserSettings(
     val externalDownloadDisplayPath: String = "",
     val quickSites: String = "",
     val autoCheckUpdates: Boolean = true,
-    val storageHintShown: Boolean = false
+    val storageHintShown: Boolean = false,
+    val clipboardReadPolicy: String = "ask",
+    val sitePermissions: Map<String, String> = emptyMap()
 )
 
 class SettingsStore(private val context: Context) {
@@ -166,6 +168,8 @@ class SettingsStore(private val context: Context) {
     private val quickSitesKey = stringPreferencesKey("quick_sites")
     private val autoCheckUpdatesKey = booleanPreferencesKey("auto_check_updates")
     private val storageHintShownKey = booleanPreferencesKey("storage_hint_shown")
+    private val clipboardReadPolicyKey = stringPreferencesKey("clipboard_read_policy")
+    private val sitePermissionsKey = stringPreferencesKey("site_permissions")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -190,7 +194,12 @@ class SettingsStore(private val context: Context) {
             externalDownloadDisplayPath = preferences[externalDownloadDisplayPathKey] ?: "",
             quickSites = preferences[quickSitesKey] ?: "",
             autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true,
-            storageHintShown = preferences[storageHintShownKey] ?: false
+            storageHintShown = preferences[storageHintShownKey] ?: false,
+            clipboardReadPolicy = preferences[clipboardReadPolicyKey] ?: "ask",
+            sitePermissions = (preferences[sitePermissionsKey] ?: "")
+                .split("\n")
+                .filter { it.isNotBlank() && it.contains('=') }
+                .associate { it.substringBefore('=') to it.substringAfter('=') }
         )
     }
 
@@ -221,6 +230,13 @@ class SettingsStore(private val context: Context) {
     }
     suspend fun autoCheckUpdates(value: Boolean) = update { it[autoCheckUpdatesKey] = value }
     suspend fun storageHintShown(value: Boolean) = update { it[storageHintShownKey] = value }
+    suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
+    suspend fun setSitePermission(key: String, value: String) = update { preferences ->
+        val current = preferences[sitePermissionsKey] ?: ""
+        val entries = current.split("\n").filter { it.isNotBlank() && it.substringBefore('=') != key }
+        preferences[sitePermissionsKey] = (entries + "$key=$value").joinToString("\n")
+    }
+    suspend fun clearSitePermissions() = update { it[sitePermissionsKey] = "" }
     suspend fun clearOnExit(enabled: Boolean, cookies: Boolean, cache: Boolean, history: Boolean) = update { preferences ->
         preferences[clearOnExitKey] = enabled
         preferences[clearCookiesOnExitKey] = cookies
