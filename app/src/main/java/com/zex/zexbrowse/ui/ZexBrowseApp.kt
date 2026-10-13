@@ -77,7 +77,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LoadingIndicator
@@ -140,7 +139,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, EXPRESSIVE_DEMO, ABOUT }
+enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -373,7 +372,6 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
                         onUserAgent = { navigate(Page.USER_AGENT) },
                         onAbout = { navigate(Page.ABOUT) },
-                        onExpressiveDemo = { navigate(Page.EXPRESSIVE_DEMO) },
                         onBack = goBack
                     )
                     Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
@@ -418,7 +416,6 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         },
                         onBack = goBack
                     )
-                    Page.EXPRESSIVE_DEMO -> ExpressiveProgressScreen(onBack = goBack)
                     Page.ABOUT -> AboutScreen(settings = settings, setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } }, onBack = goBack)
                 }
             }
@@ -899,7 +896,6 @@ private fun SettingsScreen(
     onSearchEngine: () -> Unit,
     onUserAgent: () -> Unit,
     onAbout: () -> Unit,
-    onExpressiveDemo: () -> Unit,
     onBack: () -> Unit
 ) {
     var showClearConfirmation by remember { mutableStateOf(false) }
@@ -931,7 +927,6 @@ private fun SettingsScreen(
             item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
             if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
             item { ListItem(headlineContent = { Text("外链诊断") }, supportingContent = { Text("查看最近一次外部跳转传入的原始信息") }, leadingContent = { Icon(Icons.Default.Language, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showLinkDiagnostics = true }) }
-            item { ListItem(headlineContent = { Text("Material 3 Expressive 演示") }, supportingContent = { Text("查看四种 Expressive 进度条与加载动效") }, leadingContent = { Icon(Icons.Default.Refresh, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExpressiveDemo)) }
             item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
         }
     }
@@ -1148,32 +1143,8 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun ExpressiveProgressScreen(onBack: () -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text("Material 3 Expressive") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(28.dp)
-        ) {
-            ExpressiveDemoItem("确定态直线进度条 · 带停止指示器与轨道间隙（70%）") {
-                LinearProgressIndicator(progress = { 0.7f }, modifier = Modifier.fillMaxWidth(), gapSize = 4.dp)
-            }
-            ExpressiveDemoItem("确定态波浪进度条 · 振幅 0.5、波长 24dp（50%）") {
-                WavyProgressBar(progress = 0.5f, modifier = Modifier.fillMaxWidth())
-            }
-            ExpressiveDemoItem("不确定态波浪进度条 · 无限滚动") {
-                LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
-            }
-            ExpressiveDemoItem("形变加载指示器 · 在 SoftBurst 与 Cookie9Sided 之间形变") {
-                LoadingIndicator(modifier = Modifier.size(48.dp), polygons = listOf(MaterialShapes.SoftBurst, MaterialShapes.Cookie9Sided))
-            }
-        }
-    }
-}
-
-// 全局统一的波浪进度条：固定振幅 0.5、波长 24dp，并对进度变化做平滑过渡，
-// 避免每次进度跳变时动效中断产生停顿感（LinearWavyProgressIndicator 默认不做进度过渡动画）
+// 全局统一的波浪进度条：波长 24dp，振幅沿用官方规则（进度 10% 以下、95% 以上收平为直线，中段才起波），
+// 并对进度变化做平滑过渡，避免每次进度跳变时动效中断产生停顿感（LinearWavyProgressIndicator 默认不做进度过渡动画）
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
@@ -1182,17 +1153,10 @@ private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
         animationSpec = WavyProgressIndicatorDefaults.ProgressAnimationSpec,
         label = "wavyProgress"
     )
-    LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, amplitude = { 0.5f }, wavelength = 24.dp)
+    LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, wavelength = 24.dp)
 }
 
-@Composable
-private fun ExpressiveDemoItem(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        content()
-    }
-}
-
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -1201,6 +1165,9 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     var update by remember { mutableStateOf<ReleaseInfo?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var contributors by remember { mutableStateOf<List<com.zex.zexbrowse.data.Contributor>?>(null) }
+    var contributorsLoading by remember { mutableStateOf(false) }
+    // 加载请求令牌：用于丢弃被用户提前关闭弹窗后的过期结果，避免弹窗被加载结果重新弹回
+    var contributorsRequest by remember { mutableStateOf(0) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1212,7 +1179,18 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
                 Spacer(Modifier.width(8.dp))
                 Text("GitHub 仓库")
             }
-            OutlinedButton(onClick = { scope.launch { contributors = runCatching { UpdateChecker().contributors() }.getOrElse { emptyList() } } }) { Text("贡献者") }
+            OutlinedButton(onClick = {
+                val request = ++contributorsRequest
+                contributors = null
+                contributorsLoading = true
+                scope.launch {
+                    val result = runCatching { UpdateChecker().contributors() }.getOrElse { emptyList() }
+                    if (contributorsRequest == request) {
+                        contributors = result
+                        contributorsLoading = false
+                    }
+                }
+            }) { Text("贡献者") }
             SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates)
             OutlinedButton(
                 onClick = {
@@ -1231,7 +1209,32 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
         }
     }
 
-    contributors?.let { list -> AlertDialog(onDismissRequest = { contributors = null }, title = { Text("贡献者") }, text = { if (list.isEmpty()) Text("暂无贡献者信息") else LazyColumn { items(list) { contributor -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = contributor.avatarUrl, contentDescription = contributor.name, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop); Spacer(Modifier.width(12.dp)); Text("${contributor.name} · ${contributor.contributions} 次提交") } } } }, confirmButton = { TextButton(onClick = { contributors = null }) { Text("确定") } }) }
+    val dismissContributors = { contributorsRequest++; contributors = null; contributorsLoading = false }
+    if (contributors != null || contributorsLoading) {
+        AlertDialog(
+            onDismissRequest = dismissContributors,
+            title = { Text("贡献者") },
+            text = {
+                val list = contributors
+                if (list == null) {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                        LoadingIndicator(modifier = Modifier.size(48.dp), polygons = listOf(MaterialShapes.SoftBurst, MaterialShapes.Cookie9Sided))
+                    }
+                } else if (list.isEmpty()) {
+                    Text("暂无贡献者信息")
+                } else {
+                    LazyColumn { items(list) { contributor ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(model = contributor.avatarUrl, contentDescription = contributor.name, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                            Spacer(Modifier.width(12.dp))
+                            Text("${contributor.name} · ${contributor.contributions} 次提交")
+                        }
+                    } }
+                }
+            },
+            confirmButton = { TextButton(onClick = dismissContributors) { Text("确定") } }
+        )
+    }
 
     update?.let { release -> UpdateDialog(release = release, onDismiss = { update = null }) }
     message?.let { content ->
