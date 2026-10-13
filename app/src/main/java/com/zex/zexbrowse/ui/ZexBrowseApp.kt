@@ -139,7 +139,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, ABOUT }
+enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -341,6 +341,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     )
                     Page.BROWSER -> BrowserScreen(
                         viewModel = browserViewModel,
+                        settingsStore = settingsStore,
                         onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
                         onDownloads = { navigate(Page.DOWNLOADS) },
                         onSettings = { navigate(Page.SETTINGS) }
@@ -371,6 +372,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
                         onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
                         onUserAgent = { navigate(Page.USER_AGENT) },
+                        onClipboardPermission = { navigate(Page.CLIPBOARD_PERMISSION) },
                         onAbout = { navigate(Page.ABOUT) },
                         onBack = goBack
                     )
@@ -416,6 +418,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         },
                         onBack = goBack
                     )
+                    Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(settings = settings, onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } }, onClear = { scope.launch { settingsStore.clearSitePermissions() } }, onBack = goBack)
                     Page.ABOUT -> AboutScreen(settings = settings, setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } }, onBack = goBack)
                 }
             }
@@ -569,7 +572,7 @@ private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -586,12 +589,57 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // 网页文件选择：单/多选两个启动器，选中后回传给网页
+    var filePickerCallback by remember { mutableStateOf<((Array<Uri>?) -> Unit)?>(null) }
+    val filePickerSingle = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val callback = filePickerCallback; filePickerCallback = null
+        callback?.invoke(if (uri != null) arrayOf(uri) else null)
+    }
+    val filePickerMultiple = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val callback = filePickerCallback; filePickerCallback = null
+        callback?.invoke(uris.toTypedArray())
+    }
+    // 网页打开外部应用：待确认的链接及其跳转动作
+    var pendingExternalAppUri by remember { mutableStateOf<String?>(null) }
+    var pendingExternalApp by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // 网站读取剪贴板：待确认的站点与结果回调
+    var clipboardReadSite by remember { mutableStateOf<String?>(null) }
+    var clipboardReadCallback by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
 
     LaunchedEffect(selectedTab?.url) {
         if (!inputFocused) input = selectedTab?.url.orEmpty()
     }
 
     viewModel.onExternalDownload = { url -> scope.launch { downloadUrl = url } }
+    // 网页请求选择文件 → 拉起系统文件选择器（原生文件应用），选完回传网页
+    viewModel.filePickerHandler = { mimeTypes, multiple, onResult ->
+        val mimes = (mimeTypes?.toList()?.takeIf { it.isNotEmpty() } ?: listOf("*/*")).toTypedArray()
+        filePickerCallback = onResult
+        if (multiple) filePickerMultiple.launch(mimes) else filePickerSingle.launch(mimes)
+    }
+    // 网页请求打开外部应用 → 先弹窗询问是否允许跳转
+    viewModel.externalAppHandler = { uri ->
+        pendingExternalApp = {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+        }
+        pendingExternalAppUri = uri
+    }
+    // 网站请求读取剪贴板 → 按全局策略处理：始终允许/拒绝直接放行，询问则弹窗并将选择按站点永久记住
+    viewModel.clipboardReadHandler = { site, callback ->
+        scope.launch {
+            val stored = settingsStore.settings.first()
+            when (stored.clipboardReadPolicy) {
+                "allow" -> callback(true)
+                "deny" -> callback(false)
+                else -> when (stored.sitePermissions[site]) {
+                    "allow" -> callback(true)
+                    "deny" -> callback(false)
+                    else -> { clipboardReadCallback = callback; clipboardReadSite = site }
+                }
+            }
+        }
+    }
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
@@ -698,6 +746,31 @@ private fun BrowserScreen(viewModel: BrowserViewModel, onTabs: (Boolean) -> Unit
             title = { Text("APK 哈希校验") },
             text = { Text(hashResult!!) },
             confirmButton = { TextButton(onClick = { hashResult = null }) { Text("确定") } }
+        )
+    }
+    if (pendingExternalAppUri != null) {
+        AlertDialog(
+            onDismissRequest = { pendingExternalAppUri = null; pendingExternalApp = null },
+            title = { Text("打开外部应用？") },
+            text = { Text("此链接将交给设备上的其它应用打开：\n${pendingExternalAppUri}") },
+            confirmButton = { TextButton(onClick = { pendingExternalApp?.invoke(); pendingExternalAppUri = null; pendingExternalApp = null }) { Text("打开") } },
+            dismissButton = { TextButton(onClick = { pendingExternalAppUri = null; pendingExternalApp = null }) { Text("取消") } }
+        )
+    }
+    if (clipboardReadSite != null) {
+        val site = clipboardReadSite!!
+        val finishClipboard: (Boolean, Boolean) -> Unit = { allow, remember ->
+            clipboardReadCallback?.invoke(allow)
+            if (remember) scope.launch { settingsStore.setSitePermission(site, if (allow) "allow" else "deny") }
+            clipboardReadSite = null
+            clipboardReadCallback = null
+        }
+        AlertDialog(
+            onDismissRequest = { finishClipboard(false, false) },
+            title = { Text("允许读取剪贴板？") },
+            text = { Text("${clipboardHost(site)} 请求读取你的剪贴板内容。") },
+            confirmButton = { TextButton(onClick = { finishClipboard(true, true) }) { Text("始终允许") } },
+            dismissButton = { TextButton(onClick = { finishClipboard(false, true) }) { Text("拒绝") } }
         )
     }
 }
@@ -895,6 +968,7 @@ private fun SettingsScreen(
     onDownloadDirectory: () -> Unit,
     onSearchEngine: () -> Unit,
     onUserAgent: () -> Unit,
+    onClipboardPermission: () -> Unit,
     onAbout: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -925,6 +999,7 @@ private fun SettingsScreen(
             item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
             item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
             item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
+            item { ListItem(headlineContent = { Text("剪贴板读取权限") }, supportingContent = { Text(clipboardPolicyLabel(settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Default.Info, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboardPermission)) }
             if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
             item { ListItem(headlineContent = { Text("外链诊断") }, supportingContent = { Text("查看最近一次外部跳转传入的原始信息") }, leadingContent = { Icon(Icons.Default.Language, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showLinkDiagnostics = true }) }
             item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
@@ -1050,6 +1125,25 @@ private fun UserAgentScreen(settings: BrowserSettings, onSelect: (String) -> Uni
 private fun CustomUserAgentScreen(settings: BrowserSettings, onSave: (String, String) -> Unit, onBack: () -> Unit) {
     EditorScreen("自定义浏览器标识", settings.customUserAgentTitle, settings.customUserAgent, "浏览器标识内容", onSave, onBack)
 }
+
+@Composable
+private fun ClipboardPermissionScreen(settings: BrowserSettings, onSelect: (String) -> Unit, onClear: () -> Unit, onBack: () -> Unit) {
+    SelectionScreen("剪贴板读取权限", onBack) {
+        item { ChoiceItem("每次询问（弹窗并记住选择）", settings.clipboardReadPolicy == "ask") { onSelect("ask") } }
+        item { ChoiceItem("始终允许", settings.clipboardReadPolicy == "allow") { onSelect("allow") } }
+        item { ChoiceItem("始终拒绝", settings.clipboardReadPolicy == "deny") { onSelect("deny") } }
+        item { Text("网站请求读取剪贴板时：始终允许/拒绝将直接放行或拦截；每次询问则会弹出提示，并将你的选择按网站永久记住。", style = MaterialTheme.typography.bodySmall) }
+        item { OutlinedButton(onClick = onClear) { Text("清除已记住的网站权限") } }
+    }
+}
+
+private fun clipboardPolicyLabel(policy: String) = when (policy) {
+    "allow" -> "始终允许"
+    "deny" -> "始终拒绝"
+    else -> "每次询问"
+}
+
+private fun clipboardHost(uri: String): String = runCatching { java.net.URI(uri).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri
 
 @Composable
 private fun SelectionScreen(title: String, onBack: () -> Unit, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {

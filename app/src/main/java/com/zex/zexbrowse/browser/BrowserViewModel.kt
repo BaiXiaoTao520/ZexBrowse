@@ -8,6 +8,7 @@ package com.zex.zexbrowse.browser
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.ZexBrowseApplication
@@ -52,6 +53,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val handler = externalDownloadHandler
         if (handler != null) handler(url) else bufferedExternalDownloads.addLast(url)
     }
+    // 界面层注入：网页请求选择文件（<input type="file"> 等）时回调。
+    // 参数：mimeTypes（可为空）、是否允许多选、结果回调（用户选中的文件 URI，取消为 null）。
+    var filePickerHandler: ((Array<out String>?, Boolean, (Array<Uri>?) -> Unit) -> Unit)? = null
+    // 界面层注入：网页请求打开外部应用（非 http(s) 的自定义 scheme 等）时回调，由界面弹窗询问用户是否允许跳转。
+    var externalAppHandler: ((String) -> Unit)? = null
+    // 界面层注入：网站请求读取剪贴板时回调。参数：发起请求的站点、结果回调（true=允许，false=拒绝）。
+    // 是否先询问用户由界面层根据用户的剪贴板读取策略决定，本层只负责转发与返回结果。
+    var clipboardReadHandler: ((String, (Boolean) -> Unit) -> Unit)? = null
     // 界面层注入：网页请求麦克风时据此申请系统权限并回传结果
     var mediaPermissionHandler: ((Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
     var browserSettings = BrowserSettings()
@@ -152,6 +161,43 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) { pendingDownloads[id] = response.uri; clearPending(id); notifyExternalDownload(response.uri) }
         })
+        session.setPromptDelegate(object : GeckoSession.PromptDelegate {
+            // 网页触发文件选择（如上传图片/视频）时，交由界面层拉起系统文件选择器，选择完成后回传给网页。
+            override fun onFilePrompt(
+                session: GeckoSession,
+                prompt: GeckoSession.PromptDelegate.FilePrompt
+            ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> {
+                val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                val handler = filePickerHandler
+                if (handler == null) {
+                    result.complete(prompt.dismiss())
+                    return result
+                }
+                handler(prompt.mimeTypes, prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE) { uris ->
+                    if (uris == null || uris.isEmpty()) result.complete(prompt.dismiss())
+                    else result.complete(prompt.confirm(application, uris))
+                }
+                return result
+            }
+        })
+        session.setSelectionActionDelegate(object : GeckoSession.SelectionActionDelegate {
+            // 网站请求读取剪贴板：交由界面层弹出询问框（按站点永久记住允许/拒绝），再回传结果。
+            override fun onShowClipboardPermissionRequest(
+                session: GeckoSession,
+                permission: GeckoSession.SelectionActionDelegate.ClipboardPermission
+            ): GeckoResult<AllowOrDeny> {
+                val result = GeckoResult<AllowOrDeny>()
+                val handler = clipboardReadHandler
+                if (handler == null) {
+                    result.complete(AllowOrDeny.DENY)
+                    return result
+                }
+                handler(permission.uri) { allow ->
+                    result.complete(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
+                }
+                return result
+            }
+        })
         session.setPermissionDelegate(object : GeckoSession.PermissionDelegate {
             // 网页发起麦克风/摄像头等媒体请求时触发，转发给界面层去申请系统运行时权限
             override fun onMediaPermissionRequest(
@@ -175,6 +221,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     notifyExternalDownload(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
+                if (uri.isExternalAppUri()) { requestExternalApp(uri); return GeckoResult.fromValue(AllowOrDeny.DENY) }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
@@ -193,6 +240,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     notifyExternalDownload(uri)
                     return null
                 }
+                if (uri.isExternalAppUri()) { requestExternalApp(uri); return null }
                 return GeckoResult.fromValue(createNewSessionForUri(uri, incognito))
             }
         })
@@ -329,6 +377,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return listOf(".apk", ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".pdf", ".exe", ".msi", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".iso", ".img", ".dmg")
             .any { path.endsWith(it) }
     }
+    // 需交给外部应用打开的链接：非浏览器自身处理的 scheme（http/https 及本地/内部 scheme 之外的自定义 scheme、intent: 等）
+    private fun String.isExternalAppUri(): Boolean {
+        val scheme = substringBefore("://").substringBefore(':').lowercase()
+        if (scheme.isEmpty()) return false
+        return scheme !in listOf("http", "https", "file", "about", "data", "blob", "javascript", "resource", "moz-extension", "content", "jar", "wyciwyg", "view-source")
+    }
+    private fun requestExternalApp(uri: String) { externalAppHandler?.invoke(uri) }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
     private fun userAgentOverride(settings: BrowserSettings): String? {
         if (settings.simplifiedUserAgent) return "Mozilla/5.0 (Android) Gecko/131 Firefox/131"
