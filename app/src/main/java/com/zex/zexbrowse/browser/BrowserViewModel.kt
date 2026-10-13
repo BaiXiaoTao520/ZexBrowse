@@ -64,6 +64,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 否则在 open() 后立即 loadUri 会因会话尚未附加而被丢弃（表现为空白新标签）
     private val pendingInitialLoads = HashMap<String, String>()
     private val pendingLoadAttempts = HashMap<String, Int>()
+    // 记录「地址是下载直链、未能加载成页面」的标签对应的下载网址。
+    // 这类标签会话停在 about:blank，刷新无意义；改为用工具栏刷新按钮手动重新触发下载弹窗。
+    private val pendingDownloads = HashMap<String, String>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
@@ -96,6 +99,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 直链下载地址不会被加载成页面：交由下载流程处理一次即可。
         // 否则每次重试都会被 onLoadRequest 判定为下载并再次弹窗，导致弹窗反复出现、无法关闭。
         if (target.isDownloadUrl()) {
+            // 记录该标签对应的下载直链，供工具栏刷新按钮手动重新触发下载
+            pendingDownloads[id] = target
             clearPending(id)
             notifyExternalDownload(target)
             return
@@ -139,13 +144,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val session = GeckoSession(sessionSettings.build())
         val id = UUID.randomUUID().toString()
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
-            override fun onPageStart(session: GeckoSession, url: String) { if (url.startsWith("http")) clearPending(id); android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url"); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
+            override fun onPageStart(session: GeckoSession, url: String) { if (url.startsWith("http")) { clearPending(id); pendingDownloads.remove(id) }; android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url"); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
-            override fun onExternalResponse(session: GeckoSession, response: WebResponse) { clearPending(id); notifyExternalDownload(response.uri) }
+            override fun onExternalResponse(session: GeckoSession, response: WebResponse) { pendingDownloads[id] = response.uri; clearPending(id); notifyExternalDownload(response.uri) }
         })
         session.setPermissionDelegate(object : GeckoSession.PermissionDelegate {
             // 网页发起麦克风/摄像头等媒体请求时触发，转发给界面层去申请系统运行时权限
@@ -165,6 +170,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 if (uri.isDownloadUrl()) {
+                    pendingDownloads[id] = uri
                     clearPending(id)
                     notifyExternalDownload(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
@@ -196,6 +202,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
         clearPending(id)
+        pendingDownloads.remove(id)
         runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
@@ -263,8 +270,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
-    fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }; fun reload() { selected?.session?.reload() }
+    fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
+    fun reload() {
+        val tab = selected ?: return
+        val pending = pendingDownloads[tab.id]
+        // 标签地址是下载直链（未被加载成页面、会被 onLoadRequest 拒绝）时，刷新按钮改为手动重新触发下载弹窗：
+        // 既避免自动重试导致「点取消后反复弹出」，也避免一次性弹框被取消后「再也弹不出来」。
+        if (pending != null) notifyExternalDownload(pending) else tab.session.reload()
+    }
     fun enqueueDownload(url: String, fileName: String, expectedHash: String) {
+        selected?.let { tab -> if (pendingDownloads[tab.id] == url) pendingDownloads.remove(tab.id) }
         viewModelScope.launch {
             downloadScheduler.enqueue(
                 url, fileName, expectedHash,
