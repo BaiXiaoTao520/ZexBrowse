@@ -175,7 +175,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 }
                 handler(prompt.mimeTypes, prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE) { uris ->
                     if (uris == null || uris.isEmpty()) result.complete(prompt.dismiss())
-                    else result.complete(prompt.confirm(application, uris))
+                    else result.complete(prompt.confirm(getApplication<Application>(), uris))
                 }
                 return result
             }
