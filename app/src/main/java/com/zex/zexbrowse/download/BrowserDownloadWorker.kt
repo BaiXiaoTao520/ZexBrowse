@@ -136,10 +136,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     }
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = applicationContext.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "浏览器下载", NotificationManager.IMPORTANCE_LOW))
-        }
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "浏览器下载", NotificationManager.IMPORTANCE_LOW))
     }
 
     companion object {
