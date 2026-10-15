@@ -12,9 +12,28 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 36
-        versionCode = 36
-        versionName = "2.7.0"
+        versionCode = 37
+        versionName = "6.0.0"
         ndk { abiFilters += "arm64-v8a" }
+
+        // Mirror 酱资源 ID：不从源码硬编码（避免公开仓库暴露），
+        // 由构建环境变量 MIRRORCHYAN_RES_ID 注入（CI 用 Secrets，本地可在 ~/.gradle/gradle.properties 配置）。
+        // 未注入时为空，Mirror 酱相关入口自动隐藏。
+        val mirrorResId: String = (System.getenv("MIRRORCHYAN_RES_ID")
+            ?: project.findProperty("mirrorchyan.resId")?.toString()
+            ?: "").trim()
+        // 转义反斜杠与双引号，保证生成到 BuildConfig 里是合法的 Java 字符串字面量
+        val escapedResId = mirrorResId.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "MIRRORCHYAN_RES_ID", "\"$escapedResId\"")
+
+        // Mirror 酱功能总开关。
+        // 平台方建议新项目先稳定运行一段时间后再接入，避免平台上出现大量空 rid 与低完成度条目，
+        // 因此默认关闭：关闭时应用不发起任何 Mirror 酱请求，相关入口置灰显示「暂不可用」。
+        // 日后平台确认接入后，只需把仓库变量 MIRRORCHYAN_ENABLED 设为 true（无需改代码）。
+        val mirrorEnabled = (System.getenv("MIRRORCHYAN_ENABLED")
+            ?: project.findProperty("mirrorchyan.enabled")?.toString()
+            ?: "false").trim().equals("true", ignoreCase = true)
+        buildConfigField("boolean", "MIRRORCHYAN_ENABLED", mirrorEnabled.toString())
     }
 
     splits {

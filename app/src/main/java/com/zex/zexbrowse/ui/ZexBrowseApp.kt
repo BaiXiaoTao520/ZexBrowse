@@ -22,11 +22,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -63,10 +67,23 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Cookie
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.ManageSearch
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -121,9 +138,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.DownloadEntity
+import com.zex.zexbrowse.data.MirrorChyan
+import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
+import com.zex.zexbrowse.data.recommendedApps
 import com.zex.zexbrowse.download.DownloadManager
 import com.zex.zexbrowse.download.UpdateDownloadResult
 import com.zex.zexbrowse.ExternalLinkDiagnostics
@@ -139,7 +159,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, THEME_PERSONALIZATION, DOWNLOAD_SETTINGS, SEARCH_BROWSER_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -203,9 +223,12 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         }
     }
     var navStack by rememberSaveable { mutableStateOf(listOf(Page.HOME)) }
+    // 导航方向：true=前进（入栈），false=后退（出栈）。
+    // 不能靠比较栈深度推断（状态更新时序不可靠），而是在导航时显式记录。
+    var navForward by remember { mutableStateOf(true) }
     val page = navStack.last()
-    val navigate: (Page) -> Unit = { navStack = navStack + it }
-    val goBack: () -> Unit = { if (navStack.size > 1) navStack = navStack.dropLast(1) }
+    val navigate: (Page) -> Unit = { navForward = true; navStack = navStack + it }
+    val goBack: () -> Unit = { if (navStack.size > 1) { navForward = false; navStack = navStack.dropLast(1) } }
     var tabsIncognito by remember { mutableStateOf(false) }
     var startupUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
     // 首次启动引导：提醒下载目录为内部存储（仅首次，读取已持久化的真实值，避免默认初始值误触发）
@@ -244,6 +267,14 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
 
     browserViewModel.browserSettings = settings
+    // 网页权限策略读取（剪贴板 / 麦克风 / 外部应用跳转），供引擎层在回调时即时判断
+    browserViewModel.policyProvider = { key ->
+        when (key) {
+            "mic" -> settings.micPolicy
+            "external_app" -> settings.externalAppPolicy
+            else -> settings.clipboardReadPolicy
+        }
+    }
     // 网页请求麦克风的回调：已授权则直接放行，否则弹系统询问
     browserViewModel.mediaPermissionHandler = { audio, callback ->
         val activity = context.findActivity()
@@ -258,7 +289,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         }
     }
     LaunchedEffect(settings.autoCheckUpdates) {
-        if (settings.autoCheckUpdates) startupUpdate = runCatching { UpdateChecker().latest() }.getOrNull()?.takeIf { UpdateChecker().isNewer(it.version) }
+        if (settings.autoCheckUpdates) {
+            val checker = UpdateChecker(cdk = settings.mirrorCdk)
+            startupUpdate = runCatching { checker.latest() }.getOrNull()?.takeIf { checker.isNewer(it.version) }
+        }
     }
     DisposableEffect(
         lifecycleOwner,
@@ -330,14 +364,27 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
 
     MaterialExpressiveTheme(colorScheme = colorScheme) {
         Surface {
-            AnimatedContent(targetState = page, label = "page") { destination ->
+            // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
+            AnimatedContent(
+                targetState = page,
+                transitionSpec = {
+                    val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
+                    slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+                },
+                label = "page"
+            ) { destination ->
                 when (destination) {
                     Page.HOME -> HomeScreen(
                         settings = settings,
                         setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
                         onOpen = { address -> browserViewModel.load(address); navigate(Page.BROWSER) },
                         onHistory = { navigate(Page.HISTORY) },
-                        onSettings = { navigate(Page.SETTINGS) }
+                        onSettings = { navigate(Page.SETTINGS) },
+                        onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
+                    )
+                    Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
+                        browserViewModel = browserViewModel,
+                        onBack = goBack
                     )
                     Page.BROWSER -> BrowserScreen(
                         viewModel = browserViewModel,
@@ -350,16 +397,6 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     Page.SETTINGS -> SettingsScreen(
                         settings = settings,
                         isDefaultBrowser = isDefaultBrowser,
-                        setMode = { scope.launch { settingsStore.mode(it) } },
-                        setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
-                        setDynamic = { scope.launch { settingsStore.dynamic(it) } },
-                        setCookie = { scope.launch { settingsStore.cookies(it) } },
-                        setApkHash = { scope.launch { settingsStore.apkHash(it) } },
-                        setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
-                        clearBrowserData = {
-                            browserViewModel.clearBrowserData()
-                            Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
-                        },
                         onSetDefaultBrowser = {
                             // 设为默认浏览器由用户在系统设置中自愿选择
                             val launched = runCatching {
@@ -367,13 +404,50 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                             }.isSuccess
                             if (!launched) Toast.makeText(context, "请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器", Toast.LENGTH_LONG).show()
                         },
-                        onDownloads = { navigate(Page.DOWNLOADS) },
                         onHistory = { navigate(Page.HISTORY) },
+                        onThemePersonalization = { navigate(Page.THEME_PERSONALIZATION) },
+                        onDownloadSettings = { navigate(Page.DOWNLOAD_SETTINGS) },
+                        onSearchBrowserSettings = { navigate(Page.SEARCH_BROWSER_SETTINGS) },
+                        onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
+                        onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
+                        onAbout = { navigate(Page.ABOUT) },
+                        onBack = goBack
+                    )
+                    Page.THEME_PERSONALIZATION -> ThemePersonalizationScreen(
+                        settings = settings,
+                        setMode = { scope.launch { settingsStore.mode(it) } },
+                        setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
+                        setDynamic = { scope.launch { settingsStore.dynamic(it) } },
+                        onBack = goBack
+                    )
+                    Page.DOWNLOAD_SETTINGS -> DownloadSettingsScreen(
+                        settings = settings,
+                        setApkHash = { scope.launch { settingsStore.apkHash(it) } },
+                        onDownloads = { navigate(Page.DOWNLOADS) },
                         onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
+                        onBack = goBack
+                    )
+                    Page.SEARCH_BROWSER_SETTINGS -> SearchBrowserSettingsScreen(
+                        settings = settings,
                         onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
                         onUserAgent = { navigate(Page.USER_AGENT) },
-                        onClipboardPermission = { navigate(Page.CLIPBOARD_PERMISSION) },
-                        onAbout = { navigate(Page.ABOUT) },
+                        onBack = goBack
+                    )
+                    Page.COOKIE_SETTINGS -> CookieSettingsScreen(
+                        settings = settings,
+                        setCookie = { scope.launch { settingsStore.cookies(it) } },
+                        setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
+                        clearBrowserData = {
+                            browserViewModel.clearBrowserData()
+                            Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
+                        },
+                        onBack = goBack
+                    )
+                    Page.WEB_PERMISSIONS -> WebPermissionsScreen(
+                        settings = settings,
+                        onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
+                        onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
+                        onMic = { navigate(Page.MIC_PERMISSION) },
                         onBack = goBack
                     )
                     Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
@@ -418,8 +492,37 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         },
                         onBack = goBack
                     )
-                    Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(settings = settings, onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } }, onClear = { scope.launch { settingsStore.clearSitePermissions() } }, onBack = goBack)
-                    Page.ABOUT -> AboutScreen(settings = settings, setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } }, onBack = goBack)
+                    Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
+                        settings = settings,
+                        onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
+                        onClear = {
+                            scope.launch { settingsStore.clearSitePermissions() }
+                            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+                        },
+                        onBack = goBack
+                    )
+                    Page.MIC_PERMISSION -> SimplePolicyScreen(
+                        title = "麦克风权限",
+                        description = "网页请求使用麦克风（如语音搜索、语音输入）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会先弹出系统权限询问。",
+                        options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
+                        current = settings.micPolicy,
+                        onSelect = { scope.launch { settingsStore.micPolicy(it) } },
+                        onBack = goBack
+                    )
+                    Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
+                        title = "跳转至外部 APP 权限",
+                        description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
+                        options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
+                        current = settings.externalAppPolicy,
+                        onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
+                        onBack = goBack
+                    )
+                    Page.ABOUT -> AboutScreen(
+                        settings = settings,
+                        setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
+                        setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
+                        onBack = goBack
+                    )
                 }
             }
             startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
@@ -449,7 +552,7 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 @Composable
-private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit) {
+private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { now = Date(); kotlinx.coroutines.delay(1_000) } }
@@ -474,6 +577,9 @@ private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Uni
             Spacer(Modifier.height(48.dp))
             AddressInput(value = query, onValueChange = { query = it }, onSubmit = { onOpen(query) })
             Spacer(Modifier.height(32.dp))
+            // 应用推荐入口：点击进入推荐列表（位于快捷访问上方）
+            AppRecommendationEntry(onClick = onAppRecommendations)
+            Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("快捷访问", style = MaterialTheme.typography.titleMedium)
                 TextButton(onClick = { showQuickSiteDialog = true }) { Text("编辑") }
@@ -497,6 +603,196 @@ private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Uni
     }
 }
 
+/**
+ * 应用推荐列表页。
+ *
+ * 下载行为沿用本应用已有的下载体系：
+ * - APK 直链 → 走应用内下载（下载目录遵循「下载设置」的配置）；
+ * - 网页/网盘类链接 → 交给系统处理，由系统默认浏览器或用户选择的应用打开。
+ */
+@Composable
+private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var detail by remember { mutableStateOf<RecommendedApp?>(null) }
+    // 已触发下载的条目 → 其在下载记录中的 id，用于完成后直接安装
+    var downloadingApp by remember { mutableStateOf<RecommendedApp?>(null) }
+    var downloadId by remember { mutableStateOf<String?>(null) }
+    var downloadDone by remember { mutableStateOf(false) }
+    val downloads by browserViewModel.downloads.collectAsState(initial = emptyList())
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("应用推荐") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Text("Zex 开发者为您精选以下应用", style = MaterialTheme.typography.titleMedium)
+            }
+            item {
+                Text("发现适合你的工具与创作体验", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            items(recommendedApps) { app ->
+                RecommendationCard(app = app) { detail = app }
+            }
+        }
+    }
+
+    detail?.let { app ->
+        RecommendationInfoDialog(
+            app = app,
+            onDownload = {
+                detail = null
+                if (app.isApk) {
+                    downloadingApp = app
+                    downloadDone = false
+                    browserViewModel.enqueueDownload(app.downloadUrl, app.fileName, "") { id -> downloadId = id }
+                } else {
+                    openInBrowser(context, app.downloadUrl)
+                }
+            },
+            onDismiss = { detail = null }
+        )
+    }
+
+    downloadingApp?.let { app ->
+        val record = downloads.firstOrNull { it.id == downloadId }
+        // 后台下载完成后自动切换到「安装」状态
+        if ((record?.status == "completed" || record?.status == "hash_mismatch") && !downloadDone) downloadDone = true
+        RecommendationDownloadDialog(
+            app = app,
+            record = record,
+            finished = downloadDone,
+            onInstall = { record?.let { openDownload(context, it) } },
+            onDismiss = { downloadingApp = null; downloadId = null; downloadDone = false }
+        )
+    }
+}
+
+/** 交给系统打开网页类链接（系统默认浏览器或用户选择的应用） */
+private fun openInBrowser(context: android.content.Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+}
+
+/**
+ * 推荐条目卡片。
+ *
+ * 水波纹说明：[Card] 的 onClick 重载内部用卡片自身的 [shape] 作为水波纹边界，
+ * 因此水波纹与卡片圆角完全一致；同时 [Card] 默认 clip 内容，图标方块也不会溢出。
+ */
+@Composable
+private fun RecommendationCard(app: RecommendedApp, onClick: () -> Unit) {
+    val shape = MaterialTheme.shapes.large
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = shape) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 图标小正方形背景
+            Surface(
+                modifier = Modifier.size(44.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) { Icon(app.icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(app.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(app.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * 推荐详情弹窗：展示完整说明，统一一个「下载」按钮：
+ * APK 直链走应用内下载，网页/网盘链接交给系统打开。
+ */
+@Composable
+private fun RecommendationInfoDialog(
+    app: RecommendedApp,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(app.icon, null)
+                Spacer(Modifier.width(10.dp))
+                Text(app.displayName)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())
+            ) {
+                Text(app.description)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDownload) {
+                Icon(if (app.isApk) Icons.Default.Download else Icons.Default.Language, null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (app.isApk) "下载" else "浏览器打开")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+/**
+ * 应用内下载进度弹窗：进度直接取自下载记录（与「下载设置 → 下载记录」同一数据源），
+ * 下载完成后原地切换为「安装」。
+ */
+@Composable
+private fun RecommendationDownloadDialog(
+    app: RecommendedApp,
+    record: DownloadEntity?,
+    finished: Boolean,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val failed = record?.status == "failed" || record?.status == "cancelled"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("下载 ${app.displayName}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (finished) {
+                    Text("下载完成，可直接安装；文件也已保存到「下载设置」指定的目录。")
+                    record?.sha256?.takeIf { it.isNotBlank() }?.let { hash ->
+                        Text("SHA-256：$hash", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (failed) {
+                    Text(record?.errorMessage?.ifBlank { "下载失败" } ?: "下载失败")
+                } else {
+                    val progress = record?.progress ?: 0
+                    // 与下载记录卡片一致，统一使用带平滑过渡的波浪进度条
+                    WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
+                    Text(if (progress > 0) "正在下载：$progress%" else "正在准备下载…")
+                }
+            }
+        },
+        confirmButton = {
+            if (finished) {
+                TextButton(onClick = onInstall) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("立即安装") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (finished) "关闭" else "后台下载") } }
+    )
+}
+
 private fun decodeQuickSites(raw: String): List<QuickSite> {
     if (raw.isBlank()) return defaultQuickSites
     val parsed = raw.split("\n").mapNotNull { line ->
@@ -505,6 +801,42 @@ private fun decodeQuickSites(raw: String): List<QuickSite> {
         if (title.isEmpty() || url.isEmpty()) null else QuickSite(title, url, title.take(1))
     }
     return parsed.ifEmpty { defaultQuickSites }
+}
+
+/**
+ * 首页「应用推荐」入口卡片。
+ *
+ * 水波纹说明：使用 [Card] 的 onClick 重载（内部自带与卡片形状一致的 ripple），
+ * 不再用 Modifier.clickable（矩形水波纹会超出圆角卡片边界造成错位）。
+ */
+@Composable
+private fun AppRecommendationEntry(onClick: () -> Unit) {
+    val shape = MaterialTheme.shapes.extraLarge
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 图标小方块背景
+            Surface(
+                modifier = Modifier.size(44.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Apps, null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("应用推荐", style = MaterialTheme.typography.titleMedium)
+                Text("精选工具与创作应用，一点即览", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable
@@ -539,7 +871,7 @@ private fun QuickSiteGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onRe
         items(sites.chunked(2)) { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { site ->
-                    ElevatedCard(Modifier.weight(1f).height(92.dp).clickable { onOpen(site.url) }) {
+                    ElevatedCard(onClick = { onOpen(site.url) }, modifier = Modifier.weight(1f).height(92.dp)) {
                         Column(Modifier.padding(14.dp)) {
                             Text(site.icon, style = MaterialTheme.typography.headlineSmall)
                             Text(site.title)
@@ -617,13 +949,20 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settingsStore: SettingsSt
         filePickerCallback = onResult
         if (multiple) filePickerMultiple.launch(mimes) else filePickerSingle.launch(mimes)
     }
-    // 网页请求打开外部应用 → 先弹窗询问是否允许跳转
+    // 网页请求打开外部应用 → 按「跳转至外部 APP 权限」策略处理：始终拒绝直接拦截，始终允许直接跳转，否则弹窗询问
     viewModel.externalAppHandler = { uri ->
-        pendingExternalApp = {
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        when (settings.externalAppPolicy) {
+            "deny" -> Unit
+            "allow" -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+            else -> {
+                pendingExternalApp = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+                }
+                pendingExternalAppUri = uri
+            }
         }
-        pendingExternalAppUri = uri
     }
     // 网站请求读取剪贴板 → 按全局策略处理：始终允许/拒绝直接放行，询问则弹窗并将选择按站点永久记住
     viewModel.clipboardReadHandler = { site, callback ->
@@ -793,7 +1132,7 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
             item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text("普通标签") }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text("无痕标签") }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
             if (displayedTabs.isEmpty()) item { Text(if (incognitoOnly) "暂无无痕标签" else "暂无普通标签") }
             items(displayedTabs, key = { it.id }) { tab ->
-                ElevatedCard(Modifier.fillMaxWidth().clickable { viewModel.select(tab.id); onBack() }) {
+                ElevatedCard(onClick = { viewModel.select(tab.id); onBack() }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(Modifier.size(52.dp), color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
                             Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Language, null) }
@@ -844,7 +1183,7 @@ private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit,
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(history, key = { it.id }) { item ->
-                    ElevatedCard(Modifier.fillMaxWidth().clickable { onOpen(item.url) }) {
+                    ElevatedCard(onClick = { onOpen(item.url) }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(item.title.ifBlank { item.url }, maxLines = 1)
                             Text(item.url, maxLines = 1, style = MaterialTheme.typography.bodySmall)
@@ -954,79 +1293,71 @@ private fun formatBytes(value: Long): String = when {
 @Composable
 private fun SettingsScreen(
     settings: BrowserSettings,
-    setMode: (String) -> Unit,
-    setForceDarkWeb: (Boolean) -> Unit,
-    setDynamic: (Boolean) -> Unit,
-    setCookie: (Boolean) -> Unit,
-    setApkHash: (Boolean) -> Unit,
-    setClearOnExit: (Boolean, Boolean, Boolean, Boolean) -> Unit,
-    clearBrowserData: () -> Unit,
     isDefaultBrowser: Boolean,
     onSetDefaultBrowser: () -> Unit,
-    onDownloads: () -> Unit,
     onHistory: () -> Unit,
-    onDownloadDirectory: () -> Unit,
-    onSearchEngine: () -> Unit,
-    onUserAgent: () -> Unit,
-    onClipboardPermission: () -> Unit,
+    onThemePersonalization: () -> Unit,
+    onDownloadSettings: () -> Unit,
+    onSearchBrowserSettings: () -> Unit,
+    onCookieSettings: () -> Unit,
+    onWebPermissions: () -> Unit,
     onAbout: () -> Unit,
     onBack: () -> Unit
 ) {
-    var showClearConfirmation by remember { mutableStateOf(false) }
-    var showExitOptions by remember { mutableStateOf(false) }
     var showLinkDiagnostics by remember { mutableStateOf(false) }
-    var exitCookies by remember(settings.clearCookiesOnExit) { mutableStateOf(settings.clearCookiesOnExit) }
-    var exitCache by remember(settings.clearCacheOnExit) { mutableStateOf(settings.clearCacheOnExit) }
-    var exitHistory by remember(settings.clearHistoryOnExit) { mutableStateOf(settings.clearHistoryOnExit) }
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            item { ThemeSelector(settings.darkMode, setMode) }
-            item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后仅传入深色偏好，由网页自行适配", settings.forceDarkWeb, setForceDarkWeb) }
-            item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic) }
+            // 主题及网页个性化：主题 / 强制适配深色模式 / 动态莫奈取色
+            item {
+                SettingsEntry(
+                    title = "主题及网页个性化",
+                    subtitle = "主题、强制适配深色模式、动态莫奈取色",
+                    icon = Icons.Rounded.Palette,
+                    onClick = onThemePersonalization
+                )
+            }
+            // 下载设置：下载记录 / 下载文件路径 / APK SHA-256 校验
+            item {
+                SettingsEntry(
+                    title = "下载设置",
+                    subtitle = "下载记录、保存路径、APK 校验",
+                    icon = Icons.Default.Download,
+                    onClick = onDownloadSettings
+                )
+            }
+            // 搜索引擎与浏览设置：搜索引擎 / 浏览器标识
+            item {
+                SettingsEntry(
+                    title = "搜索引擎与浏览设置",
+                    subtitle = "搜索引擎、浏览器标识",
+                    icon = Icons.Rounded.ManageSearch,
+                    onClick = onSearchBrowserSettings
+                )
+            }
+            // Cookie 设置：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据
+            item {
+                SettingsEntry(
+                    title = "Cookie 设置",
+                    subtitle = cookieSettingsSubtitle(settings),
+                    icon = Icons.Rounded.Cookie,
+                    onClick = onCookieSettings
+                )
+            }
+            // 网页权限管理：剪贴板 / 跳转至外部 APP / 麦克风
+            item {
+                SettingsEntry(
+                    title = "网页权限管理",
+                    subtitle = "剪贴板读取、外部 APP 跳转、麦克风",
+                    icon = Icons.Rounded.Security,
+                    onClick = onWebPermissions
+                )
+            }
             item { HorizontalDivider() }
-            item { SwitchRow("启用 Cookie", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie) }
-            item { ListItem(headlineContent = { Text("无痕会话") }, supportingContent = { Text("通过浏览页底部新建标签按钮创建；无痕会话不保存历史、Cookie 或缓存。") }) }
-            item { ListItem(headlineContent = { Text("清除缓存与 Cookie") }, leadingContent = { Icon(Icons.Default.Delete, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
-            item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit) { showExitOptions = true } }
-            item { HorizontalDivider() }
-            item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
             item { ListItem(headlineContent = { Text("浏览历史") }, supportingContent = { Text("查看最近访问的网页") }, leadingContent = { Icon(Icons.Default.History, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onHistory)) }
-            item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(when {
-                settings.downloadDirectoryMode == "external" && settings.externalDownloadDisplayPath.isBlank() -> "外部目录（未设置）"
-                settings.downloadDirectoryMode == "external" -> settings.externalDownloadDisplayPath
-                else -> "内部应用目录"
-            }) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
-            item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
-            item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
-            item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash) }
-            item { ListItem(headlineContent = { Text("剪贴板读取权限") }, supportingContent = { Text(clipboardPolicyLabel(settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Default.Info, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboardPermission)) }
             if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
             item { ListItem(headlineContent = { Text("外链诊断") }, supportingContent = { Text("查看最近一次外部跳转传入的原始信息") }, leadingContent = { Icon(Icons.Default.Language, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showLinkDiagnostics = true }) }
-            item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
+            item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
         }
-    }
-    if (showClearConfirmation) ConfirmDialog("清除浏览器数据？", "将清除缓存、Cookie 和浏览历史，此操作无法撤销。", {
-        clearBrowserData(); showClearConfirmation = false
-    }, { showClearConfirmation = false })
-    if (showExitOptions) {
-        AlertDialog(
-            onDismissRequest = { showExitOptions = false },
-            title = { Text("退出时清除浏览器数据") },
-            text = {
-                Column {
-                    CheckRow("Cookie 与站点数据", exitCookies) { exitCookies = it }
-                    CheckRow("网页缓存", exitCache) { exitCache = it }
-                    CheckRow("浏览历史", exitHistory) { exitHistory = it }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    setClearOnExit(exitCookies || exitCache || exitHistory, exitCookies, exitCache, exitHistory)
-                    showExitOptions = false
-                }) { Text("确定") }
-            },
-            dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text("取消") } }
-        )
     }
     if (showLinkDiagnostics) {
         val info by ExternalLinkDiagnostics.last.collectAsState()
@@ -1036,6 +1367,46 @@ private fun SettingsScreen(
             text = { Text(if (info.isBlank()) "尚未收到任何外部跳转。请从其它应用打开一个链接后再回来查看。" else info) },
             confirmButton = { TextButton(onClick = { showLinkDiagnostics = false }) { Text("关闭") } }
         )
+    }
+}
+
+/** Cookie 设置副标题：概括当前各项开关状态 */
+private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
+    val cookieState = if (settings.cookiesEnabled) "Cookie 追踪已开启" else "Cookie 追踪已关闭"
+    val exitState = if (settings.clearOnExit) "退出时自动清除" else "退出时保留数据"
+    return "$cookieState · $exitState"
+}
+
+/**
+ * 设置页合并入口项：带图标小方块背景的卡片。
+ *
+ * 水波纹说明：使用 [Card] 的 onClick 重载，水波纹由卡片自身的 [shape] 裁剪，
+ * 与实际卡片形状完全一致；若改用 Modifier.clickable，水波纹会溢出圆角边界。
+ */@Composable
+private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -1116,7 +1487,7 @@ private fun UserAgentScreen(settings: BrowserSettings, onSelect: (String) -> Uni
     val agents = listOf("geckoview" to "默认 GeckoView", "android_chrome" to "Android Chrome", "desktop_chrome" to "桌面 Chrome", "desktop_firefox" to "桌面 Firefox")
     SelectionScreen("浏览器标识", onBack) {
         agents.forEach { (value, title) -> item { ChoiceItem(title, settings.userAgentMode == value) { onSelect(value) } } }
-        item { SwitchRow("简化浏览器标识", "减少 User-Agent 中的设备信息", settings.simplifiedUserAgent, onSimplified) }
+        item { SwitchRow("简化浏览器标识", "减少 User-Agent 中的设备信息", settings.simplifiedUserAgent, onSimplified, leading = Icons.Default.Computer) }
         item { ListItem(headlineContent = { Text(settings.customUserAgentTitle) }, supportingContent = { Text("自定义浏览器标识") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
     }
 }
@@ -1132,9 +1503,153 @@ private fun ClipboardPermissionScreen(settings: BrowserSettings, onSelect: (Stri
         item { ChoiceItem("每次询问（弹窗并记住选择）", settings.clipboardReadPolicy == "ask") { onSelect("ask") } }
         item { ChoiceItem("始终允许", settings.clipboardReadPolicy == "allow") { onSelect("allow") } }
         item { ChoiceItem("始终拒绝", settings.clipboardReadPolicy == "deny") { onSelect("deny") } }
-        item { Text("网站请求读取剪贴板时：始终允许/拒绝将直接放行或拦截；每次询问则会弹出提示，并将你的选择按网站永久记住。", style = MaterialTheme.typography.bodySmall) }
-        item { OutlinedButton(onClick = onClear) { Text("清除已记住的网站权限") } }
+        // 说明文字：上下留白，避免贴到上方选项与下方按钮的边缘
+        item { Text("网站请求读取剪贴板时：始终允许/拒绝将直接放行或拦截；每次询问则会弹出提示，并将你的选择按网站永久记住。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+        item { Spacer(Modifier.height(24.dp)) }
+        item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text("清除已记住的网站权限") } }
     }
+}
+
+/**
+ * 通用权限策略选择页（麦克风 / 外部 APP 跳转）。
+ *
+ * 这些策略会实时作用于对应权限回调（见 BrowserViewModel 中的 policy 判断），
+ * 不是仅保存设置的「摆设」。
+ */
+@Composable
+private fun SimplePolicyScreen(
+    title: String,
+    description: String,
+    options: List<Pair<String, String>>,
+    current: String,
+    onSelect: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen(title, onBack) {
+        options.forEach { (value, label) ->
+            item { ChoiceItem(label, current == value) { onSelect(value) } }
+        }
+        item { Text(description, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+    }
+}
+
+/** 主题及网页个性化：主题 / 强制适配深色模式 / 动态莫奈取色 */
+@Composable
+private fun ThemePersonalizationScreen(
+    settings: BrowserSettings,
+    setMode: (String) -> Unit,
+    setForceDarkWeb: (Boolean) -> Unit,
+    setDynamic: (Boolean) -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen("主题及网页个性化", onBack) {
+        item { ThemeSelector(settings.darkMode, setMode) }
+        item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后网页按自身与系统偏好渲染", settings.forceDarkWeb, setForceDarkWeb, leading = Icons.Rounded.DarkMode) }
+        item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic, leading = Icons.Rounded.Palette) }
+    }
+}
+
+/** 下载设置：下载记录 / 下载文件路径 / APK SHA-256 校验 */
+@Composable
+private fun DownloadSettingsScreen(
+    settings: BrowserSettings,
+    setApkHash: (Boolean) -> Unit,
+    onDownloads: () -> Unit,
+    onDownloadDirectory: () -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen("下载设置", onBack) {
+        item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
+        item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(downloadDirectoryLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
+        item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash, leading = Icons.Rounded.VerifiedUser) }
+    }
+}
+
+private fun downloadDirectoryLabel(settings: BrowserSettings): String = when {
+    settings.downloadDirectoryMode == "external" && settings.externalDownloadDisplayPath.isBlank() -> "外部目录（未设置）"
+    settings.downloadDirectoryMode == "external" -> settings.externalDownloadDisplayPath
+    else -> "内部应用目录"
+}
+
+/** 搜索引擎与浏览设置：搜索引擎 / 浏览器标识 */
+@Composable
+private fun SearchBrowserSettingsScreen(
+    settings: BrowserSettings,
+    onSearchEngine: () -> Unit,
+    onUserAgent: () -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen("搜索引擎与浏览设置", onBack) {
+        item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
+        item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
+    }
+}
+
+/** Cookie 设置：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据 */
+@Composable
+private fun CookieSettingsScreen(
+    settings: BrowserSettings,
+    setCookie: (Boolean) -> Unit,
+    setClearOnExit: (Boolean, Boolean, Boolean, Boolean) -> Unit,
+    clearBrowserData: () -> Unit,
+    onBack: () -> Unit
+) {
+    var showClearConfirmation by remember { mutableStateOf(false) }
+    var showExitOptions by remember { mutableStateOf(false) }
+    var exitCookies by remember(settings.clearCookiesOnExit) { mutableStateOf(settings.clearCookiesOnExit) }
+    var exitCache by remember(settings.clearCacheOnExit) { mutableStateOf(settings.clearCacheOnExit) }
+    var exitHistory by remember(settings.clearHistoryOnExit) { mutableStateOf(settings.clearHistoryOnExit) }
+    SelectionScreen("Cookie 设置", onBack) {
+        item { SwitchRow("Cookie 追踪", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie, leading = Icons.Rounded.Cookie) }
+        item { ListItem(headlineContent = { Text("清除缓存与 Cookie") }, supportingContent = { Text("立即清除缓存、Cookie 和浏览历史") }, leadingContent = { Icon(Icons.Default.Delete, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
+        item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit, { showExitOptions = true }, leading = Icons.Default.Delete) }
+    }
+    if (showClearConfirmation) ConfirmDialog("清除浏览器数据？", "将清除缓存、Cookie 和浏览历史，此操作无法撤销。", {
+        clearBrowserData(); showClearConfirmation = false
+    }, { showClearConfirmation = false })
+    if (showExitOptions) {
+        AlertDialog(
+            onDismissRequest = { showExitOptions = false },
+            title = { Text("退出时清除浏览器数据") },
+            text = {
+                Column {
+                    CheckRow("Cookie 与站点数据", exitCookies) { exitCookies = it }
+                    CheckRow("网页缓存", exitCache) { exitCache = it }
+                    CheckRow("浏览历史", exitHistory) { exitHistory = it }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    setClearOnExit(exitCookies || exitCache || exitHistory, exitCookies, exitCache, exitHistory)
+                    showExitOptions = false
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text("取消") } }
+        )
+    }
+}
+
+/** 网页权限管理：剪贴板 / 跳转至外部 APP / 麦克风 */
+@Composable
+private fun WebPermissionsScreen(
+    settings: BrowserSettings,
+    onClipboard: () -> Unit,
+    onExternalApp: () -> Unit,
+    onMic: () -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen("网页权限管理", onBack) {
+        item { ListItem(headlineContent = { Text("剪贴板读取权限") }, supportingContent = { Text(clipboardPolicyLabel(settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
+        item { ListItem(headlineContent = { Text("跳转至外部 APP 权限") }, supportingContent = { Text(policyLabel(settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
+        item { ListItem(headlineContent = { Text("麦克风权限") }, supportingContent = { Text(policyLabel(settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
+        item { Text("这些权限会实时作用于网页请求：始终允许/拒绝直接放行或拦截，每次询问则先征求你的意见。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+    }
+}
+
+private fun policyLabel(policy: String) = when (policy) {
+    "allow" -> "始终允许"
+    "deny" -> "始终拒绝"
+    else -> "每次询问"
 }
 
 private fun clipboardPolicyLabel(policy: String) = when (policy) {
@@ -1174,6 +1689,7 @@ private fun ThemeSelector(mode: String, setMode: (String) -> Unit) {
     ListItem(
         headlineContent = { Text("主题") },
         supportingContent = { Text("跟随系统、浅色或深色") },
+        leadingContent = { Icon(Icons.Rounded.Palette, null) },
         trailingContent = {
             Box {
                 TextButton(onClick = { expanded = true }) { Text(labels[mode] ?: "跟随系统") }
@@ -1203,10 +1719,11 @@ private fun UserAgentSelector(mode: String, labels: Map<String, String>, setMode
 }
 
 @Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, leading: androidx.compose.ui.graphics.vector.ImageVector? = null) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(subtitle) },
+        leadingContent = leading?.let { icon -> { Icon(icon, null) } },
         trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange) }
     )
 }
@@ -1250,9 +1767,124 @@ private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
     LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, wavelength = 24.dp)
 }
 
+/**
+ * 「Mirror 酱高速下载」卡片。
+ *
+ * 平台方（Mirror 酱商务）建议新项目先稳定运行一段时间后再接入，
+ * 因此在功能开放前展示为「熄灭」状态：整条卡片暗淡、不可点击、无水波纹，
+ * 副标题标注「暂不可用」，也不展示无法使用的 CDK 输入。
+ * 待平台确认接入后，把构建开关打开即自动恢复为正常可点击状态（无需改代码）。
+ *
+ * 水波纹说明：使用 [Card] 的 onClick 重载，水波纹与卡片圆角形状一致；
+ * 熄灭态下 enabled = false，不响应点击也不显示水波纹。
+ */
+@Composable
+private fun MirrorChyanCard(cdk: String, setCdk: (String) -> Unit) {
+    val context = LocalContext.current
+    val available = MirrorChyan.isAvailable
+    var showInfo by remember { mutableStateOf(false) }
+    var draft by remember(cdk) { mutableStateOf(cdk) }
+    val shape = MaterialTheme.shapes.large
+    // 熄灭态统一使用 38% 不透明度（Material disabled 标准值），
+    // 包括卡片内容区里用显式颜色的图标方块、副标题与箭头，
+    // 否则会出现「卡片变暗但文字/图标仍然高亮」的漏光感。
+    val disabledAlpha = 0.38f
+    val iconContainer = if (available) MaterialTheme.colorScheme.tertiaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = disabledAlpha)
+    val iconTint = if (available) MaterialTheme.colorScheme.onTertiaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
+    val subtitleColor = if (available) MaterialTheme.colorScheme.onSurfaceVariant
+        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
+    val arrowColor = if (available) MaterialTheme.colorScheme.onSurfaceVariant
+        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
+    // 卡片本身也显式给出禁用配色（不依赖 CardDefaults 的默认值），
+    // 与上面各子项使用同一套 38% 不透明度，整体看起来才是均匀的「熄灭」而不是斑驳的灰。
+    val cardColors = if (available) CardDefaults.cardColors() else CardDefaults.cardColors(
+        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = disabledAlpha),
+        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = disabledAlpha)
+    )
+    Card(
+        onClick = { showInfo = true },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = available,
+        colors = cardColors,
+        shape = shape
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                color = iconContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Speed, null, tint = iconTint) }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Mirror 酱高速下载", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        !available -> "暂不可用"
+                        cdk.isBlank() -> "未填写激活密钥（CDK）"
+                        else -> "已填写激活密钥（CDK）"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subtitleColor
+                )
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = arrowColor)
+        }
+    }
+    if (showInfo) {
+        AlertDialog(
+            onDismissRequest = { showInfo = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Speed, null)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Mirror 酱高速下载")
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Mirror 酱是国内第三方应用分发平台，为开源项目提供高速 CDN 镜像，可免梯下载最新安装包。", style = MaterialTheme.typography.bodyMedium)
+                    Text("在 Mirror 酱项目页获取激活密钥后填入下方，更新与下载即可使用高速通道；不填也可正常检查更新，下载会自动回退到 GitHub。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it.trim() },
+                        label = { Text("激活密钥（CDK）") },
+                        placeholder = { Text("选填") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("密钥仅保存在本机，不会随代码或日志上传。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Mirror 酱为付费第三方服务，与本项目相互独立；未获取 CDK 时仍可在项目页查看版本信息。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    setCdk(draft)
+                    showInfo = false
+                    val url = MirrorChyan.projectUrl(source = "zexbrowse_app_settings")
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        .onFailure { Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show() }
+                }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("保存并前往 Mirror 酱") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { setCdk(draft); showInfo = false }) { Text("仅保存") }
+                    TextButton(onClick = { showInfo = false }) { Text("取消") }
+                }
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean) -> Unit, onBack: () -> Unit) {
+private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean) -> Unit, setMirrorCdk: (String) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -1285,14 +1917,21 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
                     }
                 }
             }) { Text("贡献者") }
-            SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates)
+            SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
+            // Mirror 酱高速下载：卡片式入口，内含 CDK 输入与说明
+            MirrorChyanCard(cdk = settings.mirrorCdk, setCdk = setMirrorCdk)
             OutlinedButton(
                 onClick = {
                     checking = true
                     scope.launch {
-                        runCatching { UpdateChecker().latest() }
+                        val checker = UpdateChecker(cdk = settings.mirrorCdk)
+                        runCatching { checker.latest() }
                             .onSuccess { release ->
-                                if (release != null && UpdateChecker().isNewer(release.version)) update = release else Toast.makeText(context, "当前已是最新版本", Toast.LENGTH_SHORT).show()
+                                if (release != null && checker.isNewer(release.version)) {
+                                    update = release
+                                } else {
+                                    Toast.makeText(context, "当前已是最新版本", Toast.LENGTH_SHORT).show()
+                                }
                             }
                             .onFailure { error -> message = "更新检查失败：${error.message ?: "请稍后重试"}" }
                         checking = false
@@ -1383,6 +2022,10 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                 ) {
                     Text(release.notes.ifBlank { "暂无更新说明" })
                 }
+                // Mirror 酱返回的提示（如 CDK 失效、次数用完），让用户知道回退原因
+                release.mirrorMessage?.takeIf { it.isNotBlank() }?.let { hint ->
+                    Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
                 if (downloading) {
                     if (connecting) {
                         LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
@@ -1396,15 +2039,18 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
         },
         confirmButton = {
             if (!downloading) {
+                // 应用内下载：仅在 Mirror 酱可用且拿到直链时优先用之，否则回退 GitHub
+                val effectiveUrl = (if (MirrorChyan.isAvailable) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null)
+                    ?: release.downloadUrl
                 TextButton(
-                    enabled = release.downloadUrl.isNotBlank(),
+                    enabled = effectiveUrl.isNotBlank(),
                     onClick = {
                         progress = 0
                         connecting = true
                         downloadJob = scope.launch {
                             try {
                                 val downloaded = DownloadManager(context).downloadUpdateApk(
-                                    url = release.downloadUrl,
+                                    url = effectiveUrl,
                                     fileName = "ZexBrowse-${release.version}.apk",
                                     onProgress = { value ->
                                         connecting = false
@@ -1422,15 +2068,49 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                             }
                         }
                     }
-                ) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载") }
+                ) {
+                    Icon(Icons.Default.Download, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("下载")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = {
-                downloadJob?.cancel()
-                downloadJob = null
-                onDismiss()
-            }) { Text("取消") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Mirror酱高速下载：跳转浏览器打开。
+                // 功能未开放（平台方建议新项目稳定一段时间后再接入）时保持熄灭状态，点击无响应；
+                // 可用时优先用 Mirror 酱返回的带时效直链；未填 CDK 时打开项目页（可获取 CDK）。
+                val mirrorReady = MirrorChyan.isAvailable
+                val browserUrl = if (mirrorReady) {
+                    release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } ?: release.mirrorUrl
+                } else null
+                TextButton(
+                    enabled = mirrorReady && browserUrl != null,
+                    // 权重 + fill=false：宽度不够时标签可换行，不会把「取消」挤出弹窗
+                    modifier = Modifier.weight(1f, fill = false),
+                    onClick = {
+                        downloadJob?.cancel()
+                        downloadJob = null
+                        browserUrl?.let { target ->
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                .onFailure { Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
+                ) {
+                    // 图标与文字均使用 LocalContentColor，禁用态由 TextButton 自动降为熄灭色
+                    Icon(Icons.Rounded.Speed, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (mirrorReady) "Mirror酱高速下载" else "Mirror酱高速下载（暂不可用）",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+                TextButton(onClick = {
+                    downloadJob?.cancel()
+                    downloadJob = null
+                    onDismiss()
+                }) { Text("取消") }
+            }
         }
     )
 

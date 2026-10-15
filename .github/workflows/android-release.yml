@@ -78,6 +78,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Mirror 酱资源 ID 与功能开关：源码中不硬编码，由仓库变量注入。
+          # MIRRORCHYAN_ENABLED 默认关闭（平台方建议新项目稳定后再接入）；开放后设为 true 即可启用。
+          MIRRORCHYAN_RES_ID: ${{ secrets.MIRRORCHYAN_RES_ID }}
+          MIRRORCHYAN_ENABLED: ${{ vars.MIRRORCHYAN_ENABLED || 'false' }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: 生成 APK SHA-256 校验文件

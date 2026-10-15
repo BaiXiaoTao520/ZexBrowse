@@ -20,6 +20,15 @@
     text-shadow: none !important;
   }
 
+  /* 媒体元素例外：上面的通配背景/边框覆盖会破坏视频自身的合成层，
+     导致播放器 UI 异常与帧调度变差，这里恢复其默认取值。 */
+  video,
+  audio,
+  canvas {
+    background-color: revert !important;
+    box-shadow: revert !important;
+  }
+
   a,
   a * {
     color: #8ab4f8 !important;
@@ -33,8 +42,10 @@
     color: #e3e3e6 !important;
   }
 
-  img,
-  video {
+  /* 仅对静态图片做轻微暗化。
+     不要给 video 加 filter：CSS filter 会强制视频帧脱离硬件直通路径、额外经合成通道，
+     在弱设备上会造成丢帧与音频断续。视频本身的亮度由用户自行调节。 */
+  img {
     filter: brightness(0.9) contrast(1.02);
   }
 }

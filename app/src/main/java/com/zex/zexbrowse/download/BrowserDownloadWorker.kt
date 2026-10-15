@@ -9,6 +9,7 @@ package com.zex.zexbrowse.download
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
@@ -125,19 +126,61 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     }
 
     private fun notifyFinished(id: String, fileName: String, success: Boolean) {
-        ensureChannel()
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        ensureFinishedChannel()
+        val notification = NotificationCompat.Builder(applicationContext, FINISHED_CHANNEL_ID)
             .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
             .setContentTitle(fileName.ifBlank { "下载任务" })
-            .setContentText(if (success) "下载完成" else "下载失败")
+            .setContentText(if (success) "下载完成，点击查看" else "下载失败")
             .setAutoCancel(true)
+            .setContentIntent(openAppPendingIntent())
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        applicationContext.getSystemService(NotificationManager::class.java).notify(id.hashCode(), notification)
+        // 完成通知必须用与前台通知不同的 ID：Worker 返回后 WorkManager 会按「前台通知 ID」
+        // 调用 cancelNotification，若两者共用同一 ID，刚发出的「下载完成」会被立即取消，
+        // 表现为通知中心里看不到（或一闪而过）。
+        applicationContext.getSystemService(NotificationManager::class.java).notify(finishedNotificationId(id), notification)
     }
 
+    /**
+     * 完成通知 ID：翻转前台通知 ID 的最高位。
+     * xor 的结果恒不等于原值，因此与前台通知 ID 一定不同；不同下载之间也几乎不可能碰撞。
+     */
+    private fun finishedNotificationId(id: String): Int = id.hashCode() xor Int.MIN_VALUE
+
+    /** 点击通知回到应用 */
+    private fun openAppPendingIntent(): android.app.PendingIntent {
+        val intent = applicationContext.packageManager.getLaunchIntentForPackage(applicationContext.packageName)
+            ?: Intent()
+        return android.app.PendingIntent.getActivity(
+            applicationContext,
+            0,
+            intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * 进行中的下载通知渠道（低重要性，静默更新，避免进度刷新反复打扰）。
+     * 渠道创建后可重复调用（幂等）；用标记位避免每次进度变化都走一遍系统调用。
+     */
+    private var downloadChannelReady = false
     private fun ensureChannel() {
+        if (downloadChannelReady) return
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "浏览器下载", NotificationManager.IMPORTANCE_LOW))
+        downloadChannelReady = true
+    }
+
+    /**
+     * 下载完成通知使用独立渠道（默认重要性）：
+     * 进行中的静默通知与「已完成」提示分开，完成后用户能明确感知到。
+     */
+    private var finishedChannelReady = false
+    private fun ensureFinishedChannel() {
+        if (finishedChannelReady) return
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(FINISHED_CHANNEL_ID, "下载完成", NotificationManager.IMPORTANCE_DEFAULT))
+        finishedChannelReady = true
     }
 
     companion object {
@@ -148,5 +191,6 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         const val KEY_EXPECTED_HASH = "expected_hash"
         const val KEY_PROGRESS = "progress"
         private const val CHANNEL_ID = "browser_downloads"
+        private const val FINISHED_CHANNEL_ID = "browser_downloads_done"
     }
 }
