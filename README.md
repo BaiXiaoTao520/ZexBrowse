@@ -17,3 +17,9 @@ ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack
 项目提供 [GitHub Actions 工作流](.github/workflows/android-release.yml)
 
 Release 会附带 `SHA256SUMS.txt`
+
+## 赞助与支持
+
+如果我的分享对你有一点点帮助，一杯奶茶钱就是对我最大的鼓励 ☕
+
+<img width="1213" height="1213" alt="Image" src="https://github.com/user-attachments/assets/51c3e27e-d97f-4229-8f6e-1a33c3256776" />

@@ -75,13 +75,16 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -91,7 +94,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -164,6 +166,9 @@ enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS,
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
+/** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
+private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
+
 private val defaultQuickSites = listOf(
     QuickSite("GitHub", "https://github.com", "⌘"),
     QuickSite("Google", "https://www.google.com", "G"),
@@ -187,6 +192,34 @@ private fun isAppDefaultBrowser(context: Context): Boolean {
     @Suppress("DEPRECATION")
     val resolved = context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
     return resolved?.activityInfo?.packageName == context.packageName
+}
+
+/**
+ * 调起系统默认浏览器选择框（Android 10+ 的角色请求，由系统弹窗让用户自己选）；
+ * 返回 false 表示当前系统不支持或调用失败，由调用方回退到系统设置页。
+ */
+private fun requestDefaultBrowser(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+    return runCatching {
+        val roleManager = context.getSystemService(android.app.role.RoleManager::class.java)
+        if (roleManager == null || !roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) return false
+        val intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+}
+
+/**
+ * 引导用户设置默认浏览器：优先直接弹系统选择框（Android 10+）；
+ * 系统不支持时回退到默认应用设置页，再不行才提示手动操作。
+ */
+private fun promptDefaultBrowser(context: Context) {
+    if (requestDefaultBrowser(context)) return
+    val launched = runCatching {
+        context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
+    if (!launched) Toast.makeText(context, "请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器", Toast.LENGTH_LONG).show()
 }
 
 @Composable
@@ -233,8 +266,12 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     val goBack: () -> Unit = { if (navStack.size > 1) { navForward = false; navStack = navStack.dropLast(1) } }
     var tabsIncognito by remember { mutableStateOf(false) }
     var startupUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
+    // 赞助与支持：从「关于」页的卡片入口打开说明弹窗
+    var sponsorInfo by remember { mutableStateOf(false) }
     // 首次启动引导：提醒下载目录为内部存储（仅首次，读取已持久化的真实值，避免默认初始值误触发）
     var showFirstRunStorageHint by remember { mutableStateOf(false) }
+    // 首启引导第二弹：推荐将 ZexBrowse 设为默认浏览器（在外部存储提示之后，仅首启展示一次）
+    var showDefaultBrowserPrompt by remember { mutableStateOf(false) }
     // 本应用是否已被用户设为默认浏览器（用于决定是否展示设置项入口）
     var isDefaultBrowser by remember { mutableStateOf(isAppDefaultBrowser(context)) }
 
@@ -251,6 +288,19 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 进入应用、切回前台（含从系统默认应用设置返回）时重新检测默认浏览器状态：
     // 已是默认则不显示入口；用户改选了其它浏览器后入口重新出现
     val lifecycleOwner = LocalLifecycleOwner.current
+    // 首启引导：外部存储提示处理完后，再询问是否设为默认浏览器（两步互斥，避免弹窗叠加）
+    LaunchedEffect(settings.storageHintShown, settings.downloadDirectoryMode, isDefaultBrowser) {
+        if (settings.defaultBrowserHintShown || isDefaultBrowser) return@LaunchedEffect
+        if (showFirstRunStorageHint) return@LaunchedEffect
+        // 外部存储提示尚在等待处理（目录仍为内部存储且从未提示过）时先让位，
+        // 否则已有外部存储的老用户会因 storageHintShown 永远为 false 而永远不触发
+        val storageHintPending = !settings.storageHintShown && settings.downloadDirectoryMode == "internal"
+        if (storageHintPending) return@LaunchedEffect
+        if (startupUpdate != null) return@LaunchedEffect
+        if (settingsStore.settings.first().defaultBrowserHintShown) return@LaunchedEffect
+        kotlinx.coroutines.delay(600)
+        if (startupUpdate == null && !isAppDefaultBrowser(context)) showDefaultBrowserPrompt = true
+    }
     DisposableEffect(lifecycleOwner, navStack.last()) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) isDefaultBrowser = isAppDefaultBrowser(context)
@@ -411,11 +461,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         settings = settings,
                         isDefaultBrowser = isDefaultBrowser,
                         onSetDefaultBrowser = {
-                            // 设为默认浏览器由用户在系统设置中自愿选择
-                            val launched = runCatching {
-                                context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            }.isSuccess
-                            if (!launched) Toast.makeText(context, "请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器", Toast.LENGTH_LONG).show()
+                            // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
+                            promptDefaultBrowser(context)
                         },
                         onHistory = { navigate(Page.HISTORY) },
                         onThemePersonalization = { navigate(Page.THEME_PERSONALIZATION) },
@@ -542,18 +589,44 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         settings = settings,
                         setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
                         setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
+                        setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
+                        onSponsor = { sponsorInfo = true },
                         onBack = goBack
                     )
                 }
             }
-            startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
+            startupUpdate?.let { release -> UpdateDialog(release = release, preferMirror = settings.preferMirrorDownload, onDismiss = { startupUpdate = null }) }
+            if (sponsorInfo) SponsorDialog(onDismiss = { sponsorInfo = false })
             if (showFirstRunStorageHint && startupUpdate == null) {
                 AlertDialog(
                     onDismissRequest = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } },
                     title = { Text("建议修改下载目录") },
                     text = { Text("当前下载目录为内部存储（应用私有目录）。为保证大文件与外部存储访问，建议改为外部存储目录。") },
-                    confirmButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) }; externalDirPicker.launch(null) }) { Text("设置外部存储") } },
+                        confirmButton = { TextButton(onClick = {
+                            showFirstRunStorageHint = false
+                            scope.launch { settingsStore.storageHintShown(true) }
+                            externalDirPicker.launch(null)
+                        }) { Text("设置外部存储") } },
                     dismissButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } }) { Text("稍后") } }
+                )
+            }
+            // 首启引导第二弹：外部存储提示处理完（或无需提示）后询问是否设为默认浏览器
+            if (showDefaultBrowserPrompt && startupUpdate == null && !showFirstRunStorageHint) {
+                val dismissDefaultBrowserPrompt = {
+                    showDefaultBrowserPrompt = false
+                    scope.launch { settingsStore.defaultBrowserHintShown(true) }
+                }
+                AlertDialog(
+                    onDismissRequest = dismissDefaultBrowserPrompt,
+                    title = { Text("设为默认浏览器") },
+                    text = { Text("将 ZexBrowse 设为默认浏览器后，你从其它应用或分享菜单打开的网页链接会直接由它打开。是否设置完全由你自愿决定，也可以随时在系统设置中改回。") },
+                    confirmButton = {
+                        Button(onClick = {
+                            dismissDefaultBrowserPrompt()
+                            promptDefaultBrowser(context)
+                        }) { Text("设为默认") }
+                    },
+                    dismissButton = { TextButton(onClick = dismissDefaultBrowserPrompt) { Text("稍后") } }
                 )
             }
             // 网页请求麦克风且策略为「每次询问」时：按站点询问并记住选择。
@@ -1444,11 +1517,40 @@ private fun SettingsScreen(
                     onClick = onWebPermissions
                 )
             }
-            item { HorizontalDivider() }
-            item { ListItem(headlineContent = { Text("浏览历史") }, supportingContent = { Text("查看最近访问的网页") }, leadingContent = { Icon(Icons.Default.History, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onHistory)) }
-            if (!isDefaultBrowser) item { ListItem(headlineContent = { Text("设为默认浏览器") }, supportingContent = { Text("将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择") }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, modifier = Modifier.clickable(onClick = onSetDefaultBrowser)) }
-            item { ListItem(headlineContent = { Text("外链诊断") }, supportingContent = { Text("查看最近一次外部跳转传入的原始信息") }, leadingContent = { Icon(Icons.Default.Language, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showLinkDiagnostics = true }) }
-            item { ListItem(headlineContent = { Text("关于 ZexBrowse") }, leadingContent = { Icon(Icons.Default.Info, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onAbout)) }
+            // 浏览历史 / 外链诊断 / 关于：与上方入口统一为卡片样式
+            item {
+                SettingsEntry(
+                    title = "浏览历史",
+                    subtitle = "查看最近访问的网页",
+                    icon = Icons.Default.History,
+                    onClick = onHistory
+                )
+            }
+            if (!isDefaultBrowser) item {
+                SettingsEntry(
+                    title = "设为默认浏览器",
+                    subtitle = "将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择",
+                    icon = Icons.Rounded.Public,
+                    onClick = onSetDefaultBrowser,
+                    accent = true
+                )
+            }
+            item {
+                SettingsEntry(
+                    title = "外链诊断",
+                    subtitle = "查看最近一次外部跳转传入的原始信息",
+                    icon = Icons.Default.Language,
+                    onClick = { showLinkDiagnostics = true }
+                )
+            }
+            item {
+                SettingsEntry(
+                    title = "关于 ZexBrowse",
+                    subtitle = "版本、许可、贡献者与赞助支持",
+                    icon = Icons.Default.Info,
+                    onClick = onAbout
+                )
+            }
         }
     }
     if (showLinkDiagnostics) {
@@ -1475,11 +1577,16 @@ private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
  * 水波纹说明：使用 [Card] 的 onClick 重载，水波纹由卡片自身的 [shape] 裁剪，
  * 与实际卡片形状完全一致；若改用 Modifier.clickable，水波纹会溢出圆角边界。
  */@Composable
-private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp, accent: Boolean = false) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        shape = MaterialTheme.shapes.large
+        modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 6.dp),
+        shape = MaterialTheme.shapes.large,
+        // accent 仅用于需要突出的单项入口（如「设为默认浏览器」）；其余入口保持默认配色
+        colors = if (accent) CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer
+        ) else CardDefaults.cardColors()
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -1487,17 +1594,19 @@ private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compos
         ) {
             Surface(
                 modifier = Modifier.size(44.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
+                color = if (accent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondaryContainer,
                 shape = MaterialTheme.shapes.medium
             ) {
-                Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = if (accent) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondaryContainer)
+                }
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (accent) 0.75f else 1f), maxLines = 2)
             }
-            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (accent) 0.75f else 1f))
         }
     }
 }
@@ -1752,6 +1861,13 @@ private fun clipboardPolicyLabel(policy: String) = when (policy) {
 
 private fun siteHost(uri: String): String = runCatching { java.net.URI(uri).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri
 
+/** 在 URL 上追加查询参数：已带查询串时用 & 拼接，解析失败时原样返回 */
+private fun String.suffixQuery(pair: Pair<String, String>): String = runCatching {
+    val uri = java.net.URI(this)
+    val separator = if (uri.rawQuery.isNullOrEmpty()) "?" else "&"
+    "$this$separator${pair.first}=${pair.second}"
+}.getOrDefault(this)
+
 private fun hasRecordAudioPermission(context: Context): Boolean =
     androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
@@ -1932,9 +2048,12 @@ private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
 @Composable
 private fun MirrorChyanCard(cdk: String, setCdk: (String) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val available = MirrorChyan.isAvailable
     var showInfo by remember { mutableStateOf(false) }
     var draft by remember(cdk) { mutableStateOf(cdk) }
+    var verifying by remember { mutableStateOf(false) }
+    var verdict by remember { mutableStateOf<String?>(null) }
     val shape = MaterialTheme.shapes.large
     // 熄灭态统一使用 38% 不透明度（Material disabled 标准值），
     // 包括卡片内容区里用显式颜色的图标方块、副标题与箭头，
@@ -2004,12 +2123,46 @@ private fun MirrorChyanCard(cdk: String, setCdk: (String) -> Unit) {
                     Text("在 Mirror 酱项目页获取激活密钥后填入下方，更新与下载即可使用高速通道；不填也可正常检查更新，下载会自动回退到 GitHub。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = draft,
-                        onValueChange = { draft = it.trim() },
+                        onValueChange = { draft = it.trim(); verdict = null },
                         label = { Text("激活密钥（CDK）") },
                         placeholder = { Text("选填") },
                         singleLine = true,
+                        enabled = available && !verifying,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (available) {
+                        OutlinedButton(
+                            enabled = !verifying,
+                            onClick = {
+                                if (draft.isBlank()) {
+                                    verdict = "请先填写激活密钥"
+                                } else {
+                                    verifying = true
+                                    verdict = null
+                                    scope.launch {
+                                        val result = runCatching { UpdateChecker().verifyCdk(draft) }.getOrNull()
+                                        verdict = when {
+                                            result == null -> "验证失败：网络异常或服务未响应，请稍后重试"
+                                            result.isBlank() -> "密钥有效，可使用高速下载"
+                                            else -> result
+                                        }
+                                        verifying = false
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Rounded.VerifiedUser, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (verifying) "正在验证…" else "验证密钥")
+                        }
+                    }
+                    verdict?.let { text ->
+                        Text(
+                            text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (text.startsWith("密钥有效")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                    }
                     Text("密钥仅保存在本机，不会随代码或日志上传。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Mirror 酱为付费第三方服务，与本项目相互独立；未获取 CDK 时仍可在项目页查看版本信息。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -2035,7 +2188,14 @@ private fun MirrorChyanCard(cdk: String, setCdk: (String) -> Unit) {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean) -> Unit, setMirrorCdk: (String) -> Unit, onBack: () -> Unit) {
+private fun AboutScreen(
+    settings: BrowserSettings,
+    setAutoCheckUpdates: (Boolean) -> Unit,
+    setMirrorCdk: (String) -> Unit,
+    setPreferMirrorDownload: (Boolean) -> Unit,
+    onSponsor: () -> Unit,
+    onBack: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -2069,8 +2229,18 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
                 }
             }) { Text("贡献者") }
             SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
+            SwitchRow("下载更新时优先使用 Mirror 酱高速通道", "关闭后始终走 GitHub 直链；Mirror 酱不可用时自动回退", settings.preferMirrorDownload, setPreferMirrorDownload, leading = Icons.Rounded.Speed)
             // Mirror 酱高速下载：卡片式入口，内含 CDK 输入与说明
             MirrorChyanCard(cdk = settings.mirrorCdk, setCdk = setMirrorCdk)
+            // 赞助与支持：与其它入口保持相同的卡片样式
+            SettingsEntry(
+                title = "赞助与支持",
+                subtitle = "支持作者与后续开发维护",
+                icon = Icons.Rounded.VolunteerActivism,
+                onClick = onSponsor,
+                // 本页其余控件都基于 24dp 内边距，卡片不再额外内缩，保持左边缘对齐
+                horizontalPadding = 0.dp
+            )
             OutlinedButton(
                 onClick = {
                     checking = true
@@ -2108,10 +2278,18 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
                     Text("暂无贡献者信息")
                 } else {
                     LazyColumn { items(list) { contributor ->
-                        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val homepage = "https://github.com/${contributor.name}"
+                        Row(
+                            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable { openInBrowser(context, homepage) }.padding(vertical = 6.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             AsyncImage(model = contributor.avatarUrl, contentDescription = contributor.name, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
                             Spacer(Modifier.width(12.dp))
-                            Text("${contributor.name} · ${contributor.contributions} 次提交")
+                            Column(Modifier.weight(1f)) {
+                                Text(contributor.name)
+                                Text("${contributor.contributions} 次提交", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } }
                 }
@@ -2120,7 +2298,7 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
         )
     }
 
-    update?.let { release -> UpdateDialog(release = release, onDismiss = { update = null }) }
+    update?.let { release -> UpdateDialog(release = release, preferMirror = settings.preferMirrorDownload, onDismiss = { update = null }) }
     message?.let { content ->
         AlertDialog(
             onDismissRequest = { message = null },
@@ -2131,31 +2309,68 @@ private fun AboutScreen(settings: BrowserSettings, setAutoCheckUpdates: (Boolean
     }
 }
 
+/** 赞助与支持说明弹窗：自愿原则，引导前往仓库 README 查看赞赏码 */
+@Composable
+private fun SponsorDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.VolunteerActivism, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("赞助与支持")
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("如果 ZexBrowse 用起来顺手，欢迎请作者喝杯咖啡。")
+                Text("ZexBrowse 由个人在业余时间开发维护，持续免费、无广告，也不上架任何应用商店。你的支持会直接用于服务器与带宽开销、测试设备，以及后续功能的开发与维护。")
+                Text("赞助完全出于自愿，金额不限；不赞助也完全不影响任何功能的使用。")
+                Text("如何支持", style = MaterialTheme.typography.titleSmall)
+                Text("1. 点击下方「前往赞赏」，跳转到项目 README。")
+                Text("2. 在页面中向下滑动，找到「赞助与支持」中的赞赏码图片。")
+                Text("3. 长按保存该图片（或截图保存），再打开微信「扫一扫」，从相册选择它即可完成。")
+                Text("无论是否赞助，感谢你使用 ZexBrowse；遇到问题欢迎在 GitHub 仓库反馈，帮助它变得更好。")
+            }
+        },
+        confirmButton = {
+            Button(onClick = { openInBrowser(context, SPONSOR_PAGE_URL); onDismiss() }) {
+                Icon(Icons.Rounded.VolunteerActivism, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("前往赞赏")
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var downloadJob by remember { mutableStateOf<Job?>(null) }
-    var progress by remember { mutableStateOf(0) }
-    var connecting by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<UpdateDownloadResult?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
-    val downloading = downloadJob?.isActive == true
+private fun UpdateDialog(release: ReleaseInfo, preferMirror: Boolean, onDismiss: () -> Unit) {
+    // 用户点了「下载」后切换到独立下载窗口；为空表示仍在简介窗口
+    var stage by remember { mutableStateOf<ReleaseInfo?>(null) }
 
-    result?.let { downloadResult ->
-        AlertDialog(
-            onDismissRequest = { result = null; onDismiss() },
-            title = { Text("下载完成") },
-            text = { Column { Text("SHA-256：${downloadResult.sha256}"); Text(downloadResult.file.absolutePath, style = MaterialTheme.typography.bodySmall) } },
-            confirmButton = { TextButton(onClick = { openUpdateApk(context, downloadResult.file); result = null; onDismiss() }) { Text("立即安装") } },
-            dismissButton = { TextButton(onClick = { result = null; onDismiss() }) { Text("稍后") } }
-        )
-        return
+    val current = stage
+    if (current == null) {
+        UpdateIntroDialog(release = release, preferMirror = preferMirror, onStartDownload = { stage = release }, onDismiss = onDismiss)
+    } else {
+        UpdateDownloadDialog(release = current, preferMirror = preferMirror, onBack = onDismiss)
     }
+}
+
+/** 发现新版本的简介窗口：只负责展示更新说明并提供下载入口 */
+@Composable
+private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onStartDownload: () -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // 应用内下载：仅在 Mirror 酱可用且拿到直链时优先用之，否则回退 GitHub
+    val mirrorUrl = if (MirrorChyan.isAvailable && preferMirror) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null
+    val effectiveUrl = mirrorUrl ?: release.downloadUrl
 
     AlertDialog(
-        onDismissRequest = { downloadJob?.cancel(); downloadJob = null; onDismiss() },
+        onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.SystemUpdate, "升级更新", tint = MaterialTheme.colorScheme.primary)
@@ -2173,64 +2388,35 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                 ) {
                     Text(release.notes.ifBlank { "暂无更新说明" })
                 }
+                // 下载通道标注：让用户知道即将走哪条通道，以及为什么
+                Text(
+                    if (mirrorUrl != null) "下载通道：Mirror 酱高速通道" else "下载通道：GitHub 直链",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 // Mirror 酱返回的提示（如 CDK 失效、次数用完），让用户知道回退原因
                 release.mirrorMessage?.takeIf { it.isNotBlank() }?.let { hint ->
                     Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
-                if (downloading) {
-                    if (connecting) {
-                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
-                        Text("正在连接服务器…")
-                    } else {
-                        WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
-                        Text("正在下载：$progress%")
-                    }
+                if (effectiveUrl.isBlank()) {
+                    Text("未获取到可用的下载地址，可稍后重试或前往项目页手动下载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
             }
         },
         confirmButton = {
-            if (!downloading) {
-                // 应用内下载：仅在 Mirror 酱可用且拿到直链时优先用之，否则回退 GitHub
-                val effectiveUrl = (if (MirrorChyan.isAvailable) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null)
-                    ?: release.downloadUrl
-                TextButton(
-                    enabled = effectiveUrl.isNotBlank(),
-                    onClick = {
-                        progress = 0
-                        connecting = true
-                        downloadJob = scope.launch {
-                            try {
-                                val downloaded = DownloadManager(context).downloadUpdateApk(
-                                    url = effectiveUrl,
-                                    fileName = "ZexBrowse-${release.version}.apk",
-                                    onProgress = { value ->
-                                        connecting = false
-                                        progress = value
-                                    }
-                                )
-                                result = downloaded
-                            } catch (_: CancellationException) {
-                                message = "下载已取消"
-                            } catch (error: Throwable) {
-                                message = "下载失败：${error.message ?: "未知错误"}"
-                            } finally {
-                                downloadJob = null
-                                connecting = false
-                            }
-                        }
-                    }
-                ) {
-                    Icon(Icons.Default.Download, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("下载")
-                }
+            Button(
+                enabled = effectiveUrl.isNotBlank(),
+                onClick = onStartDownload
+            ) {
+                Icon(Icons.Default.Download, null)
+                Spacer(Modifier.width(6.dp))
+                Text("下载")
             }
         },
         dismissButton = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Mirror酱高速下载：跳转浏览器打开。
-                // 功能未开放（平台方建议新项目稳定一段时间后再接入）时保持熄灭状态，点击无响应；
-                // 可用时优先用 Mirror 酱返回的带时效直链；未填 CDK 时打开项目页（可获取 CDK）。
+                // 功能未开放时保持熄灭状态；可用时优先用返回的带时效直链；未填 CDK 时打开项目页。
                 val mirrorReady = MirrorChyan.isAvailable
                 val browserUrl = if (mirrorReady) {
                     release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } ?: release.mirrorUrl
@@ -2239,16 +2425,8 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                     enabled = mirrorReady && browserUrl != null,
                     // 权重 + fill=false：宽度不够时标签可换行，不会把「取消」挤出弹窗
                     modifier = Modifier.weight(1f, fill = false),
-                    onClick = {
-                        downloadJob?.cancel()
-                        downloadJob = null
-                        browserUrl?.let { target ->
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                                .onFailure { Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show() }
-                        }
-                    }
+                    onClick = { browserUrl?.let { target -> openInBrowser(context, target) } }
                 ) {
-                    // 图标与文字均使用 LocalContentColor，禁用态由 TextButton 自动降为熄灭色
                     Icon(Icons.Rounded.Speed, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(
@@ -2256,21 +2434,122 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
-                TextButton(onClick = {
-                    downloadJob?.cancel()
-                    downloadJob = null
-                    onDismiss()
-                }) { Text("取消") }
+                TextButton(onClick = onDismiss) { Text("取消") }
             }
         }
     )
+}
 
-    message?.let { content ->
-        AlertDialog(
-            onDismissRequest = { message = null },
-            title = { Text("更新") },
-            text = { Text(content) },
-            confirmButton = { TextButton(onClick = { message = null }) { Text("确定") } }
-        )
+/**
+ * 独立下载窗口：下载中只提供取消；失败提供取消与重试；成功提供取消与立即安装。
+ *
+ * 取消时会停止下载并同步删除已写入的临时文件与同名 APK，避免残留。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun UpdateDownloadDialog(release: ReleaseInfo, preferMirror: Boolean, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val fileName = "ZexBrowse-${release.version}.apk"
+    val mirrorUrl = if (MirrorChyan.isAvailable && preferMirror) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null
+    val effectiveUrl = mirrorUrl ?: release.downloadUrl
+    val channel = if (mirrorUrl != null) "Mirror 酱高速通道" else "GitHub 直链"
+
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    // attempt 变化会重启 LaunchedEffect，用于「重试」
+    var attempt by remember { mutableStateOf(0) }
+    var progress by remember { mutableStateOf(0) }
+    var connecting by remember { mutableStateOf(true) }
+    var result by remember { mutableStateOf<UpdateDownloadResult?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val downloading = downloadJob?.isActive == true
+
+    // 重试时更换文件名，绕开 HTTP 缓存（OkHttp 默认会缓存重定向与响应）
+    val requestUrl = if (attempt == 0) effectiveUrl else effectiveUrl.suffixQuery("retry" to attempt.toString())
+
+    LaunchedEffect(effectiveUrl, attempt) {
+        if (effectiveUrl.isBlank()) { connecting = false; error = "未获取到可用的下载地址"; return@LaunchedEffect }
+        downloadJob?.cancel()
+        downloadJob = null
+        progress = 0
+        connecting = true
+        error = null
+        result = null
+        downloadJob = scope.launch {
+            try {
+                val downloaded = DownloadManager(context).downloadUpdateApk(
+                    url = requestUrl,
+                    fileName = fileName,
+                    onProgress = { value ->
+                        connecting = false
+                        progress = value
+                    }
+                )
+                result = downloaded
+            } catch (_: CancellationException) {
+                // 取消由界面处理，这里不弹错误
+            } catch (throwable: Throwable) {
+                error = throwable.message ?: "未知错误"
+            }
+            // 不在此处清空 downloadJob：重试时旧任务可能晚于新任务结束，
+            // 清空会把新任务误标为已结束；downloading 由 isActive 实时判断。
+        }
     }
+
+    // 关闭窗口（系统返回或点关闭）：先停下载，再同步清掉未完成的文件。
+    // 删除必须同步完成：本函数的 composition scope 会在 onBack() 后立即销毁，
+    // 若删在协程里，标签页被销毁时会连同删除任务一起取消，文件就会残留。
+    val cancelAndClean = {
+        downloadJob?.cancel()
+        downloadJob = null
+        DownloadManager(context).deleteUpdateApk(fileName)
+    }
+
+    AlertDialog(
+        // 下载进行中不允许点外部关闭，避免文件残留；需用「取消」按钮
+        onDismissRequest = { if (!downloading) { cancelAndClean(); onBack() } },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Download, "下载更新", tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(if (result != null) "下载完成" else "正在下载 ${release.version}")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("下载通道：$channel", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                when {
+                    result != null -> {
+                        Text("文件名：${result!!.file.name}")
+                        Text("SHA-256：${result!!.sha256}", style = MaterialTheme.typography.bodySmall)
+                        Text(result!!.file.absolutePath, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    error != null -> Text("下载失败：$error", color = MaterialTheme.colorScheme.error)
+                    connecting -> {
+                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
+                        Text("正在连接服务器…")
+                    }
+                    else -> {
+                        WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
+                        Text("正在下载：$progress%")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (result != null) {
+                Button(onClick = { openUpdateApk(context, result!!.file); onBack() }) {
+                    Icon(Icons.Default.OpenInNew, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("立即安装")
+                }
+            } else if (error != null) {
+                Button(onClick = { attempt += 1 }) { Text("重试") }
+            }
+        },
+        dismissButton = {
+            // 三种状态下的「取消」都停下载并删除文件（含已完成的安装包），不留残留
+            TextButton(onClick = { cancelAndClean(); onBack() }) { Text("取消") }
+        }
+    )
 }

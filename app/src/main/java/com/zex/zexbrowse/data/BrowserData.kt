@@ -141,11 +141,15 @@ data class BrowserSettings(
     val quickSites: String = "",
     val autoCheckUpdates: Boolean = true,
     val storageHintShown: Boolean = false,
+    /** 首启「设为默认浏览器」引导是否已展示过；仅用于避免重复打扰，与是否已成为默认无关 */
+    val defaultBrowserHintShown: Boolean = false,
     val clipboardReadPolicy: String = "ask",
     val micPolicy: String = "ask",
     val externalAppPolicy: String = "ask",
     /** Mirror 酱激活密钥（CDK）；为空时仅能查询版本、无法使用高速下载 */
     val mirrorCdk: String = "",
+    /** 有更新时是否优先走 Mirror 酱高速通道；关闭或不可用时回退 GitHub */
+    val preferMirrorDownload: Boolean = true,
     val sitePermissions: Map<String, String> = emptyMap(),
     /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
     val siteMicPermissions: Map<String, String> = emptyMap()
@@ -174,10 +178,12 @@ class SettingsStore(private val context: Context) {
     private val quickSitesKey = stringPreferencesKey("quick_sites")
     private val autoCheckUpdatesKey = booleanPreferencesKey("auto_check_updates")
     private val storageHintShownKey = booleanPreferencesKey("storage_hint_shown")
+    private val defaultBrowserHintShownKey = booleanPreferencesKey("default_browser_hint_shown")
     private val clipboardReadPolicyKey = stringPreferencesKey("clipboard_read_policy")
     private val micPolicyKey = stringPreferencesKey("mic_policy")
     private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
     private val mirrorCdkKey = stringPreferencesKey("mirror_cdk")
+    private val preferMirrorDownloadKey = booleanPreferencesKey("prefer_mirror_download")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
     private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
 
@@ -205,10 +211,12 @@ class SettingsStore(private val context: Context) {
             quickSites = preferences[quickSitesKey] ?: "",
             autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true,
             storageHintShown = preferences[storageHintShownKey] ?: false,
+            defaultBrowserHintShown = preferences[defaultBrowserHintShownKey] ?: false,
             clipboardReadPolicy = preferences[clipboardReadPolicyKey] ?: "ask",
             micPolicy = preferences[micPolicyKey] ?: "ask",
             externalAppPolicy = preferences[externalAppPolicyKey] ?: "ask",
             mirrorCdk = preferences[mirrorCdkKey] ?: "",
+            preferMirrorDownload = preferences[preferMirrorDownloadKey] ?: true,
             sitePermissions = (preferences[sitePermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
@@ -247,6 +255,8 @@ class SettingsStore(private val context: Context) {
     }
     suspend fun autoCheckUpdates(value: Boolean) = update { it[autoCheckUpdatesKey] = value }
     suspend fun storageHintShown(value: Boolean) = update { it[storageHintShownKey] = value }
+    suspend fun defaultBrowserHintShown(value: Boolean) = update { it[defaultBrowserHintShownKey] = value }
+    suspend fun preferMirrorDownload(value: Boolean) = update { it[preferMirrorDownloadKey] = value }
     suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
     suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
     suspend fun externalAppPolicy(value: String) = update { it[externalAppPolicyKey] = value }
