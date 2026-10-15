@@ -388,6 +388,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     )
                     Page.BROWSER -> BrowserScreen(
                         viewModel = browserViewModel,
+                        settings = settings,
                         settingsStore = settingsStore,
                         onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
                         onDownloads = { navigate(Page.DOWNLOADS) },
@@ -904,7 +905,7 @@ private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
