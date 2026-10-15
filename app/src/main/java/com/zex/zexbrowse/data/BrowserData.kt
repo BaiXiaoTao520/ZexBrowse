@@ -148,8 +148,8 @@ data class BrowserSettings(
     val externalAppPolicy: String = "ask",
     /** Mirror 酱激活密钥（CDK）；为空时仅能查询版本、无法使用高速下载 */
     val mirrorCdk: String = "",
-    /** 有更新时是否优先走 Mirror 酱高速通道；关闭或不可用时回退 GitHub */
-    val preferMirrorDownload: Boolean = true,
+    /** 有更新时是否优先走高速下载通道（如 Mirror 酱）；默认关闭，关闭时始终走 GitHub */
+    val preferMirrorDownload: Boolean = false,
     val sitePermissions: Map<String, String> = emptyMap(),
     /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
     val siteMicPermissions: Map<String, String> = emptyMap()
@@ -216,7 +216,7 @@ class SettingsStore(private val context: Context) {
             micPolicy = preferences[micPolicyKey] ?: "ask",
             externalAppPolicy = preferences[externalAppPolicyKey] ?: "ask",
             mirrorCdk = preferences[mirrorCdkKey] ?: "",
-            preferMirrorDownload = preferences[preferMirrorDownloadKey] ?: true,
+            preferMirrorDownload = preferences[preferMirrorDownloadKey] ?: false,
             sitePermissions = (preferences[sitePermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }

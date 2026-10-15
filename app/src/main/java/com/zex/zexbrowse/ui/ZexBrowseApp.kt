@@ -691,7 +691,8 @@ private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Uni
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp),
+            // 快捷访问条目多、或系统字体放大时会超出一屏，配上下滚动避免底部不可达
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(48.dp))
@@ -1659,7 +1660,10 @@ private fun DownloadDirectoryScreen(settings: BrowserSettings, onSave: (String, 
             TextButton(onClick = { onSave(if (useExternal) "external" else "internal", externalUri, externalPath) }) { Text("确定") }
         }
     }) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             ChoiceItem("内部应用目录", !useExternal) { useExternal = false }
             Text("内部目录不可修改，卸载应用后会一并清理。", style = MaterialTheme.typography.bodySmall)
             ChoiceItem("外部目录", useExternal) { useExternal = true }
@@ -1943,7 +1947,11 @@ private fun EditorScreen(title: String, initialTitle: String, initialValue: Stri
     var name by rememberSaveable(initialTitle) { mutableStateOf(initialTitle) }
     var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
     Scaffold(topBar = { TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { TextButton(enabled = name.isNotBlank() && value.isNotBlank(), onClick = { onSave(name.trim(), value.trim()) }) { Text("保存") } }) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 多行输入框在小屏下会顶到底部，给整页滚动能力
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("标题") }, singleLine = true)
             OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth(), label = { Text(valueLabel) }, minLines = 4)
         }
@@ -2119,7 +2127,10 @@ private fun MirrorChyanCard(cdk: String, setCdk: (String) -> Unit) {
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Text("Mirror 酱是国内第三方应用分发平台，为开源项目提供高速 CDN 镜像，可免梯下载最新安装包。", style = MaterialTheme.typography.bodyMedium)
                     Text("在 Mirror 酱项目页获取激活密钥后填入下方，更新与下载即可使用高速通道；不填也可正常检查更新，下载会自动回退到 GitHub。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
@@ -2208,7 +2219,11 @@ private fun AboutScreen(
     var contributorsRequest by remember { mutableStateOf(0) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
-        Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // 条目较多，在窄屏/横屏/大字体下会超出一屏，必须可滚动，否则底部内容点不到
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
             Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
@@ -2230,7 +2245,7 @@ private fun AboutScreen(
                 }
             }) { Text("贡献者") }
             SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
-            SwitchRow("下载更新时优先使用 Mirror 酱高速通道", "关闭后始终走 GitHub 直链；Mirror 酱不可用时自动回退", settings.preferMirrorDownload, setPreferMirrorDownload, leading = Icons.Rounded.Speed)
+            SwitchRow("优先使用高速下载通道", "默认关闭；开启且高速通道可用时优先走它，否则始终走 GitHub 直链", settings.preferMirrorDownload, setPreferMirrorDownload, leading = Icons.Rounded.Speed)
             // Mirror 酱高速下载：卡片式入口，内含 CDK 输入与说明
             MirrorChyanCard(cdk = settings.mirrorCdk, setCdk = setMirrorCdk)
             // 赞助与支持：与其它入口保持相同的卡片样式
