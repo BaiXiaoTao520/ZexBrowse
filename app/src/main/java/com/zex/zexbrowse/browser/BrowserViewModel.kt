@@ -66,11 +66,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 界面层注入：网站请求读取剪贴板时回调。参数：发起请求的站点、结果回调（true=允许，false=拒绝）。
     // 是否先询问用户由界面层根据用户的剪贴板读取策略决定，本层只负责转发与返回结果。
     var clipboardReadHandler: ((String, (Boolean) -> Unit) -> Unit)? = null
-    // 界面层注入：网页请求麦克风等媒体权限时回调（由界面根据「网页权限管理 → 麦克风权限」策略处理）
-    var mediaPermissionHandler: ((Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
-    // 界面层注入：网页请求读取剪贴板、媒体权限、外部应用跳转时，读取用户策略
-    var policyProvider: ((String) -> String)? = null
-    private fun policy(key: String): String = policyProvider?.invoke(key) ?: "ask"
+    // 界面层注入：网页请求麦克风等媒体权限时回调。参数：发起请求的站点、可用的音频设备、结果回调。
+    // 是否询问用户由界面层根据用户的麦克风策略决定，本层只负责转发与返回结果。
+    var mediaPermissionHandler: ((String, Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
@@ -219,13 +217,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
                 callback: GeckoSession.PermissionDelegate.MediaCallback
             ) {
-                // 按「网页权限管理 → 麦克风权限」策略处理：始终拒绝直接回绝，其余交由界面层申请系统权限
-                if (policy("mic") == "deny") {
-                    callback.reject()
-                    return
-                }
+                // 策略由界面层处理（始终拒绝直接回绝、始终允许直接放行、每次询问先弹窗）
                 val handler = mediaPermissionHandler
-                if (handler != null && audio != null && audio.isNotEmpty()) handler(audio, callback) else callback.reject()
+                if (handler != null && audio != null && audio.isNotEmpty()) handler(uri, audio, callback) else callback.reject()
             }
         })
         session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {

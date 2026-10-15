@@ -89,16 +89,30 @@ jobs:
           cd app/build/outputs/apk/release
           sha256sum app-release.apk > SHA256SUMS.txt
 
-      - name: 删除同版本 GitHub Release 与 SSH 签名标签
+      - name: 替换同版本 GitHub Release 与 SSH 签名标签
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
+          # 同版本重新发布要的是「真正替换」，不是删一下就算数：
+          # 旧 Release、远端标签、本地检出里的同名标签都必须清掉，
+          # 否则后面的 git tag -s 会因标签已存在而失败，或旧 Release 残留让替换落空。
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release delete "$RELEASE_TAG" --yes
+            gh release delete "$RELEASE_TAG" --yes --cleanup-tag
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             git push origin ":refs/tags/$RELEASE_TAG"
+          fi
+          git tag -d "$RELEASE_TAG" >/dev/null 2>&1 || true
+
+          # 复核清除结果，避免「删了但其实没删掉」的假成功继续往下跑
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "错误：旧标签 $RELEASE_TAG 仍然存在，替换未生效"
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "错误：旧 Release $RELEASE_TAG 仍然存在，替换未生效"
+            exit 1
           fi
 
       - name: 创建并验证 SSH 签名版本标签

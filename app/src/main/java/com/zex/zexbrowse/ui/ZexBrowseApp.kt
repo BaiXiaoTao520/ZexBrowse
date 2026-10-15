@@ -136,6 +136,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zex.zexbrowse.browser.BrowserViewModel
+import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.MirrorChyan
@@ -196,9 +197,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    // 网页语音搜索等请求麦克风时：先弹出系统权限询问，用户允许后才向网页授权（默认不主动申请）
+    // 网页请求麦克风时待回传的引擎回调与设备 id；pendingMicSite 非空表示正在弹「是否允许」站点询问框
     val pendingMicCallback = remember { mutableStateOf<GeckoSession.PermissionDelegate.MediaCallback?>(null) }
     val pendingMicId = remember { mutableStateOf<String?>(null) }
+    var pendingMicSite by remember { mutableStateOf<String?>(null) }
     val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val callback = pendingMicCallback.value
         val microphoneId = pendingMicId.value
@@ -267,25 +269,35 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
 
     browserViewModel.browserSettings = settings
-    // 网页权限策略读取（剪贴板 / 麦克风 / 外部应用跳转），供引擎层在回调时即时判断
-    browserViewModel.policyProvider = { key ->
-        when (key) {
-            "mic" -> settings.micPolicy
-            "external_app" -> settings.externalAppPolicy
-            else -> settings.clipboardReadPolicy
-        }
-    }
-    // 网页请求麦克风的回调：已授权则直接放行，否则弹系统询问
-    browserViewModel.mediaPermissionHandler = { audio, callback ->
-        val activity = context.findActivity()
+    // 网页请求麦克风 → 按「网页权限管理 → 麦克风权限」策略处理：
+    // 始终拒绝直接回绝，始终允许直接放行，每次询问则弹窗并把选择按站点记住。
+    // 放行前必须持有系统录音权限：未授权时先走系统询问，用户允许后才回传引擎。
+    browserViewModel.mediaPermissionHandler = { uri, audio, callback ->
         val microphoneId = audio.firstOrNull()?.id
-        val alreadyGranted = activity != null && androidx.core.content.ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (alreadyGranted) {
-            callback.grant(null, microphoneId)
-        } else {
-            pendingMicCallback.value = callback
-            pendingMicId.value = microphoneId
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        val site = siteHost(uri)
+        val grantOrRequestSystem = {
+            if (hasRecordAudioPermission(context)) callback.grant(null, microphoneId)
+            else {
+                pendingMicCallback.value = callback
+                pendingMicId.value = microphoneId
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+        scope.launch {
+            val stored = settingsStore.settings.first()
+            when (stored.micPolicy) {
+                "allow" -> grantOrRequestSystem()
+                "deny" -> callback.reject()
+                else -> when (stored.siteMicPermissions[site]) {
+                    "allow" -> grantOrRequestSystem()
+                    "deny" -> callback.reject()
+                    else -> {
+                        pendingMicCallback.value = callback
+                        pendingMicId.value = microphoneId
+                        pendingMicSite = site
+                    }
+                }
+            }
         }
     }
     LaunchedEffect(settings.autoCheckUpdates) {
@@ -502,12 +514,20 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         },
                         onBack = goBack
                     )
-                    Page.MIC_PERMISSION -> SimplePolicyScreen(
-                        title = "麦克风权限",
-                        description = "网页请求使用麦克风（如语音搜索、语音输入）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会先弹出系统权限询问。",
-                        options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
-                        current = settings.micPolicy,
-                        onSelect = { scope.launch { settingsStore.micPolicy(it) } },
+                    Page.MIC_PERMISSION -> MicPermissionScreen(
+                        settings = settings,
+                        onSelect = { policy ->
+                            scope.launch { settingsStore.micPolicy(policy) }
+                            // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
+                            when (policy) {
+                                "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                "deny" -> revokeRecordAudioPermission(context)
+                            }
+                        },
+                        onClear = {
+                            scope.launch { settingsStore.clearSiteMicPermissions() }
+                            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+                        },
                         onBack = goBack
                     )
                     Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
@@ -534,6 +554,31 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     text = { Text("当前下载目录为内部存储（应用私有目录）。为保证大文件与外部存储访问，建议改为外部存储目录。") },
                     confirmButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) }; externalDirPicker.launch(null) }) { Text("设置外部存储") } },
                     dismissButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } }) { Text("稍后") } }
+                )
+            }
+            // 网页请求麦克风且策略为「每次询问」时：按站点询问并记住选择。
+            // 允许时若系统尚未授权，则转为系统询问（保留 pendingMicCallback，交给 launcher 回传结果）。
+            val micSite = pendingMicSite
+            if (micSite != null) {
+                val finishMic: (Boolean, Boolean) -> Unit = { allow, remember ->
+                    val callback = pendingMicCallback.value
+                    val microphoneId = pendingMicId.value
+                    if (remember) scope.launch { settingsStore.setSiteMicPermission(micSite, if (allow) "allow" else "deny") }
+                    pendingMicSite = null
+                    if (allow && !hasRecordAudioPermission(context)) {
+                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    } else {
+                        pendingMicCallback.value = null
+                        pendingMicId.value = null
+                        if (allow) callback?.grant(null, microphoneId) else callback?.reject()
+                    }
+                }
+                AlertDialog(
+                    onDismissRequest = { finishMic(false, false) },
+                    title = { Text("允许使用麦克风？") },
+                    text = { Text("$micSite 请求使用你的麦克风。") },
+                    confirmButton = { TextButton(onClick = { finishMic(true, true) }) { Text("始终允许") } },
+                    dismissButton = { TextButton(onClick = { finishMic(false, true) }) { Text("拒绝") } }
                 )
             }
         }
@@ -619,6 +664,8 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     var downloadingApp by remember { mutableStateOf<RecommendedApp?>(null) }
     var downloadId by remember { mutableStateOf<String?>(null) }
     var downloadDone by remember { mutableStateOf(false) }
+    // 网页/网盘类条目：确认二次说明弹窗后再跳转浏览器
+    var browserNoticeApp by remember { mutableStateOf<RecommendedApp?>(null) }
     val downloads by browserViewModel.downloads.collectAsState(initial = emptyList())
 
     Scaffold(
@@ -651,12 +698,15 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
             app = app,
             onDownload = {
                 detail = null
-                if (app.isApk) {
-                    downloadingApp = app
-                    downloadDone = false
-                    browserViewModel.enqueueDownload(app.downloadUrl, app.fileName, "") { id -> downloadId = id }
-                } else {
-                    openInBrowser(context, app.downloadUrl)
+                when {
+                    app.isApk -> {
+                        downloadingApp = app
+                        downloadDone = false
+                        browserViewModel.enqueueDownload(app.downloadUrl, app.fileName, "") { id -> downloadId = id }
+                    }
+                    // 网页/网盘类链接：先弹二次说明（下载步骤、网盘提取码等），确认后再交给系统打开
+                    app.browserNotice != null -> browserNoticeApp = app
+                    else -> openInBrowser(context, app.downloadUrl)
                 }
             },
             onDismiss = { detail = null }
@@ -673,6 +723,16 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
             finished = downloadDone,
             onInstall = { record?.let { openDownload(context, it) } },
             onDismiss = { downloadingApp = null; downloadId = null; downloadDone = false }
+        )
+    }
+
+    val noticeApp = browserNoticeApp
+    val notice = noticeApp?.browserNotice
+    if (noticeApp != null && notice != null) {
+        BrowserNoticeDialog(
+            notice = notice,
+            onOpen = { browserNoticeApp = null; openInBrowser(context, noticeApp.downloadUrl) },
+            onDismiss = { browserNoticeApp = null }
         )
     }
 }
@@ -746,6 +806,37 @@ private fun RecommendationInfoDialog(
                 Icon(if (app.isApk) Icons.Default.Download else Icons.Default.Language, null)
                 Spacer(Modifier.width(6.dp))
                 Text(if (app.isApk) "下载" else "浏览器打开")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+/**
+ * 网页/网盘下载的二次说明弹窗：打开浏览器前先说明下载步骤或网盘信息（如蓝奏云提取码），
+ * 确认后才跳转。对应原项目 ZexNote 中 AppShare / CoolMonitor 的下载说明弹窗。
+ */
+@Composable
+private fun BrowserNoticeDialog(
+    notice: BrowserNotice,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(notice.title) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())
+            ) {
+                Text(notice.content)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onOpen) {
+                Icon(Icons.Default.Language, null)
+                Spacer(Modifier.width(6.dp))
+                Text(notice.confirmLabel)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
@@ -1108,7 +1199,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         AlertDialog(
             onDismissRequest = { finishClipboard(false, false) },
             title = { Text("允许读取剪贴板？") },
-            text = { Text("${clipboardHost(site)} 请求读取你的剪贴板内容。") },
+            text = { Text("${siteHost(site)} 请求读取你的剪贴板内容。") },
             confirmButton = { TextButton(onClick = { finishClipboard(true, true) }) { Text("始终允许") } },
             dismissButton = { TextButton(onClick = { finishClipboard(false, true) }) { Text("拒绝") } }
         )
@@ -1659,7 +1750,66 @@ private fun clipboardPolicyLabel(policy: String) = when (policy) {
     else -> "每次询问"
 }
 
-private fun clipboardHost(uri: String): String = runCatching { java.net.URI(uri).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri
+private fun siteHost(uri: String): String = runCatching { java.net.URI(uri).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri
+
+private fun hasRecordAudioPermission(context: Context): Boolean =
+    androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+/**
+ * 撤销系统录音授权，使 Android 设置同步为「不允许」。
+ * 仅 Android 13 及以上支持；系统会在合适时机异步执行撤销，届时应用进程会被结束。
+ */
+private fun revokeRecordAudioPermission(context: Context) {
+    if (Build.VERSION.SDK_INT >= 33 && hasRecordAudioPermission(context)) {
+        runCatching { context.revokeSelfPermissionOnKill(Manifest.permission.RECORD_AUDIO) }
+    }
+}
+
+/**
+ * 麦克风权限设置页。
+ *
+ * 三档策略直接作用于网页请求；同时把授权状态同步到系统：选「始终允许」时申请一次系统录音权限，
+ * 选「始终拒绝」时撤销已授予的系统录音权限（Android 13 及以上）。
+ */
+@Composable
+private fun MicPermissionScreen(
+    settings: BrowserSettings,
+    onSelect: (String) -> Unit,
+    onClear: () -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    // 用户可能去系统设置里改动授权，回到本页时重新读取
+    var osGranted by remember { mutableStateOf(hasRecordAudioPermission(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) osGranted = hasRecordAudioPermission(context) }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    SelectionScreen("麦克风权限", onBack) {
+        item { ChoiceItem("每次询问（弹窗并记住选择）", settings.micPolicy == "ask") { onSelect("ask") } }
+        item { ChoiceItem("始终允许", settings.micPolicy == "allow") { onSelect("allow") } }
+        item { ChoiceItem("始终拒绝", settings.micPolicy == "deny") { onSelect("deny") } }
+        item { Text("网页请求使用麦克风（如语音搜索、语音输入）时：始终允许/拒绝直接放行或拦截；每次询问则先弹窗并将你的选择按网站记住。选择「始终拒绝」会同时撤销系统的录音授权（Android 13 及以上，系统在合适时机执行，届时应用可能重启）。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+        item { Spacer(Modifier.height(8.dp)) }
+        item {
+            ListItem(
+                headlineContent = { Text("系统录音权限") },
+                supportingContent = { Text(if (osGranted) "已允许" else "未允许") },
+                leadingContent = { Icon(Icons.Rounded.Mic, null) },
+                trailingContent = {
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            .onFailure { Toast.makeText(context, "无法打开系统设置", Toast.LENGTH_SHORT).show() }
+                    }) { Text("系统设置") }
+                }
+            )
+        }
+        item { Spacer(Modifier.height(8.dp)) }
+        item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text("清除已记住的网站权限") } }
+    }
+}
 
 @Composable
 private fun SelectionScreen(title: String, onBack: () -> Unit, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {

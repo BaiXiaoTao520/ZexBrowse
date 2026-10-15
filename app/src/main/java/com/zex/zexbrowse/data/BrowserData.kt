@@ -146,7 +146,9 @@ data class BrowserSettings(
     val externalAppPolicy: String = "ask",
     /** Mirror 酱激活密钥（CDK）；为空时仅能查询版本、无法使用高速下载 */
     val mirrorCdk: String = "",
-    val sitePermissions: Map<String, String> = emptyMap()
+    val sitePermissions: Map<String, String> = emptyMap(),
+    /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
+    val siteMicPermissions: Map<String, String> = emptyMap()
 )
 
 class SettingsStore(private val context: Context) {
@@ -177,6 +179,7 @@ class SettingsStore(private val context: Context) {
     private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
     private val mirrorCdkKey = stringPreferencesKey("mirror_cdk")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
+    private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -207,6 +210,10 @@ class SettingsStore(private val context: Context) {
             externalAppPolicy = preferences[externalAppPolicyKey] ?: "ask",
             mirrorCdk = preferences[mirrorCdkKey] ?: "",
             sitePermissions = (preferences[sitePermissionsKey] ?: "")
+                .split("\n")
+                .filter { it.isNotBlank() && it.contains('=') }
+                .associate { it.substringBefore('=') to it.substringAfter('=') },
+            siteMicPermissions = (preferences[siteMicPermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
                 .associate { it.substringBefore('=') to it.substringAfter('=') }
@@ -251,6 +258,12 @@ class SettingsStore(private val context: Context) {
         preferences[sitePermissionsKey] = (entries + "$key=$value").joinToString("\n")
     }
     suspend fun clearSitePermissions() = update { it[sitePermissionsKey] = "" }
+    suspend fun setSiteMicPermission(key: String, value: String) = update { preferences ->
+        val current = preferences[siteMicPermissionsKey] ?: ""
+        val entries = current.split("\n").filter { it.isNotBlank() && it.substringBefore('=') != key }
+        preferences[siteMicPermissionsKey] = (entries + "$key=$value").joinToString("\n")
+    }
+    suspend fun clearSiteMicPermissions() = update { it[siteMicPermissionsKey] = "" }
     suspend fun clearOnExit(enabled: Boolean, cookies: Boolean, cache: Boolean, history: Boolean) = update { preferences ->
         preferences[clearOnExitKey] = enabled
         preferences[clearCookiesOnExitKey] = cookies
