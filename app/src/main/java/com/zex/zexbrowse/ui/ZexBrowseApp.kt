@@ -195,27 +195,24 @@ private fun isAppDefaultBrowser(context: Context): Boolean {
 }
 
 /**
- * 调起系统默认浏览器选择框（Android 10+ 的角色请求，由系统弹窗让用户自己选）；
- * 返回 false 表示当前系统不支持或调用失败，由调用方回退到系统设置页。
+ * 构造系统「默认浏览器选择框」的 Intent（Android 10+ 的角色请求）。
+ * 返回 null 表示当前系统不支持该角色，由调用方回退到默认应用设置页。
+ *
+ * 注意：必须用 ActivityResultLauncher 以 startActivityForResult 形式启动（见 ZexBrowseApp），
+ * 系统端 RequestRoleActivity 靠 getCallingPackage() 识别请求方，
+ * 而该值仅在 startActivityForResult 启动时才非空；用 startActivity 会被系统直接忽略。
  */
-private fun requestDefaultBrowser(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+private fun defaultBrowserRoleIntent(context: Context): Intent? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
     return runCatching {
         val roleManager = context.getSystemService(android.app.role.RoleManager::class.java)
-        if (roleManager == null || !roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) return false
-        val intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        true
-    }.getOrDefault(false)
+        if (roleManager == null || !roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) return null
+        roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER)
+    }.getOrNull()
 }
 
-/**
- * 引导用户设置默认浏览器：优先直接弹系统选择框（Android 10+）；
- * 系统不支持时回退到默认应用设置页，再不行才提示手动操作。
- */
-private fun promptDefaultBrowser(context: Context) {
-    if (requestDefaultBrowser(context)) return
+/** 系统不支持角色请求时的兜底：打开系统「默认应用」设置页，再不济提示手动操作 */
+private fun openDefaultAppSettings(context: Context) {
     val launched = runCatching {
         context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }.isSuccess
@@ -230,6 +227,18 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // 默认浏览器角色请求：结果由 ON_RESUME 时的 isAppDefaultBrowser 重新检测，这里无需处理返回值
+    val defaultBrowserRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+    // 引导用户设置默认浏览器：优先弹系统选择框（Android 10+）；
+    // 系统不支持或启动失败时回退到「默认应用」设置页
+    val requestDefaultBrowser: () -> Unit = {
+        val roleIntent = defaultBrowserRoleIntent(context)
+        if (roleIntent == null) {
+            openDefaultAppSettings(context)
+        } else {
+            runCatching { defaultBrowserRoleLauncher.launch(roleIntent) }.onFailure { openDefaultAppSettings(context) }
+        }
+    }
     // 网页请求麦克风时待回传的引擎回调与设备 id；pendingMicSite 非空表示正在弹「是否允许」站点询问框
     val pendingMicCallback = remember { mutableStateOf<GeckoSession.PermissionDelegate.MediaCallback?>(null) }
     val pendingMicId = remember { mutableStateOf<String?>(null) }
@@ -462,7 +471,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         isDefaultBrowser = isDefaultBrowser,
                         onSetDefaultBrowser = {
                             // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
-                            promptDefaultBrowser(context)
+                            requestDefaultBrowser()
                         },
                         onHistory = { navigate(Page.HISTORY) },
                         onThemePersonalization = { navigate(Page.THEME_PERSONALIZATION) },
@@ -624,7 +633,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     confirmButton = {
                         Button(onClick = {
                             dismissDefaultBrowserPrompt()
-                            promptDefaultBrowser(context)
+                            requestDefaultBrowser()
                         }) { Text("设为默认") }
                     },
                     dismissButton = { TextButton(onClick = dismissDefaultBrowserPrompt) { Text("稍后") } }
