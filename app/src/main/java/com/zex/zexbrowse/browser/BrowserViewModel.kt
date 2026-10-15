@@ -16,6 +16,7 @@ import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.HistoryEntity
 import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
+import com.zex.zexbrowse.media.MediaPlaybackController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +34,9 @@ import java.util.UUID
 data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val runtime = (application as ZexBrowseApplication).runtime
+    private fun forceDarkApplication() = getApplication<Application>() as ZexBrowseApplication
+    // 网页媒体播放期间的前台服务与音频焦点管理（避免后台/锁屏时音频断续）
+    private val mediaPlayback = MediaPlaybackController(getApplication())
     private val database = BrowserDatabase.create(application)
     private val downloadScheduler = DownloadScheduler(application)
     val downloads = database.downloadDao().observeAll()
@@ -57,15 +61,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 参数：mimeTypes（可为空）、是否允许多选、结果回调（用户选中的文件 URI，取消为 null）。
     var filePickerHandler: ((Array<out String>?, Boolean, (Array<Uri>?) -> Unit) -> Unit)? = null
     // 界面层注入：网页请求打开外部应用（非 http(s) 的自定义 scheme 等）时回调，由界面弹窗询问用户是否允许跳转。
+    // 是否询问由用户在「网页权限管理 → 跳转至外部 APP 权限」中的策略决定。
     var externalAppHandler: ((String) -> Unit)? = null
     // 界面层注入：网站请求读取剪贴板时回调。参数：发起请求的站点、结果回调（true=允许，false=拒绝）。
     // 是否先询问用户由界面层根据用户的剪贴板读取策略决定，本层只负责转发与返回结果。
     var clipboardReadHandler: ((String, (Boolean) -> Unit) -> Unit)? = null
-    // 界面层注入：网页请求麦克风时据此申请系统权限并回传结果
+    // 界面层注入：网页请求麦克风等媒体权限时回调（由界面根据「网页权限管理 → 麦克风权限」策略处理）
     var mediaPermissionHandler: ((Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
+    // 界面层注入：网页请求读取剪贴板、媒体权限、外部应用跳转时，读取用户策略
+    var policyProvider: ((String) -> String)? = null
+    private fun policy(key: String): String = policyProvider?.invoke(key) ?: "ask"
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+    // 记录强制暗化扩展当前是否启用，用于在开关变化时触发页面重载使样式生效/失效
+    private var lastForceDark: Boolean? = null
     // 记录已应用到会话的 UA，避免重复设置导致无谓刷新；
     // 初始化为 null 表示“尚未应用任何 UA”，首次应用时按需设置
     private var lastUserAgent: String? = null
@@ -152,6 +162,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build())
         val id = UUID.randomUUID().toString()
+        // 媒体播放委托：播放时启动前台服务 + 申请音频焦点，停止时释放（修复后台/锁屏音频断续）
+        mediaPlayback.attach(session)
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) { if (url.startsWith("http")) { clearPending(id); pendingDownloads.remove(id) }; android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url"); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
@@ -207,6 +219,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
                 callback: GeckoSession.PermissionDelegate.MediaCallback
             ) {
+                // 按「网页权限管理 → 麦克风权限」策略处理：始终拒绝直接回绝，其余交由界面层申请系统权限
+                if (policy("mic") == "deny") {
+                    callback.reject()
+                    return
+                }
                 val handler = mediaPermissionHandler
                 if (handler != null && audio != null && audio.isNotEmpty()) handler(audio, callback) else callback.reject()
             }
@@ -291,14 +308,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun applyForceDark(dark: Boolean, force: Boolean) {
         runCatching {
-            val scheme = when {
-                !dark -> GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
-                force -> GeckoRuntimeSettings.COLOR_SCHEME_DARK
-                else -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
-            }
+            // 应用深色主题时向网页传入深色偏好（未适配的网页由内置扩展强制暗化）；
+            // 浅色主题时传入浅色偏好，避免浅色应用里出现深色网页。
+            val scheme = if (dark) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+            // 强制暗化仅在「应用深色主题 + 开启强制适配」时生效；
+            // 关闭开关后必须真正停用内置扩展，否则网页仍会被强制暗化（历史遗留问题）。
+            val forceDarkEnabled = dark && force
+            val schemeChanged = lastColorScheme != scheme
+            val forceDarkChanged = lastForceDark != forceDarkEnabled
             runtime.settings.setPreferredColorScheme(scheme)
-            if (lastColorScheme != scheme) {
+            forceDarkApplication().setForceDarkExtensionEnabled(forceDarkEnabled)
+            if (schemeChanged || forceDarkChanged) {
                 lastColorScheme = scheme
+                lastForceDark = forceDarkEnabled
+                // 扩展的启用/停用需重新加载页面才能生效
                 _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
             }
         }
@@ -326,14 +349,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 既避免自动重试导致「点取消后反复弹出」，也避免一次性弹框被取消后「再也弹不出来」。
         if (pending != null) notifyExternalDownload(pending) else tab.session.reload()
     }
-    fun enqueueDownload(url: String, fileName: String, expectedHash: String) {
+    /**
+     * 加入下载队列（与网页下载、外链下载同一套后台下载体系）。
+     * 下载记录 id 通过 [onEnqueued] 回调返回，便于调用方跟踪进度（不阻塞界面线程）。
+     */
+    fun enqueueDownload(url: String, fileName: String, expectedHash: String, onEnqueued: (String) -> Unit = {}) {
         selected?.let { tab -> if (pendingDownloads[tab.id] == url) pendingDownloads.remove(tab.id) }
         viewModelScope.launch {
-            downloadScheduler.enqueue(
-                url, fileName, expectedHash,
-                browserSettings.downloadDirectoryMode == "external",
-                browserSettings.externalDownloadTreeUri
-            )
+            val id = runCatching {
+                downloadScheduler.enqueue(
+                    url, fileName, expectedHash,
+                    browserSettings.downloadDirectoryMode == "external",
+                    browserSettings.externalDownloadTreeUri
+                )
+            }.getOrNull()
+            if (id != null) onEnqueued(id)
         }
     }
     fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
@@ -383,7 +413,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (scheme.isEmpty()) return false
         return scheme !in listOf("http", "https", "file", "about", "data", "blob", "javascript", "resource", "moz-extension", "content", "jar", "wyciwyg", "view-source")
     }
-    private fun requestExternalApp(uri: String) { externalAppHandler?.invoke(uri) }
+    private fun requestExternalApp(uri: String) {
+        // 跳转外部应用仍先由界面层弹窗询问；策略为「始终拒绝」时界面层直接忽略，不再询问。
+        // 策略为「始终允许」时界面层不弹窗直接跳转（实现见界面层 externalAppHandler）。
+        externalAppHandler?.invoke(uri)
+    }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
     private fun userAgentOverride(settings: BrowserSettings): String? {
         if (settings.simplifiedUserAgent) return "Mozilla/5.0 (Android) Gecko/131 Firefox/131"
@@ -410,5 +444,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         return (template.takeIf { it.contains("{query}") } ?: "https://www.google.com/search?q={query}").replace("{query}", encoded)
     }
-    override fun onCleared() { _tabs.value.forEach { it.session.close() }; super.onCleared() }
+    override fun onCleared() {
+        // 释放媒体资源（前台服务 / 音频焦点），避免应用退出后残留常驻通知或占着焦点
+        mediaPlayback.release()
+        _tabs.value.forEach { it.session.close() }
+        super.onCleared()
+    }
 }

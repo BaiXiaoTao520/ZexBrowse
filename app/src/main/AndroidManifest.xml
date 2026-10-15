@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 网页媒体播放期间保持前台服务，避免后台/锁屏时被系统降优先级导致音频断续 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 网页语音搜索等需要麦克风；声明但不默认申请，仅在网页实际使用时由系统弹窗询问 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -26,6 +28,8 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
         <service android:name="androidx.work.impl.foreground.SystemForegroundService" android:foregroundServiceType="dataSync" android:exported="false" tools:node="merge" />
+        <!-- 网页媒体播放前台服务：仅在网页实际播放音频/视频时启动 -->
+        <service android:name=".media.MediaPlaybackService" android:foregroundServiceType="mediaPlayback" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:windowSoftInputMode="stateUnspecified|adjustResize">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <!-- 允许被系统列为默认浏览器候选：接收 http/https 链接（是否设为默认由用户自愿决定） -->

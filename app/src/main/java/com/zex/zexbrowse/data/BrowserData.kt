@@ -142,6 +142,10 @@ data class BrowserSettings(
     val autoCheckUpdates: Boolean = true,
     val storageHintShown: Boolean = false,
     val clipboardReadPolicy: String = "ask",
+    val micPolicy: String = "ask",
+    val externalAppPolicy: String = "ask",
+    /** Mirror 酱激活密钥（CDK）；为空时仅能查询版本、无法使用高速下载 */
+    val mirrorCdk: String = "",
     val sitePermissions: Map<String, String> = emptyMap()
 )
 
@@ -169,6 +173,9 @@ class SettingsStore(private val context: Context) {
     private val autoCheckUpdatesKey = booleanPreferencesKey("auto_check_updates")
     private val storageHintShownKey = booleanPreferencesKey("storage_hint_shown")
     private val clipboardReadPolicyKey = stringPreferencesKey("clipboard_read_policy")
+    private val micPolicyKey = stringPreferencesKey("mic_policy")
+    private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
+    private val mirrorCdkKey = stringPreferencesKey("mirror_cdk")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
 
     val settings = context.dataStore.data.map { preferences ->
@@ -196,6 +203,9 @@ class SettingsStore(private val context: Context) {
             autoCheckUpdates = preferences[autoCheckUpdatesKey] ?: true,
             storageHintShown = preferences[storageHintShownKey] ?: false,
             clipboardReadPolicy = preferences[clipboardReadPolicyKey] ?: "ask",
+            micPolicy = preferences[micPolicyKey] ?: "ask",
+            externalAppPolicy = preferences[externalAppPolicyKey] ?: "ask",
+            mirrorCdk = preferences[mirrorCdkKey] ?: "",
             sitePermissions = (preferences[sitePermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
@@ -231,6 +241,10 @@ class SettingsStore(private val context: Context) {
     suspend fun autoCheckUpdates(value: Boolean) = update { it[autoCheckUpdatesKey] = value }
     suspend fun storageHintShown(value: Boolean) = update { it[storageHintShownKey] = value }
     suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
+    suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
+    suspend fun externalAppPolicy(value: String) = update { it[externalAppPolicyKey] = value }
+    // 仅本地保存 CDK，不写入日志、不上传到除 Mirror 酱外的任何服务
+    suspend fun mirrorCdk(value: String) = update { it[mirrorCdkKey] = value }
     suspend fun setSitePermission(key: String, value: String) = update { preferences ->
         val current = preferences[sitePermissionsKey] ?: ""
         val entries = current.split("\n").filter { it.isNotBlank() && it.substringBefore('=') != key }
