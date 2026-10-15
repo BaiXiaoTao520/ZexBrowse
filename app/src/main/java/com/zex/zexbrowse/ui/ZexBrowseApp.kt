@@ -1034,8 +1034,11 @@ private fun AddressInput(value: String, onValueChange: (String) -> Unit, onSubmi
 
 @Composable
 private fun QuickSiteGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onRestore: () -> Unit) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(sites.chunked(2)) { row ->
+    // 用普通 Column 而非 LazyColumn：本组件始终嵌在带 verticalScroll 的首页里，
+    // 纵向可滚动组件不能在无限高度约束下测量（会直接抛异常导致启动闪退）；
+    // 快捷站点数量本就很少，无需懒加载。
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        sites.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { site ->
                     ElevatedCard(onClick = { onOpen(site.url) }, modifier = Modifier.weight(1f).height(92.dp)) {
@@ -1048,7 +1051,7 @@ private fun QuickSiteGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onRe
                 repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        item { TextButton(onClick = onRestore, modifier = Modifier.fillMaxWidth()) { Text("恢复默认快捷站点") } }
+        TextButton(onClick = onRestore, modifier = Modifier.fillMaxWidth()) { Text("恢复默认快捷站点") }
     }
 }
 
