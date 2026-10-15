@@ -16,11 +16,27 @@ import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
+ * 网页/网盘类下载的二次说明弹窗内容。
+ *
+ * 这类链接无法在应用内直接下载，需要在跳转浏览器前先说明下载步骤或网盘信息
+ * （例如蓝奏云的提取码）。为 null 表示无需说明，直接交给系统打开。
+ */
+data class BrowserNotice(
+    /** 弹窗标题 */
+    val title: String,
+    /** 弹窗正文（换行分隔） */
+    val content: String,
+    /** 确认按钮文案 */
+    val confirmLabel: String
+)
+
+/**
  * 应用推荐条目。
  *
  * 字段与本应用的下载流程保持一致：
  * - [downloadUrl] 为 APK 直链时走应用内下载（遵循「下载设置」中的目录配置），完成后可安装；
- * - 否则为网页/网盘类资源，交给系统处理（由系统默认浏览器或用户选择的应用打开）。
+ * - 否则为网页/网盘类资源，交给系统处理（由系统默认浏览器或用户选择的应用打开）；
+ *   配置了 [browserNotice] 时，打开浏览器前先弹出说明。
  */
 data class RecommendedApp(
     val name: String,
@@ -28,7 +44,9 @@ data class RecommendedApp(
     val summary: String,
     val description: String,
     val downloadUrl: String,
-    val icon: ImageVector
+    val icon: ImageVector,
+    /** 网页/网盘类下载的二次说明弹窗；为 null 表示直接打开浏览器 */
+    val browserNotice: BrowserNotice? = null
 ) {
     /** 卡片/弹窗标题：有版本号时拼接版本号显示 */
     val displayName: String get() = if (version.isEmpty()) name else "$name $version"
@@ -49,6 +67,15 @@ val appShareRecommendation = RecommendedApp(
     summary = "App 多版本讨论、评分与资源分享平台",
     downloadUrl = "https://app.sharess.cn/download",
     icon = Icons.Rounded.Apps,
+    browserNotice = BrowserNotice(
+        title = "AppShare 下载说明",
+        content = "具体下载步骤：\n\n" +
+            "1. 点击页面中的“正式版”。\n" +
+            "2. 页面会跳转到蓝奏云。\n" +
+            "3. 在蓝奏云页面点击下载即可。\n\n" +
+            "建议使用电脑 UA 访问。手机端网页可能会提示开通会员才能下载。",
+        confirmLabel = "打开浏览器"
+    ),
     description = """
         AppShare 平台介绍
         一个提供 App 多版本讨论及评分的平台
@@ -154,6 +181,14 @@ val coolMonitorRecommendation = RecommendedApp(
     summary = "开源设备健康监控诊断工具",
     downloadUrl = "https://wwbaa.lanzoub.com/b01gicpghc",
     icon = Icons.Rounded.MonitorHeart,
+    browserNotice = BrowserNotice(
+        title = "CoolMonitor 网盘下载",
+        content = "即将跳转至浏览器\n" +
+            "网盘商：蓝奏云\n" +
+            "提取码：1c37\n" +
+            "建议更换为电脑 UA 访问下载文件",
+        confirmLabel = "网盘下载"
+    ),
     description = "CoolMonitor 安卓设备健康监控诊断工具，实时监测CPU/电池温度、后台耗电应用、WiFi网络风险，支持App权限审计、垃圾营销通知过滤、电池健康评估，内置AI智能分析设备异常并给出优化建议，纯本地数据处理不上传隐私，无广告免费使用"
 )
 
