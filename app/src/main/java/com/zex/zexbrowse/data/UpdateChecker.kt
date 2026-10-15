@@ -228,6 +228,12 @@ class UpdateChecker(
         }
     }
 
+    /**
+     * 校验激活密钥是否可用：真实发起一次平台请求。
+     * 返回平台提示，空字符串表示密钥有效；null 表示服务未开放或请求失败，无法判断。
+     */
+    suspend fun verifyCdk(cdk: String): String? = MirrorChyan.latest(cdk, client)?.message
+
     fun isNewer(remote: String, local: String = BuildConfig.VERSION_NAME): Boolean {
         val remoteParts = versionParts(remote)
         val localParts = versionParts(local)

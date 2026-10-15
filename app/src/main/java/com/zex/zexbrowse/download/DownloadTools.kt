@@ -41,6 +41,23 @@ object ApkHashVerifier {
 class DownloadManager(private val context: Context) {
     private val client = OkHttpClient()
 
+    /** 更新包存放目录：不进用户下载目录，仅用于应用内更新流程 */
+    private fun updateDirectory(): File =
+        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "updates")
+
+    /** 更新包与同名临时文件；统一定位，避免下载与清场指向不同路径 */
+    private fun updateFiles(fileName: String): Pair<File, File> {
+        val destination = File(updateDirectory(), fileName.ifBlank { "ZexBrowse-update.apk" })
+        return destination to File(destination.parentFile, "${destination.name}.download")
+    }
+
+    /** 删除更新包及其未完成的临时文件，供取消下载 / 放弃安装时清场，避免残留 */
+    fun deleteUpdateApk(fileName: String) {
+        val (destination, temporary) = updateFiles(fileName)
+        temporary.delete()
+        destination.delete()
+    }
+
     suspend fun download(url: String, target: Uri): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build()
         client.newCall(request).execute().use { response ->
@@ -58,11 +75,9 @@ class DownloadManager(private val context: Context) {
         fileName: String,
         onProgress: (Int) -> Unit
     ): UpdateDownloadResult = withContext(Dispatchers.IO) {
-        val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: File(context.filesDir, "updates")
+        val directory = updateDirectory()
         check(directory.exists() || directory.mkdirs()) { "无法创建更新下载目录" }
-        val destination = File(directory, fileName.ifBlank { "ZexBrowse-update.apk" })
-        val temporary = File(directory, "${destination.name}.download")
+        val (destination, temporary) = updateFiles(fileName)
         temporary.delete()
 
         try {
