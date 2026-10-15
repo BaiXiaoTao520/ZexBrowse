@@ -612,7 +612,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             }
             // 首启引导第二弹：外部存储提示处理完（或无需提示）后询问是否设为默认浏览器
             if (showDefaultBrowserPrompt && startupUpdate == null && !showFirstRunStorageHint) {
-                val dismissDefaultBrowserPrompt = {
+                // 显式标注 () -> Unit：末尾 scope.launch 返回 Job，存进变量后类型会被推成 () -> Job
+                val dismissDefaultBrowserPrompt: () -> Unit = {
                     showDefaultBrowserPrompt = false
                     scope.launch { settingsStore.defaultBrowserHintShown(true) }
                 }
