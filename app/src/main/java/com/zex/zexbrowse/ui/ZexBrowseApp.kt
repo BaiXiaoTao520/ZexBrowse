@@ -19,10 +19,12 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
@@ -72,12 +74,15 @@ import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Cookie
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material3.AlertDialog
@@ -130,6 +135,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.AndroidView
@@ -154,15 +160,17 @@ import com.zex.zexbrowse.BuildConfig
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, THEME_PERSONALIZATION, DOWNLOAD_SETTINGS, SEARCH_BROWSER_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -289,8 +297,15 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     LaunchedEffect(incomingUrlSeq, incomingUrl) {
         val target = incomingUrl ?: return@LaunchedEffect
         android.util.Log.d("ZexIntent", "LaunchedEffect external url=$target seq=$incomingUrlSeq")
-        browserViewModel.newTab(initialUrl = target)
-        navStack = listOf(Page.HOME, Page.BROWSER)
+        // 外部链接优先复用当前标签：首次启动时已有一个空白首页标签，
+        // 此时若无条件 newTab 就会出现两个标签页（原问题是两个空白页）。
+        // 仅当当前标签已经加载过内容（非空白）时，才新建标签，避免覆盖用户正在看的网页。
+        if (browserViewModel.loadExternalUrl(target)) {
+            navStack = listOf(Page.HOME, Page.BROWSER)
+        } else {
+            browserViewModel.newTab(initialUrl = target)
+            navStack = listOf(Page.HOME, Page.BROWSER)
+        }
         onIncomingUrlHandled()
     }
 
@@ -395,11 +410,49 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         }
     }
 
-    BackHandler(enabled = navStack.size > 1) {
+    // 侧滑返回（预测性返回）的跟手进度：0=未开始，1=已滑到底。
+    // 仅用于手势进行中的实时位移，松手提交/取消后由回调恢复为 0。
+    val backProgress = remember { Animatable(0f) }
+    // 返回是否可以拦截：有可退的页面栈，或浏览器可后退。
+    // 侧滑手势与实体返回键共用同一套判定。
+    val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true)
+    val performBack: () -> Unit = {
         if (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true) {
             browserViewModel.back()
         } else {
             goBack()
+        }
+    }
+
+    BackHandler(enabled = navStack.size > 1) {
+        performBack()
+    }
+
+    // 预测性返回：系统开始侧滑时持续推送进度，据此实时位移页面，
+    // 松手完成则执行返回，取消则回弹。仅 Android 13+ 支持，低版本自动回退到 BackHandler。
+    //
+    // 流程语义（官方约定）：
+    // - collect 正常结束 = 手势完成，应提交返回；
+    // - 抛 CancellationException = 手势取消，必须终止本协程，不能继续执行返回。
+    PredictiveBackHandler(enabled = canHandleBack) { progressEvents ->
+        try {
+            progressEvents.collect { event -> backProgress.snapTo(event.progress) }
+            // 手势完成
+            backProgress.animateTo(1f, tween(120))
+            performBack()
+        } catch (cancelled: CancellationException) {
+            // 手势取消：本协程已处于取消态，回弹动画需放在 NonCancellable 中，
+            // 否则 animateTo 会立即再抛 CancellationException，导致回弹不执行、页面停在半途。
+            withContext(NonCancellable) {
+                backProgress.animateTo(0f, tween(160))
+            }
+            throw cancelled
+        } finally {
+            // 无论完成或取消，最终都回到初始位移，避免残留偏移。
+            // finally 可能也处于取消态，同样需 NonCancellable，否则会抛新异常覆盖原结果。
+            withContext(NonCancellable) {
+                backProgress.snapTo(0f)
+            }
         }
     }
 
@@ -435,173 +488,180 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
 
     MaterialExpressiveTheme(colorScheme = colorScheme) {
         Surface {
-            // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
-            AnimatedContent(
-                targetState = page,
-                transitionSpec = {
-                    val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
-                    slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
-                },
-                label = "page"
-            ) { destination ->
-                when (destination) {
-                    Page.HOME -> HomeScreen(
-                        settings = settings,
-                        setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
-                        onOpen = { address -> browserViewModel.load(address); navigate(Page.BROWSER) },
-                        onHistory = { navigate(Page.HISTORY) },
-                        onSettings = { navigate(Page.SETTINGS) },
-                        onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
-                    )
-                    Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
-                        browserViewModel = browserViewModel,
-                        onBack = goBack
-                    )
-                    Page.BROWSER -> BrowserScreen(
-                        viewModel = browserViewModel,
-                        settings = settings,
-                        settingsStore = settingsStore,
-                        onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
-                        onDownloads = { navigate(Page.DOWNLOADS) },
-                        onSettings = { navigate(Page.SETTINGS) }
-                    )
-                    Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
-                    Page.SETTINGS -> SettingsScreen(
-                        settings = settings,
-                        isDefaultBrowser = isDefaultBrowser,
-                        onSetDefaultBrowser = {
-                            // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
-                            requestDefaultBrowser()
-                        },
-                        onHistory = { navigate(Page.HISTORY) },
-                        onThemePersonalization = { navigate(Page.THEME_PERSONALIZATION) },
-                        onDownloadSettings = { navigate(Page.DOWNLOAD_SETTINGS) },
-                        onSearchBrowserSettings = { navigate(Page.SEARCH_BROWSER_SETTINGS) },
-                        onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
-                        onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
-                        onAbout = { navigate(Page.ABOUT) },
-                        onBack = goBack
-                    )
-                    Page.THEME_PERSONALIZATION -> ThemePersonalizationScreen(
-                        settings = settings,
-                        setMode = { scope.launch { settingsStore.mode(it) } },
-                        setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
-                        setDynamic = { scope.launch { settingsStore.dynamic(it) } },
-                        onBack = goBack
-                    )
-                    Page.DOWNLOAD_SETTINGS -> DownloadSettingsScreen(
-                        settings = settings,
-                        setApkHash = { scope.launch { settingsStore.apkHash(it) } },
-                        onDownloads = { navigate(Page.DOWNLOADS) },
-                        onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
-                        onBack = goBack
-                    )
-                    Page.SEARCH_BROWSER_SETTINGS -> SearchBrowserSettingsScreen(
-                        settings = settings,
-                        onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
-                        onUserAgent = { navigate(Page.USER_AGENT) },
-                        onBack = goBack
-                    )
-                    Page.COOKIE_SETTINGS -> CookieSettingsScreen(
-                        settings = settings,
-                        setCookie = { scope.launch { settingsStore.cookies(it) } },
-                        setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
-                        clearBrowserData = {
-                            browserViewModel.clearBrowserData()
-                            Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
-                        },
-                        onBack = goBack
-                    )
-                    Page.WEB_PERMISSIONS -> WebPermissionsScreen(
-                        settings = settings,
-                        onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
-                        onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
-                        onMic = { navigate(Page.MIC_PERMISSION) },
-                        onBack = goBack
-                    )
-                    Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
-                    Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
-                    Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
-                        settings = settings,
-                        onSave = { mode, uri, path ->
-                            scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
-                            Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
-                            goBack()
-                        },
-                        onBack = goBack
-                    )
-                    Page.SEARCH_ENGINE -> SearchEngineScreen(
-                        settings = settings,
-                        onSelect = { scope.launch { settingsStore.searchEngine(it) } },
-                        onCustom = { navigate(Page.CUSTOM_SEARCH) },
-                        onBack = goBack
-                    )
-                    Page.CUSTOM_SEARCH -> CustomSearchScreen(
-                        settings = settings,
-                        onSave = { title, url ->
-                            scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
-                            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                            goBack()
-                        },
-                        onBack = goBack
-                    )
-                    Page.USER_AGENT -> UserAgentScreen(
-                        settings = settings,
-                        onSelect = { scope.launch { settingsStore.userAgentMode(it) } },
-                        onSimplified = { scope.launch { settingsStore.simplifiedUserAgent(it) } },
-                        onCustom = { navigate(Page.CUSTOM_USER_AGENT) },
-                        onBack = goBack
-                    )
-                    Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
-                        settings = settings,
-                        onSave = { title, value ->
-                            scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
-                            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                            goBack()
-                        },
-                        onBack = goBack
-                    )
-                    Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
-                        settings = settings,
-                        onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
-                        onClear = {
-                            scope.launch { settingsStore.clearSitePermissions() }
-                            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
-                        },
-                        onBack = goBack
-                    )
-                    Page.MIC_PERMISSION -> MicPermissionScreen(
-                        settings = settings,
-                        onSelect = { policy ->
-                            scope.launch { settingsStore.micPolicy(policy) }
-                            // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
-                            when (policy) {
-                                "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                "deny" -> revokeRecordAudioPermission(context)
-                            }
-                        },
-                        onClear = {
-                            scope.launch { settingsStore.clearSiteMicPermissions() }
-                            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
-                        },
-                        onBack = goBack
-                    )
-                    Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
-                        title = "跳转至外部 APP 权限",
-                        description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
-                        options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
-                        current = settings.externalAppPolicy,
-                        onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
-                        onBack = goBack
-                    )
-                    Page.ABOUT -> AboutScreen(
-                        settings = settings,
-                        setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
-                        setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
-                        setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
-                        onSponsor = { sponsorInfo = true },
-                        onBack = goBack
-                    )
+            // 侧滑返回跟手位移：页面随手势进度向右平移并轻微缩小，松手取消时回弹。
+            // 位移仅在手势进行中生效（progress=0 时完全无影响），不影响普通页面切换动画。
+            Box(
+                Modifier.graphicsLayer {
+                    val progress = backProgress.value
+                    translationX = size.width * 0.28f * progress
+                    val scale = 1f - 0.06f * progress
+                    scaleX = scale
+                    scaleY = scale
+                }
+            ) {
+                // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
+                AnimatedContent(
+                    targetState = page,
+                    transitionSpec = {
+                        val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
+                        slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+                    },
+                    label = "page"
+                ) { destination ->
+                    when (destination) {
+                        Page.HOME -> HomeScreen(
+                            settings = settings,
+                            setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
+                            onOpen = { address -> browserViewModel.load(address); navigate(Page.BROWSER) },
+                            onHistory = { navigate(Page.HISTORY) },
+                            onSettings = { navigate(Page.SETTINGS) },
+                            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
+                        )
+                        Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
+                            browserViewModel = browserViewModel,
+                            onBack = goBack
+                        )
+                        Page.BROWSER -> BrowserScreen(
+                            viewModel = browserViewModel,
+                            settings = settings,
+                            settingsStore = settingsStore,
+                            onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
+                            onDownloads = { navigate(Page.DOWNLOADS) },
+                            onSettings = { navigate(Page.SETTINGS) }
+                        )
+                        Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
+                        Page.SETTINGS -> SettingsScreen(
+                            settings = settings,
+                            isDefaultBrowser = isDefaultBrowser,
+                            onSetDefaultBrowser = {
+                                // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
+                                requestDefaultBrowser()
+                            },
+                            onHistory = { navigate(Page.HISTORY) },
+                            onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
+                            onSiteSettings = { navigate(Page.SITE_SETTINGS) },
+                            onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
+                            onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
+                            onAbout = { navigate(Page.ABOUT) },
+                            onBack = goBack
+                        )
+                        Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
+                            settings = settings,
+                            setMode = { scope.launch { settingsStore.mode(it) } },
+                            setDynamic = { scope.launch { settingsStore.dynamic(it) } },
+                            setApkHash = { scope.launch { settingsStore.apkHash(it) } },
+                            onDownloads = { navigate(Page.DOWNLOADS) },
+                            onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
+                            onBack = goBack
+                        )
+                        Page.SITE_SETTINGS -> WebSiteSettingsScreen(
+                            settings = settings,
+                            setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
+                            onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
+                            onUserAgent = { navigate(Page.USER_AGENT) },
+                            onBack = goBack
+                        )
+                        Page.COOKIE_SETTINGS -> CookieSettingsScreen(
+                            settings = settings,
+                            setCookie = { scope.launch { settingsStore.cookies(it) } },
+                            setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
+                            clearBrowserData = {
+                                browserViewModel.clearBrowserData()
+                                Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
+                            },
+                            onBack = goBack
+                        )
+                        Page.WEB_PERMISSIONS -> WebPermissionsScreen(
+                            settings = settings,
+                            onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
+                            onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
+                            onMic = { navigate(Page.MIC_PERMISSION) },
+                            onBack = goBack
+                        )
+                        Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
+                        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
+                        Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
+                            settings = settings,
+                            onSave = { mode, uri, path ->
+                                scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
+                                Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
+                                goBack()
+                            },
+                            onBack = goBack
+                        )
+                        Page.SEARCH_ENGINE -> SearchEngineScreen(
+                            settings = settings,
+                            onSelect = { scope.launch { settingsStore.searchEngine(it) } },
+                            onCustom = { navigate(Page.CUSTOM_SEARCH) },
+                            onBack = goBack
+                        )
+                        Page.CUSTOM_SEARCH -> CustomSearchScreen(
+                            settings = settings,
+                            onSave = { title, url ->
+                                scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
+                                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                                goBack()
+                            },
+                            onBack = goBack
+                        )
+                        Page.USER_AGENT -> UserAgentScreen(
+                            settings = settings,
+                            onSelect = { scope.launch { settingsStore.userAgentMode(it) } },
+                            onSimplified = { scope.launch { settingsStore.simplifiedUserAgent(it) } },
+                            onCustom = { navigate(Page.CUSTOM_USER_AGENT) },
+                            onBack = goBack
+                        )
+                        Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
+                            settings = settings,
+                            onSave = { title, value ->
+                                scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
+                                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                                goBack()
+                            },
+                            onBack = goBack
+                        )
+                        Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
+                            settings = settings,
+                            onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
+                            onClear = {
+                                scope.launch { settingsStore.clearSitePermissions() }
+                                Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+                            },
+                            onBack = goBack
+                        )
+                        Page.MIC_PERMISSION -> MicPermissionScreen(
+                            settings = settings,
+                            onSelect = { policy ->
+                                scope.launch { settingsStore.micPolicy(policy) }
+                                // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
+                                when (policy) {
+                                    "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    "deny" -> revokeRecordAudioPermission(context)
+                                }
+                            },
+                            onClear = {
+                                scope.launch { settingsStore.clearSiteMicPermissions() }
+                                Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+                            },
+                            onBack = goBack
+                        )
+                        Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
+                            title = "跳转至外部 APP 权限",
+                            description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
+                            options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
+                            current = settings.externalAppPolicy,
+                            onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
+                            onBack = goBack
+                        )
+                        Page.ABOUT -> AboutScreen(
+                            settings = settings,
+                            setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
+                            setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
+                            setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
+                            onSponsor = { sponsorInfo = true },
+                            onBack = goBack
+                        )
+                    }
                 }
             }
             startupUpdate?.let { release -> UpdateDialog(release = release, preferMirror = settings.preferMirrorDownload, onDismiss = { startupUpdate = null }) }
@@ -1170,7 +1230,12 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             GlassSurface(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
                 IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, "后退") }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, "前进") }
-                IconButton(onClick = viewModel::reload) { Icon(Icons.Default.Refresh, "刷新") }
+                // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
+                if (selectedTab?.loading == true) {
+                    IconButton(onClick = viewModel::stopLoading) { Icon(Icons.Default.Close, "停止加载") }
+                } else {
+                    IconButton(onClick = viewModel::reload) { Icon(Icons.Default.Refresh, "刷新") }
+                }
                 IconButton(onClick = { showNewTabDialog = true }) { Icon(Icons.Default.Add, "新建标签") }
                 IconButton(onClick = { onTabs(selectedTab?.incognito == true) }) {
                     BadgedBox(badge = { Badge { Text(visibleTabs.size.toString()) } }) { Icon(Icons.Default.Tab, "标签") }
@@ -1475,9 +1540,8 @@ private fun SettingsScreen(
     isDefaultBrowser: Boolean,
     onSetDefaultBrowser: () -> Unit,
     onHistory: () -> Unit,
-    onThemePersonalization: () -> Unit,
-    onDownloadSettings: () -> Unit,
-    onSearchBrowserSettings: () -> Unit,
+    onGeneralSettings: () -> Unit,
+    onSiteSettings: () -> Unit,
     onCookieSettings: () -> Unit,
     onWebPermissions: () -> Unit,
     onAbout: () -> Unit,
@@ -1486,39 +1550,30 @@ private fun SettingsScreen(
     var showLinkDiagnostics by remember { mutableStateOf(false) }
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            // 主题及网页个性化：主题 / 强制适配深色模式 / 动态莫奈取色
+            // 通用设置：主题与网页个性化 / 下载设置 合并为同一页
             item {
                 SettingsEntry(
-                    title = "主题及网页个性化",
-                    subtitle = "主题、强制适配深色模式、动态莫奈取色",
-                    icon = Icons.Rounded.Palette,
-                    onClick = onThemePersonalization
+                    title = "通用设置",
+                    subtitle = "主题、动态取色、下载与保存路径",
+                    icon = Icons.Rounded.Tune,
+                    onClick = onGeneralSettings
                 )
             }
-            // 下载设置：下载记录 / 下载文件路径 / APK SHA-256 校验
+            // 网站设置：强制适配深色模式 / 搜索引擎 / 浏览器标识
             item {
                 SettingsEntry(
-                    title = "下载设置",
-                    subtitle = "下载记录、保存路径、APK 校验",
-                    icon = Icons.Default.Download,
-                    onClick = onDownloadSettings
+                    title = "网站设置",
+                    subtitle = "强制适配深色模式、搜索引擎、浏览器标识",
+                    icon = Icons.Rounded.Language,
+                    onClick = onSiteSettings
                 )
             }
-            // 搜索引擎与浏览设置：搜索引擎 / 浏览器标识
+            // 隐私：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据
             item {
                 SettingsEntry(
-                    title = "搜索引擎与浏览设置",
-                    subtitle = "搜索引擎、浏览器标识",
-                    icon = Icons.Rounded.ManageSearch,
-                    onClick = onSearchBrowserSettings
-                )
-            }
-            // Cookie 设置：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据
-            item {
-                SettingsEntry(
-                    title = "Cookie 设置",
+                    title = "隐私",
                     subtitle = cookieSettingsSubtitle(settings),
-                    icon = Icons.Rounded.Cookie,
+                    icon = Icons.Rounded.PrivacyTip,
                     onClick = onCookieSettings
                 )
             }
@@ -1578,7 +1633,7 @@ private fun SettingsScreen(
     }
 }
 
-/** Cookie 设置副标题：概括当前各项开关状态 */
+/** 隐私入口副标题：概括当前各项开关状态 */
 private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
     val cookieState = if (settings.cookiesEnabled) "Cookie 追踪已开启" else "Cookie 追踪已关闭"
     val exitState = if (settings.clearOnExit) "退出时自动清除" else "退出时保留数据"
@@ -1751,36 +1806,37 @@ private fun SimplePolicyScreen(
     }
 }
 
-/** 主题及网页个性化：主题 / 强制适配深色模式 / 动态莫奈取色 */
+/** 通用设置：主题设置（主题 / 动态取色）与下载设置的合并页 */
 @Composable
-private fun ThemePersonalizationScreen(
+private fun GeneralSettingsScreen(
     settings: BrowserSettings,
     setMode: (String) -> Unit,
-    setForceDarkWeb: (Boolean) -> Unit,
     setDynamic: (Boolean) -> Unit,
-    onBack: () -> Unit
-) {
-    SelectionScreen("主题及网页个性化", onBack) {
-        item { ThemeSelector(settings.darkMode, setMode) }
-        item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后网页按自身与系统偏好渲染", settings.forceDarkWeb, setForceDarkWeb, leading = Icons.Rounded.DarkMode) }
-        item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic, leading = Icons.Rounded.Palette) }
-    }
-}
-
-/** 下载设置：下载记录 / 下载文件路径 / APK SHA-256 校验 */
-@Composable
-private fun DownloadSettingsScreen(
-    settings: BrowserSettings,
     setApkHash: (Boolean) -> Unit,
     onDownloads: () -> Unit,
     onDownloadDirectory: () -> Unit,
     onBack: () -> Unit
 ) {
-    SelectionScreen("下载设置", onBack) {
+    SelectionScreen("通用设置", onBack) {
+        item { SectionHeader("主题设置") }
+        item { ThemeSelector(settings.darkMode, setMode) }
+        item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic, leading = Icons.Rounded.Palette) }
+        item { SectionHeader("下载设置") }
         item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
         item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(downloadDirectoryLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
         item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash, leading = Icons.Rounded.VerifiedUser) }
     }
+}
+
+/** 设置页内的分组标题 */
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+    )
 }
 
 private fun downloadDirectoryLabel(settings: BrowserSettings): String = when {
@@ -1789,21 +1845,28 @@ private fun downloadDirectoryLabel(settings: BrowserSettings): String = when {
     else -> "内部应用目录"
 }
 
-/** 搜索引擎与浏览设置：搜索引擎 / 浏览器标识 */
+/**
+ * 网站设置：把原「强制适配深色模式」（属于网页渲染）与
+ * 「搜索引擎」「浏览器标识」合并到同一页。
+ */
 @Composable
-private fun SearchBrowserSettingsScreen(
+private fun WebSiteSettingsScreen(
     settings: BrowserSettings,
+    setForceDarkWeb: (Boolean) -> Unit,
     onSearchEngine: () -> Unit,
     onUserAgent: () -> Unit,
     onBack: () -> Unit
 ) {
-    SelectionScreen("搜索引擎与浏览设置", onBack) {
+    SelectionScreen("网站设置", onBack) {
+        item { SectionHeader("网页渲染") }
+        item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后网页按自身与系统偏好渲染", settings.forceDarkWeb, setForceDarkWeb, leading = Icons.Rounded.DarkMode) }
+        item { SectionHeader("搜索与浏览") }
         item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
         item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
     }
 }
 
-/** Cookie 设置：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据 */
+/** 隐私（原 Cookie 设置）：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据 */
 @Composable
 private fun CookieSettingsScreen(
     settings: BrowserSettings,
@@ -1817,7 +1880,7 @@ private fun CookieSettingsScreen(
     var exitCookies by remember(settings.clearCookiesOnExit) { mutableStateOf(settings.clearCookiesOnExit) }
     var exitCache by remember(settings.clearCacheOnExit) { mutableStateOf(settings.clearCacheOnExit) }
     var exitHistory by remember(settings.clearHistoryOnExit) { mutableStateOf(settings.clearHistoryOnExit) }
-    SelectionScreen("Cookie 设置", onBack) {
+    SelectionScreen("隐私", onBack) {
         item { SwitchRow("Cookie 追踪", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie, leading = Icons.Rounded.Cookie) }
         item { ListItem(headlineContent = { Text("清除缓存与 Cookie") }, supportingContent = { Text("立即清除缓存、Cookie 和浏览历史") }, leadingContent = { Icon(Icons.Default.Delete, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
         item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit, { showExitOptions = true }, leading = Icons.Default.Delete) }
