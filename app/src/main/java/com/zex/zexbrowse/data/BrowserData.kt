@@ -152,7 +152,9 @@ data class BrowserSettings(
     val preferMirrorDownload: Boolean = false,
     val sitePermissions: Map<String, String> = emptyMap(),
     /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
-    val siteMicPermissions: Map<String, String> = emptyMap()
+    val siteMicPermissions: Map<String, String> = emptyMap(),
+    /** 首页搜索框的搜索历史（新→旧，最多保留 10 条） */
+    val searchHistory: List<String> = emptyList()
 )
 
 class SettingsStore(private val context: Context) {
@@ -186,6 +188,7 @@ class SettingsStore(private val context: Context) {
     private val preferMirrorDownloadKey = booleanPreferencesKey("prefer_mirror_download")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
     private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
+    private val searchHistoryKey = stringPreferencesKey("search_history")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -224,7 +227,10 @@ class SettingsStore(private val context: Context) {
             siteMicPermissions = (preferences[siteMicPermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
-                .associate { it.substringBefore('=') to it.substringAfter('=') }
+                .associate { it.substringBefore('=') to it.substringAfter('=') },
+            searchHistory = (preferences[searchHistoryKey] ?: "")
+                .split("\n")
+                .filter { it.isNotBlank() }
         )
     }
 
@@ -260,6 +266,26 @@ class SettingsStore(private val context: Context) {
     suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
     suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
     suspend fun externalAppPolicy(value: String) = update { it[externalAppPolicyKey] = value }
+
+    /** 记录一次搜索：去重后置顶，仅保留最近 10 条 */
+    suspend fun addSearchHistory(keyword: String) = update { preferences ->
+        val trimmed = keyword.trim()
+        if (trimmed.isEmpty()) return@update
+        val current = (preferences[searchHistoryKey] ?: "")
+            .split("\n")
+            .filter { it.isNotBlank() && it != trimmed }
+        preferences[searchHistoryKey] = (listOf(trimmed) + current).take(10).joinToString("\n")
+    }
+
+    /** 从搜索历史中移除单条 */
+    suspend fun removeSearchHistory(keyword: String) = update { preferences ->
+        val remaining = (preferences[searchHistoryKey] ?: "")
+            .split("\n")
+            .filter { it.isNotBlank() && it != keyword }
+        preferences[searchHistoryKey] = remaining.joinToString("\n")
+    }
+
+    suspend fun clearSearchHistory() = update { it[searchHistoryKey] = "" }
     // 仅本地保存 CDK，不写入日志、不上传到除 Mirror 酱外的任何服务
     suspend fun mirrorCdk(value: String) = update { it[mirrorCdkKey] = value }
     suspend fun setSitePermission(key: String, value: String) = update { preferences ->

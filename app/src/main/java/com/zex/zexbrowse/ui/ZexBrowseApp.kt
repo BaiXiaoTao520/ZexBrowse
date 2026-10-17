@@ -24,9 +24,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -150,6 +155,7 @@ import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.MirrorChyan
 import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
+import com.zex.zexbrowse.data.SearchSuggestions
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.data.recommendedApps
@@ -511,8 +517,14 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     when (destination) {
                         Page.HOME -> HomeScreen(
                             settings = settings,
+                            searchHistory = settings.searchHistory,
+                            onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
                             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
-                            onOpen = { address -> browserViewModel.load(address); navigate(Page.BROWSER) },
+                            onOpen = { address ->
+                                // 记录搜索历史（网址也一并记下，便于重复访问）
+                                scope.launch { settingsStore.addSearchHistory(address) }
+                                browserViewModel.load(address); navigate(Page.BROWSER)
+                            },
                             onHistory = { navigate(Page.HISTORY) },
                             onSettings = { navigate(Page.SETTINGS) },
                             onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
@@ -741,7 +753,7 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 @Composable
-private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
+private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { now = Date(); kotlinx.coroutines.delay(1_000) } }
@@ -765,7 +777,7 @@ private fun HomeScreen(settings: BrowserSettings, setQuickSites: (String) -> Uni
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(48.dp))
-            AddressInput(value = query, onValueChange = { query = it }, onSubmit = { onOpen(query) })
+            AddressInput(value = query, onValueChange = { query = it }, onSubmit = { onOpen(query) }, searchHistory = searchHistory, onRemoveHistory = onRemoveSearchHistory)
             Spacer(Modifier.height(32.dp))
             // 应用推荐入口：点击进入推荐列表（位于快捷访问上方）
             AppRecommendationEntry(onClick = onAppRecommendations)
@@ -1076,29 +1088,110 @@ private fun AppRecommendationEntry(onClick: () -> Unit) {
 }
 
 @Composable
-private fun AddressInput(value: String, onValueChange: (String) -> Unit, onSubmit: () -> Unit, onFocusChange: (Boolean) -> Unit = {}) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth().onFocusChanged { onFocusChange(it.isFocused) },
-        placeholder = { Text("搜索或输入网址") },
-        singleLine = true,
-        shape = MaterialTheme.shapes.extraLarge,
-        trailingIcon = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (value.isNotBlank()) {
-                    IconButton(onClick = { onValueChange("") }) { Icon(Icons.Default.Close, "清空") }
+private fun AddressInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onFocusChange: (Boolean) -> Unit = {},
+    searchHistory: List<String> = emptyList(),
+    onRemoveHistory: (String) -> Unit = {},
+    // 是否启用联想与历史下拉：首页需要，浏览器地址栏不需要（会遮挡网页）
+    showSuggestionsPanel: Boolean = true
+) {
+    var focused by remember { mutableStateOf(false) }
+    // 远程联想结果；每次输入变化后由防抖效应刷新
+    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    // 本地过滤后的搜索历史（仅在无远程建议或未输入时展示）
+    val matchedHistory = remember(searchHistory, value) {
+        val keyword = value.trim()
+        if (keyword.isEmpty()) searchHistory.take(8)
+        else searchHistory.filter { it.contains(keyword, ignoreCase = true) }.take(8)
+    }
+
+    // 防抖拉取联想词：每次输入变更后延时 250ms 再请求，取消上一次任务，避免逐字刷接口
+    LaunchedEffect(value) {
+        val keyword = value.trim()
+        if (!showSuggestionsPanel || keyword.isEmpty()) { suggestions = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(250)
+        suggestions = SearchSuggestions.fetch(keyword)
+    }
+
+    // 无输入时优先展示历史；有输入时优先远程建议，无建议时回退历史
+    val showHistory = value.isBlank() && matchedHistory.isNotEmpty()
+    val showSuggestions = value.isNotBlank() && suggestions.isNotEmpty()
+    val fallbackHistory = value.isNotBlank() && suggestions.isEmpty() && matchedHistory.isNotEmpty()
+    val expanded = showSuggestionsPanel && focused && (showHistory || showSuggestions || fallbackHistory)
+
+    Column(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
+            placeholder = { Text("搜索或输入网址") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.extraLarge,
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (value.isNotBlank()) {
+                        IconButton(onClick = { onValueChange("") }) { Icon(Icons.Default.Close, "清空") }
+                    }
+                    IconButton(onClick = { if (value.isNotBlank()) onSubmit() }) { Icon(Icons.Default.Search, "打开") }
                 }
-                IconButton(onClick = { if (value.isNotBlank()) onSubmit() }) { Icon(Icons.Default.Search, "打开") }
-            }
-        },
-        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Go),
-        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (value.isNotBlank()) onSubmit() }),
-        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Go),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (value.isNotBlank()) onSubmit() }),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            )
         )
-    )
+
+        // 展开/收起动效：高度伸展 + 淡入淡出同步进行，展开与收起都保持顺滑
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(animationSpec = tween(200), expandFrom = Alignment.Top) + fadeIn(animationSpec = tween(200)),
+            exit = shrinkVertically(animationSpec = tween(160), shrinkTowards = Alignment.Top) + fadeOut(animationSpec = tween(120))
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                shape = MaterialTheme.shapes.large
+            ) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    val items = when {
+                        showSuggestions -> suggestions
+                        showHistory || fallbackHistory -> matchedHistory
+                        else -> emptyList()
+                    }
+                    items.forEach { keyword ->
+                        // 历史项可长按式的删除由末尾图标提供，联想项直接点击即搜索
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { onValueChange(keyword); onSubmit() }
+                                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (showSuggestions) Icons.Default.Search else Icons.Default.History,
+                                null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(keyword, maxLines = 1, modifier = Modifier.weight(1f))
+                            if (!showSuggestions) {
+                                IconButton(onClick = { onRemoveHistory(keyword) }, modifier = Modifier.size(36.dp)) {
+                                    Icon(Icons.Default.Close, "从搜索历史中移除", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
+                                Icon(Icons.Default.ArrowForward, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(12.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1223,7 +1316,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 2.dp)) {
-                AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) }, onFocusChange = { inputFocused = it })
+                AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) }, onFocusChange = { inputFocused = it }, showSuggestionsPanel = false)
             }
         },
         bottomBar = {
