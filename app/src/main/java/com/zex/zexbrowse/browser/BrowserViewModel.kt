@@ -103,6 +103,25 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return session
     }
 
+    /**
+     * 外部链接（其它应用打开/分享）优先复用当前标签，避免首启时出现两个标签页。
+     *
+     * 仅当当前标签还停在空白页（无地址或 about:blank）时才复用；
+     * 否则返回 false，由调用方新建标签，避免覆盖用户正在浏览的网页。
+     */
+    fun loadExternalUrl(url: String): Boolean {
+        val tab = selected ?: return false
+        val currentUrl = tab.url
+        val isBlankTab = currentUrl.isBlank() || currentUrl == "about:blank"
+        if (!isBlankTab) return false
+        // 已有一个未开始加载的待加载地址时不覆盖（避免连续外链互相覆盖）
+        if (pendingInitialLoads.containsKey(tab.id)) return false
+        // 复用新标签的首次加载链路：视图可能尚未就绪，交由 pendingInitialLoads 重试确保生效
+        pendingInitialLoads[tab.id] = normalize(url)
+        mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+        return true
+    }
+
     // GeckoView 视图挂载完会话后调用；此时 loadUri 才能可靠生效。
     // 仅在尚未开始尝试时触发，后续交给内部重试链，避免重复触发导致重复加载。
     fun onSessionAttached(id: String) {
@@ -343,6 +362,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 既避免自动重试导致「点取消后反复弹出」，也避免一次性弹框被取消后「再也弹不出来」。
         if (pending != null) notifyExternalDownload(pending) else tab.session.reload()
     }
+    /** 立即停止当前标签的加载（用于加载中的工具栏按钮，避免用户卡在加载状态） */
+    fun stopLoading() { selected?.session?.stop() }
     /**
      * 加入下载队列（与网页下载、外链下载同一套后台下载体系）。
      * 下载记录 id 通过 [onEnqueued] 回调返回，便于调用方跟踪进度（不阻塞界面线程）。
