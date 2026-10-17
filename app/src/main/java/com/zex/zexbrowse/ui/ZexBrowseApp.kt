@@ -35,6 +35,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -425,6 +426,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 是否正在由侧滑手势完成返回：为 true 时不播放 AnimatedContent 自带的横向切换动画，
     // 否则会与整页位移叠加，出现「旧页面停留片刻再滑走」的双重动画。
     var predictivePop by remember { mutableStateOf(false) }
+    // 手势进行中：true 时下层渲染目标页，使页面滑走时露出的是真实的目标页而非空白
+    var backActive by remember { mutableStateOf(false) }
+    // 本次手势将要返回到的页面（无页面可退时为默认值，不参与渲染）
+    var backTarget by remember { mutableStateOf(Page.HOME) }
     // 返回是否可以拦截：有可退的页面栈，或浏览器可后退。
     // 侧滑手势与实体返回键共用同一套判定。
     val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true)
@@ -435,6 +440,19 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             goBack()
         }
     }
+    // 计算并启用下层目标页；浏览器内先后退网页时页面不变，无需预渲染。
+    // 预渲染目标为浏览器页时必须跳过：BrowserScreen 会通过 AndroidView 创建 GeckoView 并挂载同一个 session，
+    // 而 GeckoView 不允许同一 session 同时挂到两个 View，否则会崩溃或黑屏。
+    // 浏览器页需要预渲染时改为显示纯色背景，同样比空白自然。
+    val beginBack: () -> Unit = {
+        val browserCanGoBack = page == Page.BROWSER && browserViewModel.selected?.canGoBack == true
+        if (!browserCanGoBack && navStack.size > 1) {
+            backTarget = navStack[navStack.size - 2]
+            backActive = true
+        }
+    }
+    // 下层是否可安全预渲染真实页面
+    val canPreviewTarget = backTarget != Page.BROWSER
 
     BackHandler(enabled = navStack.size > 1) {
         // 实体/三键返回不走整页跟手动画，确保标志处于关闭状态，避免影响常规页面切换动画
@@ -449,27 +467,36 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // - collect 正常结束 = 手势完成，应提交返回；
     // - 抛 CancellationException = 手势取消，必须终止本协程，不能继续执行返回。
     PredictiveBackHandler(enabled = canHandleBack) { progressEvents ->
+        beginBack()
         try {
-            progressEvents.collect { event -> backProgress.snapTo(event.progress) }
+            progressEvents.collect { event ->
+                // 首个事件到达即开启下层目标页；初始进度可能很小，确保页面不会先露出一帧空白
+                if (!backActive && event.progress > 0f) beginBack()
+                backProgress.snapTo(event.progress)
+            }
             // 手势完成：先把整页顺完滑出屏幕，再换页。
-            backProgress.animateTo(1f, tween(110))
+            backProgress.animateTo(1f, tween(100))
             // 标志在换页的整个重组周期内保持为 true，使 AnimatedContent 不插自己的滑入滑出动画；
             // 若在此处立即改回 false，重组时标志已复位，过渡动画依旧会启动。
             predictivePop = true
             performBack()
-            // 换页与复位放在同一帧提交：旧页已完全滑出，新页直接以静止状态出现。
+            // 换页与复位放在同一帧提交：旧页已完全滑出，下方的目标页已在原位静止渲染，
+            // 切页后画面完全一致，因此看不到空白也不会跳帧。
             // 复位必须用 NonCancellable：若协程在换页后被取消，标志会永久停在 true，
             // 导致之后所有页面切换都丢失动画。
             withContext(NonCancellable) {
                 backProgress.snapTo(0f)
                 withFrameNanos { }
                 predictivePop = false
+                backActive = false
             }
         } catch (cancelled: CancellationException) {
             // 手势取消：本协程已处于取消态，回弹动画需放在 NonCancellable 中，
             // 否则 animateTo 会立即再抛 CancellationException，导致回弹不执行、页面停在半途。
             withContext(NonCancellable) {
                 backProgress.animateTo(0f, tween(180))
+                // 取消手势：下层目标页也随之收起
+                backActive = false
             }
             throw cancelled
         }
@@ -507,194 +534,79 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
 
     MaterialExpressiveTheme(colorScheme = colorScheme) {
         Surface {
-            // 侧滑返回跟手位移：整页（含 TopBar / 内容 / 底部栏）随手指整体右移并缩小，
-            // 露出下层背景，形成「整个页面被拎走」的效果，而不是页内元素各自滑动。
-            // progress=0 时变换完全无影响，不影响普通页面切换与日常使用。
-            Box(
-                Modifier.graphicsLayer {
-                    val progress = backProgress.value
-                    if (progress > 0f) {
-                        translationX = size.width * progress
-                        val scale = 1f - 0.12f * progress
-                        scaleX = scale
-                        scaleY = scale
-                        // 轻微淡出，让下层背景透出，强化「页面正在被移除」的观感
-                        alpha = 1f - 0.3f * progress
+            Box(Modifier.fillMaxSize()) {
+                // 下层：手势进行中预先渲染目标页，让滑走时能看到真实的目标页面而不是空白。
+                // 仅在 beginBack() 之后有内容，平时完全不参与组合，不影响性能。
+                if (backActive) {
+                    Box(Modifier.fillMaxSize()) {
+                        if (canPreviewTarget) {
+                            PageContent(
+                                destination = backTarget,
+                                settings = settings,
+                                searchHistory = settings.searchHistory,
+                                settingsStore = settingsStore,
+                                browserViewModel = browserViewModel,
+                                scope = scope,
+                                context = context,
+                                isDefaultBrowser = isDefaultBrowser,
+                                requestDefaultBrowser = requestDefaultBrowser,
+                                micPermissionLauncher = micPermissionLauncher,
+                                tabsIncognito = tabsIncognito,
+                                navigate = navigate,
+                                goBack = goBack,
+                                onSponsor = { sponsorInfo = true }
+                            )
+                        } else {
+                            // 目标为浏览器页：不能重复创建 GeckoView，用主题背景色占位，
+                            // 比露出纯空白更自然，也不会出现白色闪屏。
+                            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
+                        }
                     }
                 }
-            ) {
-                // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
-                // 侧滑手势完成时跳过该动画，由上面的整页位移接管，避免双重动画造成页面停留。
-                AnimatedContent(
-                    targetState = page,
-                    transitionSpec = {
-                        if (predictivePop) {
-                            EnterTransition.None togetherWith ExitTransition.None
-                        } else {
-                            val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
-                            slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+
+                // 上层：当前页。手势期间随手指整体右移并缩小、淡出，露出下面的目标页；
+                // 手势完成时切换页面并瞬间归位，由下层同款页面无缝接替，因此不会再出现空白或跳帧。
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        val progress = backProgress.value
+                        if (progress > 0f) {
+                            translationX = size.width * progress
+                            val scale = 1f - 0.12f * progress
+                            scaleX = scale
+                            scaleY = scale
+                            alpha = 1f - 0.25f * progress
                         }
-                    },
-                    label = "page"
-                ) { destination ->
-                    when (destination) {
-                        Page.HOME -> HomeScreen(
+                    }
+                ) {
+                    // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
+                    // 侧滑手势完成时跳过该动画，由整页位移接管，避免双重动画。
+                    AnimatedContent(
+                        targetState = page,
+                        transitionSpec = {
+                            if (predictivePop) {
+                                EnterTransition.None togetherWith ExitTransition.None
+                            } else {
+                                val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
+                                slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+                            }
+                        },
+                        label = "page"
+                    ) { destination ->
+                        PageContent(
+                            destination = destination,
                             settings = settings,
                             searchHistory = settings.searchHistory,
-                            onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
-                            setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
-                            onOpen = { address ->
-                                // 记录搜索历史（网址也一并记下，便于重复访问）
-                                scope.launch { settingsStore.addSearchHistory(address) }
-                                browserViewModel.load(address); navigate(Page.BROWSER)
-                            },
-                            onHistory = { navigate(Page.HISTORY) },
-                            onSettings = { navigate(Page.SETTINGS) },
-                            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
-                        )
-                        Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
-                            browserViewModel = browserViewModel,
-                            onBack = goBack
-                        )
-                        Page.BROWSER -> BrowserScreen(
-                            viewModel = browserViewModel,
-                            settings = settings,
                             settingsStore = settingsStore,
-                            onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
-                            onDownloads = { navigate(Page.DOWNLOADS) },
-                            onSettings = { navigate(Page.SETTINGS) }
-                        )
-                        Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
-                        Page.SETTINGS -> SettingsScreen(
-                            settings = settings,
+                            browserViewModel = browserViewModel,
+                            scope = scope,
+                            context = context,
                             isDefaultBrowser = isDefaultBrowser,
-                            onSetDefaultBrowser = {
-                                // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
-                                requestDefaultBrowser()
-                            },
-                            onHistory = { navigate(Page.HISTORY) },
-                            onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
-                            onSiteSettings = { navigate(Page.SITE_SETTINGS) },
-                            onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
-                            onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
-                            onAbout = { navigate(Page.ABOUT) },
-                            onBack = goBack
-                        )
-                        Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
-                            settings = settings,
-                            setMode = { scope.launch { settingsStore.mode(it) } },
-                            setDynamic = { scope.launch { settingsStore.dynamic(it) } },
-                            setApkHash = { scope.launch { settingsStore.apkHash(it) } },
-                            onDownloads = { navigate(Page.DOWNLOADS) },
-                            onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
-                            onBack = goBack
-                        )
-                        Page.SITE_SETTINGS -> WebSiteSettingsScreen(
-                            settings = settings,
-                            setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
-                            onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
-                            onUserAgent = { navigate(Page.USER_AGENT) },
-                            onBack = goBack
-                        )
-                        Page.COOKIE_SETTINGS -> CookieSettingsScreen(
-                            settings = settings,
-                            setCookie = { scope.launch { settingsStore.cookies(it) } },
-                            setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
-                            clearBrowserData = {
-                                browserViewModel.clearBrowserData()
-                                Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
-                            },
-                            onBack = goBack
-                        )
-                        Page.WEB_PERMISSIONS -> WebPermissionsScreen(
-                            settings = settings,
-                            onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
-                            onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
-                            onMic = { navigate(Page.MIC_PERMISSION) },
-                            onBack = goBack
-                        )
-                        Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
-                        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
-                        Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
-                            settings = settings,
-                            onSave = { mode, uri, path ->
-                                scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
-                                Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
-                                goBack()
-                            },
-                            onBack = goBack
-                        )
-                        Page.SEARCH_ENGINE -> SearchEngineScreen(
-                            settings = settings,
-                            onSelect = { scope.launch { settingsStore.searchEngine(it) } },
-                            onCustom = { navigate(Page.CUSTOM_SEARCH) },
-                            onBack = goBack
-                        )
-                        Page.CUSTOM_SEARCH -> CustomSearchScreen(
-                            settings = settings,
-                            onSave = { title, url ->
-                                scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
-                                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                                goBack()
-                            },
-                            onBack = goBack
-                        )
-                        Page.USER_AGENT -> UserAgentScreen(
-                            settings = settings,
-                            onSelect = { scope.launch { settingsStore.userAgentMode(it) } },
-                            onSimplified = { scope.launch { settingsStore.simplifiedUserAgent(it) } },
-                            onCustom = { navigate(Page.CUSTOM_USER_AGENT) },
-                            onBack = goBack
-                        )
-                        Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
-                            settings = settings,
-                            onSave = { title, value ->
-                                scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
-                                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                                goBack()
-                            },
-                            onBack = goBack
-                        )
-                        Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
-                            settings = settings,
-                            onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
-                            onClear = {
-                                scope.launch { settingsStore.clearSitePermissions() }
-                                Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
-                            },
-                            onBack = goBack
-                        )
-                        Page.MIC_PERMISSION -> MicPermissionScreen(
-                            settings = settings,
-                            onSelect = { policy ->
-                                scope.launch { settingsStore.micPolicy(policy) }
-                                // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
-                                when (policy) {
-                                    "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    "deny" -> revokeRecordAudioPermission(context)
-                                }
-                            },
-                            onClear = {
-                                scope.launch { settingsStore.clearSiteMicPermissions() }
-                                Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
-                            },
-                            onBack = goBack
-                        )
-                        Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
-                            title = "跳转至外部 APP 权限",
-                            description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
-                            options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
-                            current = settings.externalAppPolicy,
-                            onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
-                            onBack = goBack
-                        )
-                        Page.ABOUT -> AboutScreen(
-                            settings = settings,
-                            setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
-                            setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
-                            setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
-                            onSponsor = { sponsorInfo = true },
-                            onBack = goBack
+                            requestDefaultBrowser = requestDefaultBrowser,
+                            micPermissionLauncher = micPermissionLauncher,
+                            tabsIncognito = tabsIncognito,
+                            navigate = navigate,
+                            goBack = goBack,
+                            onSponsor = { sponsorInfo = true }
                         )
                     }
                 }
@@ -761,6 +673,191 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             }
         }
     }
+}
+
+/**
+ * 单个页面的内容渲染。
+ *
+ * 抽成独立函数是为了让「当前页」与「侧滑返回时下层预渲染的目标页」共用同一份实现：
+ * 手势滑动时上方页面被移走，下方显示的必须是真实的目标页（而不是空白），
+ * 否则会先看到空白、松手后又瞬间切页，观感断裂。
+ */
+@Composable
+private fun PageContent(
+    destination: Page,
+    settings: BrowserSettings,
+    searchHistory: List<String>,
+    settingsStore: SettingsStore,
+    browserViewModel: BrowserViewModel,
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: Context,
+    isDefaultBrowser: Boolean,
+    requestDefaultBrowser: () -> Unit,
+    micPermissionLauncher: androidx.activity.result.ActivityResultLauncher<String>,
+    tabsIncognito: Boolean,
+    navigate: (Page) -> Unit,
+    goBack: () -> Unit,
+    onSponsor: () -> Unit
+) {
+    when (destination) {
+    Page.HOME -> HomeScreen(
+        settings = settings,
+        searchHistory = settings.searchHistory,
+        onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
+        setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
+        onOpen = { address ->
+            // 记录搜索历史（网址也一并记下，便于重复访问）
+            scope.launch { settingsStore.addSearchHistory(address) }
+            browserViewModel.load(address); navigate(Page.BROWSER)
+        },
+        onHistory = { navigate(Page.HISTORY) },
+        onSettings = { navigate(Page.SETTINGS) },
+        onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
+    )
+    Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
+        browserViewModel = browserViewModel,
+        onBack = goBack
+    )
+    Page.BROWSER -> BrowserScreen(
+        viewModel = browserViewModel,
+        settings = settings,
+        settingsStore = settingsStore,
+        onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
+        onDownloads = { navigate(Page.DOWNLOADS) },
+        onSettings = { navigate(Page.SETTINGS) }
+    )
+    Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
+    Page.SETTINGS -> SettingsScreen(
+        settings = settings,
+        isDefaultBrowser = isDefaultBrowser,
+        onSetDefaultBrowser = {
+            // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
+            requestDefaultBrowser()
+        },
+        onHistory = { navigate(Page.HISTORY) },
+        onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
+        onSiteSettings = { navigate(Page.SITE_SETTINGS) },
+        onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
+        onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
+        onAbout = { navigate(Page.ABOUT) },
+        onBack = goBack
+    )
+    Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
+        settings = settings,
+        setMode = { scope.launch { settingsStore.mode(it) } },
+        setDynamic = { scope.launch { settingsStore.dynamic(it) } },
+        setApkHash = { scope.launch { settingsStore.apkHash(it) } },
+        onDownloads = { navigate(Page.DOWNLOADS) },
+        onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
+        onBack = goBack
+    )
+    Page.SITE_SETTINGS -> WebSiteSettingsScreen(
+        settings = settings,
+        setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
+        onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
+        onUserAgent = { navigate(Page.USER_AGENT) },
+        onBack = goBack
+    )
+    Page.COOKIE_SETTINGS -> CookieSettingsScreen(
+        settings = settings,
+        setCookie = { scope.launch { settingsStore.cookies(it) } },
+        setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
+        clearBrowserData = {
+            browserViewModel.clearBrowserData()
+            Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
+        },
+        onBack = goBack
+    )
+    Page.WEB_PERMISSIONS -> WebPermissionsScreen(
+        settings = settings,
+        onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
+        onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
+        onMic = { navigate(Page.MIC_PERMISSION) },
+        onBack = goBack
+    )
+    Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
+    Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
+    Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
+        settings = settings,
+        onSave = { mode, uri, path ->
+            scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
+            Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
+            goBack()
+        },
+        onBack = goBack
+    )
+    Page.SEARCH_ENGINE -> SearchEngineScreen(
+        settings = settings,
+        onSelect = { scope.launch { settingsStore.searchEngine(it) } },
+        onCustom = { navigate(Page.CUSTOM_SEARCH) },
+        onBack = goBack
+    )
+    Page.CUSTOM_SEARCH -> CustomSearchScreen(
+        settings = settings,
+        onSave = { title, url ->
+            scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
+            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+            goBack()
+        },
+        onBack = goBack
+    )
+    Page.USER_AGENT -> UserAgentScreen(
+        settings = settings,
+        onSelect = { scope.launch { settingsStore.userAgentMode(it) } },
+        onSimplified = { scope.launch { settingsStore.simplifiedUserAgent(it) } },
+        onCustom = { navigate(Page.CUSTOM_USER_AGENT) },
+        onBack = goBack
+    )
+    Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
+        settings = settings,
+        onSave = { title, value ->
+            scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
+            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+            goBack()
+        },
+        onBack = goBack
+    )
+    Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
+        settings = settings,
+        onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
+        onClear = {
+            scope.launch { settingsStore.clearSitePermissions() }
+            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+        },
+        onBack = goBack
+    )
+    Page.MIC_PERMISSION -> MicPermissionScreen(
+        settings = settings,
+        onSelect = { policy ->
+            scope.launch { settingsStore.micPolicy(policy) }
+            // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
+            when (policy) {
+                "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                "deny" -> revokeRecordAudioPermission(context)
+            }
+        },
+        onClear = {
+            scope.launch { settingsStore.clearSiteMicPermissions() }
+            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+        },
+        onBack = goBack
+    )
+    Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
+        title = "跳转至外部 APP 权限",
+        description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
+        options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
+        current = settings.externalAppPolicy,
+        onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
+        onBack = goBack
+    )
+    Page.ABOUT -> AboutScreen(
+        settings = settings,
+        setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
+        setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
+        setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
+        onSponsor = { sponsorInfo = true },
+        onBack = goBack
+    )    }
 }
 
 @Composable
