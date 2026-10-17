@@ -435,7 +435,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
     private fun userAgentOverride(settings: BrowserSettings): String? {
-        if (settings.simplifiedUserAgent) return "Mozilla/5.0 (Android) Gecko/131 Firefox/131"
+        // 简化标识：去掉设备型号、Build 号等隐私信息，但必须保持 Firefox UA 的合法格式。
+        // 注意 Gecko/ 后面固定为 20100101（不是版本号），且需带 rv: 标记；
+        // 写成 "Gecko/131" 这类非法格式会被必应等站点的反爬规则直接拒绝（请求被 blocked）。
+        if (settings.simplifiedUserAgent) return "Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/20100101 Firefox/131.0"
         val userAgent = when (settings.userAgentMode) {
             "android_chrome" -> "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
             "desktop_chrome" -> "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
