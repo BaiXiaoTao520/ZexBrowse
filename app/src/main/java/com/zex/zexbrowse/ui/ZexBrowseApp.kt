@@ -25,6 +25,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -132,6 +134,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -419,6 +422,9 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 侧滑返回（预测性返回）的跟手进度：0=未开始，1=已滑到底。
     // 仅用于手势进行中的实时位移，松手提交/取消后由回调恢复为 0。
     val backProgress = remember { Animatable(0f) }
+    // 是否正在由侧滑手势完成返回：为 true 时不播放 AnimatedContent 自带的横向切换动画，
+    // 否则会与整页位移叠加，出现「旧页面停留片刻再滑走」的双重动画。
+    var predictivePop by remember { mutableStateOf(false) }
     // 返回是否可以拦截：有可退的页面栈，或浏览器可后退。
     // 侧滑手势与实体返回键共用同一套判定。
     val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true)
@@ -431,6 +437,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
 
     BackHandler(enabled = navStack.size > 1) {
+        // 实体/三键返回不走整页跟手动画，确保标志处于关闭状态，避免影响常规页面切换动画
+        predictivePop = false
         performBack()
     }
 
@@ -443,22 +451,27 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     PredictiveBackHandler(enabled = canHandleBack) { progressEvents ->
         try {
             progressEvents.collect { event -> backProgress.snapTo(event.progress) }
-            // 手势完成
-            backProgress.animateTo(1f, tween(120))
+            // 手势完成：先把整页顺完滑出屏幕，再换页。
+            backProgress.animateTo(1f, tween(110))
+            // 标志在换页的整个重组周期内保持为 true，使 AnimatedContent 不插自己的滑入滑出动画；
+            // 若在此处立即改回 false，重组时标志已复位，过渡动画依旧会启动。
+            predictivePop = true
             performBack()
+            // 换页与复位放在同一帧提交：旧页已完全滑出，新页直接以静止状态出现。
+            // 复位必须用 NonCancellable：若协程在换页后被取消，标志会永久停在 true，
+            // 导致之后所有页面切换都丢失动画。
+            withContext(NonCancellable) {
+                backProgress.snapTo(0f)
+                withFrameNanos { }
+                predictivePop = false
+            }
         } catch (cancelled: CancellationException) {
             // 手势取消：本协程已处于取消态，回弹动画需放在 NonCancellable 中，
             // 否则 animateTo 会立即再抛 CancellationException，导致回弹不执行、页面停在半途。
             withContext(NonCancellable) {
-                backProgress.animateTo(0f, tween(160))
+                backProgress.animateTo(0f, tween(180))
             }
             throw cancelled
-        } finally {
-            // 无论完成或取消，最终都回到初始位移，避免残留偏移。
-            // finally 可能也处于取消态，同样需 NonCancellable，否则会抛新异常覆盖原结果。
-            withContext(NonCancellable) {
-                backProgress.snapTo(0f)
-            }
         }
     }
 
@@ -494,23 +507,33 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
 
     MaterialExpressiveTheme(colorScheme = colorScheme) {
         Surface {
-            // 侧滑返回跟手位移：页面随手势进度向右平移并轻微缩小，松手取消时回弹。
-            // 位移仅在手势进行中生效（progress=0 时完全无影响），不影响普通页面切换动画。
+            // 侧滑返回跟手位移：整页（含 TopBar / 内容 / 底部栏）随手指整体右移并缩小，
+            // 露出下层背景，形成「整个页面被拎走」的效果，而不是页内元素各自滑动。
+            // progress=0 时变换完全无影响，不影响普通页面切换与日常使用。
             Box(
                 Modifier.graphicsLayer {
                     val progress = backProgress.value
-                    translationX = size.width * 0.28f * progress
-                    val scale = 1f - 0.06f * progress
-                    scaleX = scale
-                    scaleY = scale
+                    if (progress > 0f) {
+                        translationX = size.width * progress
+                        val scale = 1f - 0.12f * progress
+                        scaleX = scale
+                        scaleY = scale
+                        // 轻微淡出，让下层背景透出，强化「页面正在被移除」的观感
+                        alpha = 1f - 0.3f * progress
+                    }
                 }
             ) {
                 // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
+                // 侧滑手势完成时跳过该动画，由上面的整页位移接管，避免双重动画造成页面停留。
                 AnimatedContent(
                     targetState = page,
                     transitionSpec = {
-                        val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
-                        slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+                        if (predictivePop) {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        } else {
+                            val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
+                            slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+                        }
                     },
                     label = "page"
                 ) { destination ->

@@ -12,8 +12,8 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 36
-        versionCode = 40
-        versionName = "6.1.0"
+        versionCode = 41
+        versionName = "6.1.1"
         ndk { abiFilters += "arm64-v8a" }
 
         // Mirror 酱资源 ID：不从源码硬编码（避免公开仓库暴露），
