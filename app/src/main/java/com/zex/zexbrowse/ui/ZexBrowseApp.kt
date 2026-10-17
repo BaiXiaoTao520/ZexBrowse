@@ -700,164 +700,165 @@ private fun PageContent(
     onSponsor: () -> Unit
 ) {
     when (destination) {
-    Page.HOME -> HomeScreen(
-        settings = settings,
-        searchHistory = settings.searchHistory,
-        onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
-        setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
-        onOpen = { address ->
-            // 记录搜索历史（网址也一并记下，便于重复访问）
-            scope.launch { settingsStore.addSearchHistory(address) }
-            browserViewModel.load(address); navigate(Page.BROWSER)
-        },
-        onHistory = { navigate(Page.HISTORY) },
-        onSettings = { navigate(Page.SETTINGS) },
-        onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
-    )
-    Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
-        browserViewModel = browserViewModel,
-        onBack = goBack
-    )
-    Page.BROWSER -> BrowserScreen(
-        viewModel = browserViewModel,
-        settings = settings,
-        settingsStore = settingsStore,
-        onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
-        onDownloads = { navigate(Page.DOWNLOADS) },
-        onSettings = { navigate(Page.SETTINGS) }
-    )
-    Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
-    Page.SETTINGS -> SettingsScreen(
-        settings = settings,
-        isDefaultBrowser = isDefaultBrowser,
-        onSetDefaultBrowser = {
-            // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
-            requestDefaultBrowser()
-        },
-        onHistory = { navigate(Page.HISTORY) },
-        onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
-        onSiteSettings = { navigate(Page.SITE_SETTINGS) },
-        onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
-        onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
-        onAbout = { navigate(Page.ABOUT) },
-        onBack = goBack
-    )
-    Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
-        settings = settings,
-        setMode = { scope.launch { settingsStore.mode(it) } },
-        setDynamic = { scope.launch { settingsStore.dynamic(it) } },
-        setApkHash = { scope.launch { settingsStore.apkHash(it) } },
-        onDownloads = { navigate(Page.DOWNLOADS) },
-        onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
-        onBack = goBack
-    )
-    Page.SITE_SETTINGS -> WebSiteSettingsScreen(
-        settings = settings,
-        setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
-        onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
-        onUserAgent = { navigate(Page.USER_AGENT) },
-        onBack = goBack
-    )
-    Page.COOKIE_SETTINGS -> CookieSettingsScreen(
-        settings = settings,
-        setCookie = { scope.launch { settingsStore.cookies(it) } },
-        setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
-        clearBrowserData = {
-            browserViewModel.clearBrowserData()
-            Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
-        },
-        onBack = goBack
-    )
-    Page.WEB_PERMISSIONS -> WebPermissionsScreen(
-        settings = settings,
-        onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
-        onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
-        onMic = { navigate(Page.MIC_PERMISSION) },
-        onBack = goBack
-    )
-    Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
-    Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
-    Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
-        settings = settings,
-        onSave = { mode, uri, path ->
-            scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
-            Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
-            goBack()
-        },
-        onBack = goBack
-    )
-    Page.SEARCH_ENGINE -> SearchEngineScreen(
-        settings = settings,
-        onSelect = { scope.launch { settingsStore.searchEngine(it) } },
-        onCustom = { navigate(Page.CUSTOM_SEARCH) },
-        onBack = goBack
-    )
-    Page.CUSTOM_SEARCH -> CustomSearchScreen(
-        settings = settings,
-        onSave = { title, url ->
-            scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
-            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-            goBack()
-        },
-        onBack = goBack
-    )
-    Page.USER_AGENT -> UserAgentScreen(
-        settings = settings,
-        onSelect = { scope.launch { settingsStore.userAgentMode(it) } },
-        onSimplified = { scope.launch { settingsStore.simplifiedUserAgent(it) } },
-        onCustom = { navigate(Page.CUSTOM_USER_AGENT) },
-        onBack = goBack
-    )
-    Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
-        settings = settings,
-        onSave = { title, value ->
-            scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
-            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-            goBack()
-        },
-        onBack = goBack
-    )
-    Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
-        settings = settings,
-        onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
-        onClear = {
-            scope.launch { settingsStore.clearSitePermissions() }
-            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
-        },
-        onBack = goBack
-    )
-    Page.MIC_PERMISSION -> MicPermissionScreen(
-        settings = settings,
-        onSelect = { policy ->
-            scope.launch { settingsStore.micPolicy(policy) }
-            // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
-            when (policy) {
-                "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                "deny" -> revokeRecordAudioPermission(context)
-            }
-        },
-        onClear = {
-            scope.launch { settingsStore.clearSiteMicPermissions() }
-            Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
-        },
-        onBack = goBack
-    )
-    Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
-        title = "跳转至外部 APP 权限",
-        description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
-        options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
-        current = settings.externalAppPolicy,
-        onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
-        onBack = goBack
-    )
-    Page.ABOUT -> AboutScreen(
-        settings = settings,
-        setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
-        setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
-        setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
-        onSponsor = { sponsorInfo = true },
-        onBack = goBack
-    )    }
+        Page.HOME -> HomeScreen(
+            settings = settings,
+            searchHistory = settings.searchHistory,
+            onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
+            setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
+            onOpen = { address ->
+                // 记录搜索历史（网址也一并记下，便于重复访问）
+                scope.launch { settingsStore.addSearchHistory(address) }
+                browserViewModel.load(address); navigate(Page.BROWSER)
+            },
+            onHistory = { navigate(Page.HISTORY) },
+            onSettings = { navigate(Page.SETTINGS) },
+            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
+        )
+        Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
+            browserViewModel = browserViewModel,
+            onBack = goBack
+        )
+        Page.BROWSER -> BrowserScreen(
+            viewModel = browserViewModel,
+            settings = settings,
+            settingsStore = settingsStore,
+            onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
+            onDownloads = { navigate(Page.DOWNLOADS) },
+            onSettings = { navigate(Page.SETTINGS) }
+        )
+        Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
+        Page.SETTINGS -> SettingsScreen(
+            settings = settings,
+            isDefaultBrowser = isDefaultBrowser,
+            onSetDefaultBrowser = {
+                // 直接弹系统询问框由用户选择（不替用户决定）；成功后 OnResume 会自动刷新入口可见性
+                requestDefaultBrowser()
+            },
+            onHistory = { navigate(Page.HISTORY) },
+            onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
+            onSiteSettings = { navigate(Page.SITE_SETTINGS) },
+            onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
+            onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
+            onAbout = { navigate(Page.ABOUT) },
+            onBack = goBack
+        )
+        Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
+            settings = settings,
+            setMode = { scope.launch { settingsStore.mode(it) } },
+            setDynamic = { scope.launch { settingsStore.dynamic(it) } },
+            setApkHash = { scope.launch { settingsStore.apkHash(it) } },
+            onDownloads = { navigate(Page.DOWNLOADS) },
+            onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
+            onBack = goBack
+        )
+        Page.SITE_SETTINGS -> WebSiteSettingsScreen(
+            settings = settings,
+            setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
+            onSearchEngine = { navigate(Page.SEARCH_ENGINE) },
+            onUserAgent = { navigate(Page.USER_AGENT) },
+            onBack = goBack
+        )
+        Page.COOKIE_SETTINGS -> CookieSettingsScreen(
+            settings = settings,
+            setCookie = { scope.launch { settingsStore.cookies(it) } },
+            setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
+            clearBrowserData = {
+                browserViewModel.clearBrowserData()
+                Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
+            },
+            onBack = goBack
+        )
+        Page.WEB_PERMISSIONS -> WebPermissionsScreen(
+            settings = settings,
+            onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
+            onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
+            onMic = { navigate(Page.MIC_PERMISSION) },
+            onBack = goBack
+        )
+        Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
+        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
+        Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
+            settings = settings,
+            onSave = { mode, uri, path ->
+                scope.launch { settingsStore.downloadDirectory(mode, uri, path) }
+                Toast.makeText(context, "已修改", Toast.LENGTH_SHORT).show()
+                goBack()
+            },
+            onBack = goBack
+        )
+        Page.SEARCH_ENGINE -> SearchEngineScreen(
+            settings = settings,
+            onSelect = { scope.launch { settingsStore.searchEngine(it) } },
+            onCustom = { navigate(Page.CUSTOM_SEARCH) },
+            onBack = goBack
+        )
+        Page.CUSTOM_SEARCH -> CustomSearchScreen(
+            settings = settings,
+            onSave = { title, url ->
+                scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
+                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                goBack()
+            },
+            onBack = goBack
+        )
+        Page.USER_AGENT -> UserAgentScreen(
+            settings = settings,
+            onSelect = { scope.launch { settingsStore.userAgentMode(it) } },
+            onSimplified = { scope.launch { settingsStore.simplifiedUserAgent(it) } },
+            onCustom = { navigate(Page.CUSTOM_USER_AGENT) },
+            onBack = goBack
+        )
+        Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
+            settings = settings,
+            onSave = { title, value ->
+                scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
+                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                goBack()
+            },
+            onBack = goBack
+        )
+        Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
+            settings = settings,
+            onSelect = { scope.launch { settingsStore.clipboardReadPolicy(it) } },
+            onClear = {
+                scope.launch { settingsStore.clearSitePermissions() }
+                Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+            },
+            onBack = goBack
+        )
+        Page.MIC_PERMISSION -> MicPermissionScreen(
+            settings = settings,
+            onSelect = { policy ->
+                scope.launch { settingsStore.micPolicy(policy) }
+                // 同步系统录音权限：始终允许时申请一次，始终拒绝时撤销已授予的授权
+                when (policy) {
+                    "allow" -> if (!hasRecordAudioPermission(context)) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    "deny" -> revokeRecordAudioPermission(context)
+                }
+            },
+            onClear = {
+                scope.launch { settingsStore.clearSiteMicPermissions() }
+                Toast.makeText(context, "已清除已记住的网站权限", Toast.LENGTH_SHORT).show()
+            },
+            onBack = goBack
+        )
+        Page.EXTERNAL_APP_PERMISSION -> SimplePolicyScreen(
+            title = "跳转至外部 APP 权限",
+            description = "网页尝试打开非 http(s) 链接（如 intent:、mailto: 等）时的处理方式。始终允许/拒绝将直接放行或拦截；每次询问则会弹出确认提示。",
+            options = listOf("ask" to "每次询问", "allow" to "始终允许", "deny" to "始终拒绝"),
+            current = settings.externalAppPolicy,
+            onSelect = { scope.launch { settingsStore.externalAppPolicy(it) } },
+            onBack = goBack
+        )
+        Page.ABOUT -> AboutScreen(
+            settings = settings,
+            setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
+            setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
+            setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
+            onSponsor = onSponsor,
+            onBack = goBack
+        )
+    }
 }
 
 @Composable
