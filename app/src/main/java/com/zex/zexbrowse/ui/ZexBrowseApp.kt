@@ -552,6 +552,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 requestDefaultBrowser = requestDefaultBrowser,
                                 micPermissionLauncher = micPermissionLauncher,
                                 tabsIncognito = tabsIncognito,
+                                onTabsIncognitoChange = { tabsIncognito = it },
                                 navigate = navigate,
                                 goBack = goBack,
                                 onSponsor = { sponsorInfo = true }
@@ -604,6 +605,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                             requestDefaultBrowser = requestDefaultBrowser,
                             micPermissionLauncher = micPermissionLauncher,
                             tabsIncognito = tabsIncognito,
+                            onTabsIncognitoChange = { tabsIncognito = it },
                             navigate = navigate,
                             goBack = goBack,
                             onSponsor = { sponsorInfo = true }
@@ -695,6 +697,7 @@ private fun PageContent(
     requestDefaultBrowser: () -> Unit,
     micPermissionLauncher: androidx.activity.result.ActivityResultLauncher<String>,
     tabsIncognito: Boolean,
+    onTabsIncognitoChange: (Boolean) -> Unit,
     navigate: (Page) -> Unit,
     goBack: () -> Unit,
     onSponsor: () -> Unit
@@ -722,7 +725,7 @@ private fun PageContent(
             viewModel = browserViewModel,
             settings = settings,
             settingsStore = settingsStore,
-            onTabs = { incognito -> tabsIncognito = incognito; navigate(Page.TABS) },
+            onTabs = { incognito -> onTabsIncognitoChange(incognito); navigate(Page.TABS) },
             onDownloads = { navigate(Page.DOWNLOADS) },
             onSettings = { navigate(Page.SETTINGS) }
         )
