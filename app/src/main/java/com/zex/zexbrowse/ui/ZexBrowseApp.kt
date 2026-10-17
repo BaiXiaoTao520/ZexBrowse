@@ -433,6 +433,9 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 返回是否可以拦截：有可退的页面栈，或浏览器可后退。
     // 侧滑手势与实体返回键共用同一套判定。
     val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true)
+    // 浏览器（搜索结果）页不启用侧滑跟手动画：退出搜索页时保持原有的页面切换动画，
+    // 由 BackHandler 接管即可，其余页面不受影响。
+    val predictiveEnabled = canHandleBack && page != Page.BROWSER
     val performBack: () -> Unit = {
         if (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true) {
             browserViewModel.back()
@@ -466,7 +469,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 流程语义（官方约定）：
     // - collect 正常结束 = 手势完成，应提交返回；
     // - 抛 CancellationException = 手势取消，必须终止本协程，不能继续执行返回。
-    PredictiveBackHandler(enabled = canHandleBack) { progressEvents ->
+    PredictiveBackHandler(enabled = predictiveEnabled) { progressEvents ->
         beginBack()
         try {
             progressEvents.collect { event ->
@@ -565,8 +568,9 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     }
                 }
 
-                // 上层：当前页。手势期间随手指整体右移并缩小、淡出，露出下面的目标页；
-                // 手势完成时切换页面并瞬间归位，由下层同款页面无缝接替，因此不会再出现空白或跳帧。
+                // 上层：当前页。手势期间随手指整体右移并缩小，完全滑出屏幕后露出下层目标页。
+                // 不做透明度渐变：透明淡出会让下层页面「从暗渐亮」，观感上像蒙了层纱；
+                // 侧滑返回应当是整块不透明地被推走，下层保持原样不动。
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
                         val progress = backProgress.value
@@ -575,7 +579,6 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                             val scale = 1f - 0.12f * progress
                             scaleX = scale
                             scaleY = scale
-                            alpha = 1f - 0.25f * progress
                         }
                     }
                 ) {
