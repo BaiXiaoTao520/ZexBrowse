@@ -12,8 +12,8 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 36
-        versionCode = 41
-        versionName = "6.1.1"
+        versionCode = 42
+        versionName = "6.1.5"
         ndk { abiFilters += "arm64-v8a" }
 
         // Mirror 酱资源 ID：不从源码硬编码（避免公开仓库暴露），
@@ -103,6 +103,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.mozilla.geckoview:geckoview:131.0.20241011205646")
+    // GeckoView 内核：升级到 158（2026-10），替代原先的 131（2024-10）。
+    // 旧版本落后 27 个版本，累积了大量已修复的高危漏洞（沙箱逃逸、UAF、同源绕过等），
+    // 浏览器内核直接渲染不可信网页，必须保持更新。
+    implementation("org.mozilla.geckoview:geckoview:158.0.20261007201254")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

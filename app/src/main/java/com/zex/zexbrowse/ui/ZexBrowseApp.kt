@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Cookie
+import androidx.compose.material.icons.rounded.ContactSupport
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Language
@@ -186,6 +187,9 @@ data class QuickSite(val title: String, val url: String, val icon: String)
 
 /** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
 private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
+
+/** 联系我们的跳转地址 */
+private const val CONTACT_URL = "https://knocket.ai/u/zex"
 
 private val defaultQuickSites = listOf(
     QuickSite("GitHub", "https://github.com", "⌘"),
@@ -746,6 +750,7 @@ private fun PageContent(
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
             onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
             onAbout = { navigate(Page.ABOUT) },
+            onContactUs = { openInBrowser(context, CONTACT_URL) },
             onBack = goBack
         )
         Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
@@ -1765,6 +1770,7 @@ private fun SettingsScreen(
     onCookieSettings: () -> Unit,
     onWebPermissions: () -> Unit,
     onAbout: () -> Unit,
+    onContactUs: () -> Unit,
     onBack: () -> Unit
 ) {
     var showLinkDiagnostics by remember { mutableStateOf(false) }
@@ -1838,6 +1844,15 @@ private fun SettingsScreen(
                     subtitle = "版本、许可、贡献者与赞助支持",
                     icon = Icons.Default.Info,
                     onClick = onAbout
+                )
+            }
+            // 联系我们：跳转到浏览器打开反馈地址
+            item {
+                SettingsEntry(
+                    title = "联系我们",
+                    subtitle = "反馈问题与交流建议",
+                    icon = Icons.Rounded.ContactSupport,
+                    onClick = onContactUs
                 )
             }
         }
