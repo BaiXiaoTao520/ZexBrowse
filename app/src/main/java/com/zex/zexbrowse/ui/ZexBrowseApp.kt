@@ -57,6 +57,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -134,6 +135,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -145,6 +147,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
@@ -185,11 +188,14 @@ enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS,
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
-/** 设置搜索项：标题 + 可匹配的关键词别名 + 点击后跳转的动作 */
+/** 设置搜索项：子选项标题 + 所属页面（作为副标题并决定图标）+ 可匹配关键词 + 点击跳转动作 */
 private data class SettingSearchItem(
     val title: String,
+    val group: String,
     val keywords: List<String>,
-    val onClick: () -> Unit
+    val onClick: () -> Unit,
+    val accent: Boolean = false,
+    val subtitle: String? = null
 )
 
 /** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
@@ -579,17 +585,23 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     }
                 }
 
-                // 上层：当前页。手势期间随手指整体右移并缩小，完全滑出屏幕后露出下层目标页。
-                // 不做透明度渐变：透明淡出会让下层页面「从暗渐亮」，观感上像蒙了层纱；
-                // 侧滑返回应当是整块不透明地被推走，下层保持原样不动。
+                // 上层：当前页。手势期间随手指整体右移，并按 Miuix（HyperOS）风格
+                // 缩放、收拢圆角、投下阴影，营造「页面被拎起退回上层」的层级感。
+                // 不做透明度渐变：透明淡出会让下层页面「从暗渐亮」，观感上像蒙了层纱。
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
                         val progress = backProgress.value
                         if (progress > 0f) {
                             translationX = size.width * progress
-                            val scale = 1f - 0.12f * progress
+                            val scale = 1f - 0.16f * progress
                             scaleX = scale
                             scaleY = scale
+                            // Miuix 风格：跟手缩放时边缘圆角收拢并投下阴影
+                            shape = RoundedCornerShape((24f * progress).dp)
+                            clip = true
+                            shadowElevation = (14f * progress).dp.toPx()
+                            ambientShadowColor = Color.Black.copy(alpha = 0.35f)
+                            spotShadowColor = Color.Black.copy(alpha = 0.35f)
                         }
                     }
                 ) {
@@ -893,17 +905,23 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 @Composable
-private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
+/** 首页顶栏时钟：独立状态，每秒只重组自身，避免拖拽整个 HomeScreen 重组导致掉帧 */
+@Composable
+private fun ClockText() {
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { now = Date(); kotlinx.coroutines.delay(1_000) } }
+    Text(SimpleDateFormat("yyyy年MM月dd日  HH:mm:ss", Locale.getDefault()).format(now), style = MaterialTheme.typography.labelSmall)
+}
+
+private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
     val quickSites = remember(settings.quickSites) { decodeQuickSites(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ZexBrowse", fontWeight = FontWeight.Bold); Text(SimpleDateFormat("yyyy年MM月dd日  HH:mm:ss", Locale.getDefault()).format(now), style = MaterialTheme.typography.labelSmall) } },
+                title = { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ZexBrowse", fontWeight = FontWeight.Bold); ClockText() } },
                 actions = {
                     IconButton(onClick = onHistory) { Icon(Icons.Default.History, "浏览历史") }
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "设置") }
@@ -1512,27 +1530,28 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     WavyProgressBar(progress = selectedTab.progress / 100f, modifier = Modifier.fillMaxWidth())
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
-                    AndroidView(
-                        factory = { ctx ->
-                            GeckoView(ctx).apply {
-                                // 渲染后端必须在 setSession 之前设定：
-                                // SurfaceView（硬件加速合成，默认，性能最优）
-                                // TextureView（走普通 View 合成，部分 GPU 较弱的机型反而更稳）
-                                runCatching {
-                                    setViewBackend(
-                                        if (settings.hardwareAcceleration) GeckoView.BACKEND_SURFACE_VIEW
-                                        else GeckoView.BACKEND_TEXTURE_VIEW
-                                    )
+                    key(settings.hardwareAcceleration) {
+                        AndroidView(
+                            factory = { ctx ->
+                                GeckoView(ctx).apply {
+                                    // 开启硬件加速时保持 GeckoView 默认的 SurfaceView，
+                                    // 不要显式调用 setViewBackend(SURFACE_VIEW)：
+                                    // 该调用会 removeView/addView 重建渲染层，在 Compose 的
+                                    // AndroidView 中会破坏渲染时序，导致网页黑屏。
+                                    // 仅关闭时才切换 TextureView（必须在 setSession 之前）。
+                                    if (!settings.hardwareAcceleration) {
+                                        runCatching { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
+                                    }
                                 }
-                            }
-                        },
-                        update = { view ->
-                            view.setSession(selectedTab.session)
-                            // 会话挂载后再触发待加载地址（外部链接），否则 loadUri 会被丢弃
-                            view.post { viewModel.onSessionAttached(selectedTab.id) }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                            },
+                            update = { view ->
+                                view.setSession(selectedTab.session)
+                                // 会话挂载后再触发待加载地址（外部链接），否则 loadUri 会被丢弃
+                                view.post { viewModel.onSessionAttached(selectedTab.id) }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
                 if (selectedTab.failed) {
                     Text(
@@ -1796,25 +1815,36 @@ private fun SettingsScreen(
     var showLinkDiagnostics by remember { mutableStateOf(false) }
     // 设置搜索：按关键词过滤上方入口卡片
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    // 搜索索引：关键词 -> 目标入口卡片标题（含别名，便于用同义词也能找到）
+    // 搜索索引：子选项 -> 所属页面。搜索命中后直接展示子选项，点击即跳转到对应页面。
     val searchIndex = remember {
         listOf(
-            SettingSearchItem("通用设置", listOf("主题", "深色", "浅色", "取色", "莫奈", "性能", "硬件加速", "下载", "路径", "哈希", "校验"), onGeneralSettings),
-            SettingSearchItem("网站设置", listOf("网页渲染", "强制适配深色模式", "搜索引擎", "浏览器标识", "UA", "User-Agent"), onSiteSettings),
-            SettingSearchItem("隐私", listOf("Cookie", "缓存", "清除数据", "退出时清除", "站点数据"), onCookieSettings),
-            SettingSearchItem("网页权限管理", listOf("剪贴板", "外部 APP", "跳转", "麦克风", "录音", "权限"), onWebPermissions),
-            SettingSearchItem("浏览历史", listOf("历史", "访问记录"), onHistory),
-            SettingSearchItem("设为默认浏览器", listOf("默认浏览器", "默认应用", "角色"), onSetDefaultBrowser),
-            SettingSearchItem("外链诊断", listOf("外链", "跳转诊断", "Intent"), { showLinkDiagnostics = true }),
-            SettingSearchItem("关于 ZexBrowse", listOf("关于", "版本", "许可", "贡献者", "赞助", "Mirror", "CDK", "更新"), onAbout),
-            SettingSearchItem("联系我们", listOf("联系", "反馈", "建议"), onContactUs)
+            SettingSearchItem("主题", "通用设置", listOf("主题", "浅色", "深色", "夜间", "跟随系统", "亮色", "暗色"), onGeneralSettings),
+            SettingSearchItem("动态莫奈取色", "通用设置", listOf("取色", "莫奈", "Monet", "动态颜色", "壁纸", "主题色"), onGeneralSettings),
+            SettingSearchItem("硬件加速", "通用设置", listOf("硬件加速", "渲染", "性能", "GPU", "卡顿", "流畅", "掉帧", "加速"), onGeneralSettings),
+            SettingSearchItem("下载记录", "通用设置", listOf("下载", "记录", "下载记录", "文件", "进度"), onGeneralSettings),
+            SettingSearchItem("下载文件路径", "通用设置", listOf("路径", "保存位置", "存储", "目录", "下载位置", "下载路径"), onGeneralSettings),
+            SettingSearchItem("APK SHA-256 校验", "通用设置", listOf("校验", "哈希", "SHA", "APK", "安全", "完整性", "sha256", "SHA256"), onGeneralSettings),
+            SettingSearchItem("强制适配深色模式", "网站设置", listOf("深色", "黑暗", "夜间", "网页", "暗色", "适配", "网页渲染", "网页深色"), onSiteSettings),
+            SettingSearchItem("搜索引擎", "网站设置", listOf("搜索", "引擎", "百度", "必应", "DuckDuckGo", "谷歌", "搜索引擎"), onSiteSettings),
+            SettingSearchItem("浏览器标识", "网站设置", listOf("浏览器标识", "UA", "User-Agent", "桌面", "标识", "网页标识", "桌面模式"), onSiteSettings),
+            SettingSearchItem("Cookie 追踪", "隐私", listOf("Cookie", "追踪", "隐私", "数据", "Cookies"), onCookieSettings),
+            SettingSearchItem("清除缓存与 Cookie", "隐私", listOf("缓存", "清除", "Cookie", "数据", "清理", "站点数据"), onCookieSettings),
+            SettingSearchItem("退出时清除浏览器数据", "隐私", listOf("退出", "清除", "数据", "无痕", "清理", "退出时清除"), onCookieSettings),
+            SettingSearchItem("剪贴板读取权限", "网页权限管理", listOf("剪贴板", "复制", "粘贴", "权限", "读取"), onWebPermissions),
+            SettingSearchItem("跳转至外部 APP 权限", "网页权限管理", listOf("外部", "跳转", "APP", "应用", "Intent", "权限"), onWebPermissions),
+            SettingSearchItem("麦克风权限", "网页权限管理", listOf("麦克风", "录音", "权限", "语音", "音频"), onWebPermissions),
+            SettingSearchItem("浏览历史", "浏览历史", listOf("历史", "访问", "记录", "足迹", "历史记录"), onHistory),
+            SettingSearchItem("设为默认浏览器", "设为默认浏览器", listOf("默认", "浏览器", "角色", "默认应用", "默认浏览器"), onSetDefaultBrowser, accent = true, subtitle = "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验"),
+            SettingSearchItem("外链诊断", "外链诊断", listOf("外链", "诊断", "Intent", "跳转", "链接"), { showLinkDiagnostics = true }),
+            SettingSearchItem("关于 ZexBrowse", "关于 ZexBrowse", listOf("关于", "版本", "许可", "贡献者", "赞助", "Mirror", "CDK", "更新"), onAbout),
+            SettingSearchItem("联系我们", "联系我们", listOf("联系", "反馈", "建议", "问题"), onContactUs)
         )
     }
     val filtered = remember(searchQuery, isDefaultBrowser) {
         val q = searchQuery.trim()
-        if (q.isEmpty()) searchIndex.filter { it.title != "设为默认浏览器" || !isDefaultBrowser }
+        if (q.isEmpty()) searchIndex.filter { !it.accent || !isDefaultBrowser }
         else searchIndex.filter { item ->
-            (item.title != "设为默认浏览器" || !isDefaultBrowser) &&
+            (!item.accent || !isDefaultBrowser) &&
                 (item.title.contains(q, ignoreCase = true) || item.keywords.any { it.contains(q, ignoreCase = true) })
         }
     }
@@ -1855,10 +1885,10 @@ private fun SettingsScreen(
                 item {
                     SettingsEntry(
                         title = entry.title,
-                        subtitle = settingsEntrySubtitle(entry.title, settings),
-                        icon = settingsEntryIcon(entry.title),
+                        subtitle = entry.subtitle ?: entry.group,
+                        icon = settingsEntryIcon(entry.group),
                         onClick = entry.onClick,
-                        accent = entry.title == "设为默认浏览器"
+                        accent = entry.accent
                     )
                 }
             }
@@ -1875,28 +1905,7 @@ private fun SettingsScreen(
     }
 }
 
-/** 隐私入口副标题：概括当前各项开关状态 */
-private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
-    val cookieState = if (settings.cookiesEnabled) "Cookie 追踪已开启" else "Cookie 追踪已关闭"
-    val exitState = if (settings.clearOnExit) "退出时自动清除" else "退出时保留数据"
-    return "$cookieState · $exitState"
-}
-
-/** 设置入口卡片的副标题（搜索过滤后需要按标题回填） */
-private fun settingsEntrySubtitle(title: String, settings: BrowserSettings): String = when (title) {
-    "通用设置" -> "主题、动态取色、硬件加速、下载与保存路径"
-    "网站设置" -> "强制适配深色模式、搜索引擎、浏览器标识"
-    "隐私" -> cookieSettingsSubtitle(settings)
-    "网页权限管理" -> "剪贴板读取、外部 APP 跳转、麦克风"
-    "浏览历史" -> "查看最近访问的网页"
-    "设为默认浏览器" -> "将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择"
-    "外链诊断" -> "查看最近一次外部跳转传入的原始信息"
-    "关于 ZexBrowse" -> "版本、许可、贡献者与赞助支持"
-    "联系我们" -> "反馈问题与交流建议"
-    else -> ""
-}
-
-/** 设置入口卡片的图标（按标题回填，保持与原有视觉一致） */
+/** 设置入口卡片的图标（按所属页面回填，保持与原有视觉一致） */
 private fun settingsEntryIcon(title: String): androidx.compose.ui.graphics.vector.ImageVector = when (title) {
     "通用设置" -> Icons.Rounded.Tune
     "网站设置" -> Icons.Rounded.Language
