@@ -159,6 +159,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         pendingLoadAttempts.remove(id)
     }
 
+    /**
+     * 判断两个地址是否指向同一份下载：忽略查询串与锚点的差异。
+     * 刷新下载直链时 URL 可能与首次记录时略有出入（如追加的跟踪参数），
+     * 按前缀比较足以避免误删记录。
+     */
+    private fun isSameDownloadTarget(current: String, pending: String): Boolean {
+        if (current == pending) return true
+        val a = current.substringBefore('?').substringBefore('#')
+        val b = pending.substringBefore('?').substringBefore('#')
+        return a == b
+    }
+
     // GeckoView requires onNewSession to return a session that has NOT been opened yet;
     // GeckoView opens it itself. Opening it here throws AssertionError.
     private fun createNewSessionForUri(uri: String, incognito: Boolean): GeckoSession {
@@ -182,7 +194,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 媒体播放委托：播放时启动前台服务 + 申请音频焦点，停止时释放（修复后台/锁屏音频断续）
         mediaPlayback.attach(session)
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
-            override fun onPageStart(session: GeckoSession, url: String) { if (url.startsWith("http")) { clearPending(id); pendingDownloads.remove(id) }; android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url"); update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) } }
+            override fun onPageStart(session: GeckoSession, url: String) {
+                // 只有真正开始加载「别的页面」时，才丢弃下载直链记录；
+                // 若开始加载的正是这条下载直链本身（或刷新它），必须保留，
+                // 否则用户取消一次下载弹窗后，刷新按钮就再也无法重新弹出窗口。
+                if (url.startsWith("http")) {
+                    clearPending(id)
+                    val pendingDownload = pendingDownloads[id]
+                    if (pendingDownload == null || !isSameDownloadTarget(url, pendingDownload)) {
+                        pendingDownloads.remove(id)
+                    }
+                }
+                android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url")
+                update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) }
+            }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
