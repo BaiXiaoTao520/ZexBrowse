@@ -185,6 +185,13 @@ enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS,
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
+/** 设置搜索项：标题 + 可匹配的关键词别名 + 点击后跳转的动作 */
+private data class SettingSearchItem(
+    val title: String,
+    val keywords: List<String>,
+    val onClick: () -> Unit
+)
+
 /** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
 private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
 
@@ -758,6 +765,7 @@ private fun PageContent(
             setMode = { scope.launch { settingsStore.mode(it) } },
             setDynamic = { scope.launch { settingsStore.dynamic(it) } },
             setApkHash = { scope.launch { settingsStore.apkHash(it) } },
+            setHardwareAcceleration = { scope.launch { settingsStore.hardwareAcceleration(it) } },
             onDownloads = { navigate(Page.DOWNLOADS) },
             onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
             onBack = goBack
@@ -1505,7 +1513,19 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
-                        factory = { GeckoView(it) },
+                        factory = { ctx ->
+                            GeckoView(ctx).apply {
+                                // 渲染后端必须在 setSession 之前设定：
+                                // SurfaceView（硬件加速合成，默认，性能最优）
+                                // TextureView（走普通 View 合成，部分 GPU 较弱的机型反而更稳）
+                                runCatching {
+                                    setViewBackend(
+                                        if (settings.hardwareAcceleration) GeckoView.BACKEND_SURFACE_VIEW
+                                        else GeckoView.BACKEND_TEXTURE_VIEW
+                                    )
+                                }
+                            }
+                        },
                         update = { view ->
                             view.setSession(selectedTab.session)
                             // 会话挂载后再触发待加载地址（外部链接），否则 loadUri 会被丢弃
@@ -1774,86 +1794,73 @@ private fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var showLinkDiagnostics by remember { mutableStateOf(false) }
+    // 设置搜索：按关键词过滤上方入口卡片
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    // 搜索索引：关键词 -> 目标入口卡片标题（含别名，便于用同义词也能找到）
+    val searchIndex = remember {
+        listOf(
+            SettingSearchItem("通用设置", listOf("主题", "深色", "浅色", "取色", "莫奈", "性能", "硬件加速", "下载", "路径", "哈希", "校验"), onGeneralSettings),
+            SettingSearchItem("网站设置", listOf("网页渲染", "强制适配深色模式", "搜索引擎", "浏览器标识", "UA", "User-Agent"), onSiteSettings),
+            SettingSearchItem("隐私", listOf("Cookie", "缓存", "清除数据", "退出时清除", "站点数据"), onCookieSettings),
+            SettingSearchItem("网页权限管理", listOf("剪贴板", "外部 APP", "跳转", "麦克风", "录音", "权限"), onWebPermissions),
+            SettingSearchItem("浏览历史", listOf("历史", "访问记录"), onHistory),
+            SettingSearchItem("设为默认浏览器", listOf("默认浏览器", "默认应用", "角色"), onSetDefaultBrowser),
+            SettingSearchItem("外链诊断", listOf("外链", "跳转诊断", "Intent"), { showLinkDiagnostics = true }),
+            SettingSearchItem("关于 ZexBrowse", listOf("关于", "版本", "许可", "贡献者", "赞助", "Mirror", "CDK", "更新"), onAbout),
+            SettingSearchItem("联系我们", listOf("联系", "反馈", "建议"), onContactUs)
+        )
+    }
+    val filtered = remember(searchQuery, isDefaultBrowser) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) searchIndex.filter { it.title != "设为默认浏览器" || !isDefaultBrowser }
+        else searchIndex.filter { item ->
+            (item.title != "设为默认浏览器" || !isDefaultBrowser) &&
+                (item.title.contains(q, ignoreCase = true) || item.keywords.any { it.contains(q, ignoreCase = true) })
+        }
+    }
     Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            // 通用设置：主题与网页个性化 / 下载设置 合并为同一页
+            // 设置搜索框
             item {
-                SettingsEntry(
-                    title = "通用设置",
-                    subtitle = "主题、动态取色、下载与保存路径",
-                    icon = Icons.Rounded.Tune,
-                    onClick = onGeneralSettings
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    placeholder = { Text("搜索设置项") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    leadingIcon = { Icon(Icons.Default.Search, "搜索") },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Close, "清空") }
+                        }
+                    },
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
                 )
             }
-            // 网站设置：强制适配深色模式 / 搜索引擎 / 浏览器标识
-            item {
-                SettingsEntry(
-                    title = "网站设置",
-                    subtitle = "强制适配深色模式、搜索引擎、浏览器标识",
-                    icon = Icons.Rounded.Language,
-                    onClick = onSiteSettings
-                )
+            if (filtered.isEmpty()) {
+                item {
+                    Text(
+                        "未找到匹配的设置项",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp)
+                    )
+                }
             }
-            // 隐私：Cookie 追踪 / 清除缓存与 Cookie / 退出时清除浏览器数据
-            item {
-                SettingsEntry(
-                    title = "隐私",
-                    subtitle = cookieSettingsSubtitle(settings),
-                    icon = Icons.Rounded.PrivacyTip,
-                    onClick = onCookieSettings
-                )
-            }
-            // 网页权限管理：剪贴板 / 跳转至外部 APP / 麦克风
-            item {
-                SettingsEntry(
-                    title = "网页权限管理",
-                    subtitle = "剪贴板读取、外部 APP 跳转、麦克风",
-                    icon = Icons.Rounded.Security,
-                    onClick = onWebPermissions
-                )
-            }
-            // 浏览历史 / 外链诊断 / 关于：与上方入口统一为卡片样式
-            item {
-                SettingsEntry(
-                    title = "浏览历史",
-                    subtitle = "查看最近访问的网页",
-                    icon = Icons.Default.History,
-                    onClick = onHistory
-                )
-            }
-            if (!isDefaultBrowser) item {
-                SettingsEntry(
-                    title = "设为默认浏览器",
-                    subtitle = "将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择",
-                    icon = Icons.Rounded.Public,
-                    onClick = onSetDefaultBrowser,
-                    accent = true
-                )
-            }
-            item {
-                SettingsEntry(
-                    title = "外链诊断",
-                    subtitle = "查看最近一次外部跳转传入的原始信息",
-                    icon = Icons.Default.Language,
-                    onClick = { showLinkDiagnostics = true }
-                )
-            }
-            item {
-                SettingsEntry(
-                    title = "关于 ZexBrowse",
-                    subtitle = "版本、许可、贡献者与赞助支持",
-                    icon = Icons.Default.Info,
-                    onClick = onAbout
-                )
-            }
-            // 联系我们：跳转到浏览器打开反馈地址
-            item {
-                SettingsEntry(
-                    title = "联系我们",
-                    subtitle = "反馈问题与交流建议",
-                    icon = Icons.Rounded.ContactSupport,
-                    onClick = onContactUs
-                )
+            filtered.forEach { entry ->
+                item {
+                    SettingsEntry(
+                        title = entry.title,
+                        subtitle = settingsEntrySubtitle(entry.title, settings),
+                        icon = settingsEntryIcon(entry.title),
+                        onClick = entry.onClick,
+                        accent = entry.title == "设为默认浏览器"
+                    )
+                }
             }
         }
     }
@@ -1873,6 +1880,34 @@ private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
     val cookieState = if (settings.cookiesEnabled) "Cookie 追踪已开启" else "Cookie 追踪已关闭"
     val exitState = if (settings.clearOnExit) "退出时自动清除" else "退出时保留数据"
     return "$cookieState · $exitState"
+}
+
+/** 设置入口卡片的副标题（搜索过滤后需要按标题回填） */
+private fun settingsEntrySubtitle(title: String, settings: BrowserSettings): String = when (title) {
+    "通用设置" -> "主题、动态取色、硬件加速、下载与保存路径"
+    "网站设置" -> "强制适配深色模式、搜索引擎、浏览器标识"
+    "隐私" -> cookieSettingsSubtitle(settings)
+    "网页权限管理" -> "剪贴板读取、外部 APP 跳转、麦克风"
+    "浏览历史" -> "查看最近访问的网页"
+    "设为默认浏览器" -> "将 ZexBrowse 设为系统默认浏览器；是否设置由你自愿决定，点击后前往系统设置选择"
+    "外链诊断" -> "查看最近一次外部跳转传入的原始信息"
+    "关于 ZexBrowse" -> "版本、许可、贡献者与赞助支持"
+    "联系我们" -> "反馈问题与交流建议"
+    else -> ""
+}
+
+/** 设置入口卡片的图标（按标题回填，保持与原有视觉一致） */
+private fun settingsEntryIcon(title: String): androidx.compose.ui.graphics.vector.ImageVector = when (title) {
+    "通用设置" -> Icons.Rounded.Tune
+    "网站设置" -> Icons.Rounded.Language
+    "隐私" -> Icons.Rounded.PrivacyTip
+    "网页权限管理" -> Icons.Rounded.Security
+    "浏览历史" -> Icons.Default.History
+    "设为默认浏览器" -> Icons.Rounded.Public
+    "外链诊断" -> Icons.Default.Language
+    "关于 ZexBrowse" -> Icons.Default.Info
+    "联系我们" -> Icons.Rounded.ContactSupport
+    else -> Icons.Default.Settings
 }
 
 /**
@@ -2048,6 +2083,7 @@ private fun GeneralSettingsScreen(
     setMode: (String) -> Unit,
     setDynamic: (Boolean) -> Unit,
     setApkHash: (Boolean) -> Unit,
+    setHardwareAcceleration: (Boolean) -> Unit,
     onDownloads: () -> Unit,
     onDownloadDirectory: () -> Unit,
     onBack: () -> Unit
@@ -2056,6 +2092,8 @@ private fun GeneralSettingsScreen(
         item { SectionHeader("主题设置") }
         item { ThemeSelector(settings.darkMode, setMode) }
         item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic, leading = Icons.Rounded.Palette) }
+        item { SectionHeader("性能") }
+        item { SwitchRow("硬件加速", "使用 GPU 合成图层（SurfaceView）提升滚动与动画流畅度；部分机型开启后耗电或发热较高，可关闭改用兼容渲染", settings.hardwareAcceleration, setHardwareAcceleration, leading = Icons.Rounded.Speed) }
         item { SectionHeader("下载设置") }
         item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
         item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(downloadDirectoryLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }

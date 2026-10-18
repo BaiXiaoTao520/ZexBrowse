@@ -150,6 +150,8 @@ data class BrowserSettings(
     val mirrorCdk: String = "",
     /** 有更新时是否优先走高速下载通道（如 Mirror 酱）；默认关闭，关闭时始终走 GitHub */
     val preferMirrorDownload: Boolean = false,
+    /** 硬件加速：开启时 GeckoView 使用 SurfaceView 后端（默认），关闭后改用 TextureView 以降低部分机型的渲染开销 */
+    val hardwareAcceleration: Boolean = true,
     val sitePermissions: Map<String, String> = emptyMap(),
     /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
     val siteMicPermissions: Map<String, String> = emptyMap(),
@@ -186,6 +188,7 @@ class SettingsStore(private val context: Context) {
     private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
     private val mirrorCdkKey = stringPreferencesKey("mirror_cdk")
     private val preferMirrorDownloadKey = booleanPreferencesKey("prefer_mirror_download")
+    private val hardwareAccelerationKey = booleanPreferencesKey("hardware_acceleration")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
     private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
     private val searchHistoryKey = stringPreferencesKey("search_history")
@@ -220,6 +223,7 @@ class SettingsStore(private val context: Context) {
             externalAppPolicy = preferences[externalAppPolicyKey] ?: "ask",
             mirrorCdk = preferences[mirrorCdkKey] ?: "",
             preferMirrorDownload = preferences[preferMirrorDownloadKey] ?: false,
+            hardwareAcceleration = preferences[hardwareAccelerationKey] ?: true,
             sitePermissions = (preferences[sitePermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
@@ -263,6 +267,7 @@ class SettingsStore(private val context: Context) {
     suspend fun storageHintShown(value: Boolean) = update { it[storageHintShownKey] = value }
     suspend fun defaultBrowserHintShown(value: Boolean) = update { it[defaultBrowserHintShownKey] = value }
     suspend fun preferMirrorDownload(value: Boolean) = update { it[preferMirrorDownloadKey] = value }
+    suspend fun hardwareAcceleration(value: Boolean) = update { it[hardwareAccelerationKey] = value }
     suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
     suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
     suspend fun externalAppPolicy(value: String) = update { it[externalAppPolicyKey] = value }
