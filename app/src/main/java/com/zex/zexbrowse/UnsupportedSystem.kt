@@ -6,28 +6,19 @@
 
 package com.zex.zexbrowse
 
-import android.os.Build
-
 /**
  * 识别不再受支持的系统。
  *
- * 仅针对：
- * - 魅族 Flyme（含 Flyme AIOS）：Build.DISPLAY 中含有 "FLYME"。
- * - vivo 国内版 Funtouch OS：`ro.vivo.os.name` 为 Funtouch，且 `ro.vivo.product.overseas` 不为 yes（国内版）；
- *   海外版该属性为 yes，必须排除，不能误判。OriginOS 不在拦截范围。
+ * 当前仅拦截 vivo 国内版 Funtouch OS：`ro.vivo.os.name` 为 Funtouch，
+ * 且 `ro.vivo.product.overseas` 不为 yes（国内版）；海外版该属性为 yes，必须排除，不能误判。
+ * OriginOS 不在拦截范围。
+ *
+ * 魅族 Flyme 与 Flyme AIOS 已恢复支持，不再拦截。
  */
 object UnsupportedSystem {
 
     /** 返回不受支持的系统名称；受支持时返回 null。 */
-    fun detect(): String? {
-        if (isFlyme()) return "Flyme"
-        if (isChinaFuntouch()) return "Funtouch OS"
-        return null
-    }
-
-    // Flyme 与 Flyme AIOS 的 Display 标识均含 "FLYME"
-    private fun isFlyme(): Boolean =
-        Build.DISPLAY?.uppercase()?.contains("FLYME") == true
+    fun detect(): String? = if (isChinaFuntouch()) "Funtouch OS" else null
 
     private fun isChinaFuntouch(): Boolean {
         // 仅当系统名明确为 Funtouch 时才考虑（OriginOS 不在拦截范围）
