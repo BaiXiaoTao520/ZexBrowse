@@ -904,7 +904,6 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
     }
 }
 
-@Composable
 /** 首页顶栏时钟：独立状态，每秒只重组自身，避免拖拽整个 HomeScreen 重组导致掉帧 */
 @Composable
 private fun ClockText() {
@@ -913,6 +912,7 @@ private fun ClockText() {
     Text(SimpleDateFormat("yyyy年MM月dd日  HH:mm:ss", Locale.getDefault()).format(now), style = MaterialTheme.typography.labelSmall)
 }
 
+@Composable
 private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val quickSites = remember(settings.quickSites) { decodeQuickSites(settings.quickSites) }
