@@ -429,6 +429,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private companion object {
         const val MaxPendingLoadAttempts = 20
         const val PendingLoadRetryMillis = 400L
+        /** 极少数情况下取不到默认 UA 时的兜底版本，应与 app/build.gradle.kts 的 geckoview 主版本一致 */
+        const val FALLBACK_ENGINE_VERSION = "158.0"
     }
     private fun update(id: String, transform: (BrowserTab) -> BrowserTab) {
         // 内容未变化时不重新赋值，避免 StateFlow 发出等价列表导致无谓重组
@@ -459,20 +461,37 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         externalAppHandler?.invoke(uri)
     }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
+    /**
+     * 内核真实版本号（如 "158.0"）。从 GeckoView 的默认 UA 中解析，
+     * 避免硬编码导致「内核已升级但 UA 仍声称旧版本」的不一致——
+     * 那会让网站按旧内核能力降级、也让版本检测工具显示错误信息。
+     */
+    private val engineVersion: String by lazy {
+        val ua = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
+        // 默认 UA 形如：Mozilla/5.0 (Android 14; Mobile; rv:158.0) Gecko/158.0 Firefox/158.0
+        Regex("Firefox/([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
+            ?: Regex("rv:([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
+            ?: FALLBACK_ENGINE_VERSION
+    }
+
     private fun userAgentOverride(settings: BrowserSettings): String? {
-        // 简化标识：去掉设备型号、Build 号等隐私信息，但必须保持 Firefox UA 的合法格式。
+        // 简化标识：去掉设备型号、Build 号等隐私信息，但必须保持 Firefox UA 的合法格式，
+        // 且版本号必须跟随实际内核（不能写死，否则升级内核后 UA 仍声称旧版本）。
         // 注意 Gecko/ 后面固定为 20100101（不是版本号），且需带 rv: 标记；
         // 写成 "Gecko/131" 这类非法格式会被必应等站点的反爬规则直接拒绝（请求被 blocked）。
-        if (settings.simplifiedUserAgent) return "Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/20100101 Firefox/131.0"
+        if (settings.simplifiedUserAgent) {
+            return "Mozilla/5.0 (Android 14; Mobile; rv:$engineVersion) Gecko/20100101 Firefox/$engineVersion"
+        }
         val userAgent = when (settings.userAgentMode) {
             "android_chrome" -> "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
             "desktop_chrome" -> "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-            "desktop_firefox" -> "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+            "desktop_firefox" -> "Mozilla/5.0 (X11; Linux x86_64; rv:$engineVersion) Gecko/20100101 Firefox/$engineVersion"
             "custom" -> settings.customUserAgent.trim().takeIf(String::isNotEmpty)
             else -> null
         }
         return userAgent
     }
+
     private fun normalize(value: String): String {
         val text = value.trim()
         if (text.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))) return text

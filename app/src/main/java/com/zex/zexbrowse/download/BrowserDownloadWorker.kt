@@ -26,14 +26,22 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.mozilla.geckoview.GeckoSession
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.security.MessageDigest
 
-// 部分镜像站/服务器会封禁 OkHttp 默认 User-Agent（返回 403/404），需伪装成浏览器 UA 才能下载
-internal const val DOWNLOAD_USER_AGENT =
-    "Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0"
+// 部分镜像站/服务器会封禁 OkHttp 默认 User-Agent（返回 403/404），需伪装成浏览器 UA 才能下载。
+// 版本号从 GeckoView 实际内核读取，避免升级内核后仍声称旧版本；
+// 格式必须合法：Gecko/ 后固定 20100101（不是版本号），且需带 rv: 标记，否则会被反爬规则拒绝。
+internal val DOWNLOAD_USER_AGENT: String by lazy {
+    val ua = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
+    val version = Regex("Firefox/([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
+        ?: Regex("rv:([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
+        ?: "158.0"
+    "Mozilla/5.0 (Android 14; Mobile; rv:$version) Gecko/20100101 Firefox/$version"
+}
 
 class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     private val database = BrowserDatabase.create(appContext)
