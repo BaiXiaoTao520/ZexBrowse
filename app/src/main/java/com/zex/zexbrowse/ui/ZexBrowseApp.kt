@@ -198,6 +198,15 @@ private data class SettingSearchItem(
     val subtitle: String? = null
 )
 
+/** 设置页入口卡片（搜索框为空时的默认展示） */
+private data class SettingsEntryItem(
+    val title: String,
+    val subtitle: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val onClick: () -> Unit,
+    val accent: Boolean = false
+)
+
 /** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
 private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
 
@@ -1840,9 +1849,24 @@ private fun SettingsScreen(
             SettingSearchItem("联系我们", "联系我们", listOf("联系", "反馈", "建议", "问题"), onContactUs)
         )
     }
+    // 默认入口卡片（搜索框为空时展示，保持原有视觉）
+    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit) {
+        listOf(
+            SettingsEntryItem("通用设置", "主题、动态取色、硬件加速、下载与保存路径", Icons.Rounded.Tune, onGeneralSettings),
+            SettingsEntryItem("网站设置", "强制适配深色模式、搜索引擎、浏览器标识", Icons.Rounded.Language, onSiteSettings),
+            SettingsEntryItem("隐私", cookieSettingsSubtitle(settings), Icons.Rounded.PrivacyTip, onCookieSettings),
+            SettingsEntryItem("网页权限管理", "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
+            SettingsEntryItem("浏览历史", "查看最近访问的网页", Icons.Default.History, onHistory),
+            SettingsEntryItem("设为默认浏览器", "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验", Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
+            SettingsEntryItem("外链诊断", "查看最近一次外部跳转传入的原始信息", Icons.Default.Language, { showLinkDiagnostics = true }),
+            SettingsEntryItem("关于 ZexBrowse", "版本、许可、贡献者与赞助支持", Icons.Default.Info, onAbout),
+            SettingsEntryItem("联系我们", "反馈问题与交流建议", Icons.Rounded.ContactSupport, onContactUs)
+        ).filter { !it.accent || !isDefaultBrowser }
+    }
+    // 搜索命中结果（仅在搜索框有输入时使用）
     val filtered = remember(searchQuery, isDefaultBrowser) {
         val q = searchQuery.trim()
-        if (q.isEmpty()) searchIndex.filter { !it.accent || !isDefaultBrowser }
+        if (q.isEmpty()) emptyList()
         else searchIndex.filter { item ->
             (!item.accent || !isDefaultBrowser) &&
                 (item.title.contains(q, ignoreCase = true) || item.keywords.any { it.contains(q, ignoreCase = true) })
@@ -1871,7 +1895,20 @@ private fun SettingsScreen(
                     )
                 )
             }
-            if (filtered.isEmpty()) {
+            if (searchQuery.isBlank()) {
+                // 默认展示入口卡片
+                entries.forEach { entry ->
+                    item {
+                        SettingsEntry(
+                            title = entry.title,
+                            subtitle = entry.subtitle,
+                            icon = entry.icon,
+                            onClick = entry.onClick,
+                            accent = entry.accent
+                        )
+                    }
+                }
+            } else if (filtered.isEmpty()) {
                 item {
                     Text(
                         "未找到匹配的设置项",
@@ -1880,16 +1917,17 @@ private fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp)
                     )
                 }
-            }
-            filtered.forEach { entry ->
-                item {
-                    SettingsEntry(
-                        title = entry.title,
-                        subtitle = entry.subtitle ?: entry.group,
-                        icon = settingsEntryIcon(entry.group),
-                        onClick = entry.onClick,
-                        accent = entry.accent
-                    )
+            } else {
+                filtered.forEach { entry ->
+                    item {
+                        SettingsEntry(
+                            title = entry.title,
+                            subtitle = entry.subtitle ?: entry.group,
+                            icon = settingsEntryIcon(entry.group),
+                            onClick = entry.onClick,
+                            accent = entry.accent
+                        )
+                    }
                 }
             }
         }
@@ -1903,6 +1941,13 @@ private fun SettingsScreen(
             confirmButton = { TextButton(onClick = { showLinkDiagnostics = false }) { Text("关闭") } }
         )
     }
+}
+
+/** 隐私入口副标题：概括当前各项开关状态 */
+private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
+    val cookieState = if (settings.cookiesEnabled) "Cookie 追踪已开启" else "Cookie 追踪已关闭"
+    val exitState = if (settings.clearOnExit) "退出时自动清除" else "退出时保留数据"
+    return "$cookieState · $exitState"
 }
 
 /** 设置入口卡片的图标（按所属页面回填，保持与原有视觉一致） */
