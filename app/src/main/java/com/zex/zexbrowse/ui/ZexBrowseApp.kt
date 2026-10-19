@@ -111,6 +111,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LoadingIndicator
@@ -1170,6 +1171,7 @@ private fun BrowserNoticeDialog(
  * 应用内下载进度弹窗：进度直接取自下载记录（与「下载设置 → 下载记录」同一数据源），
  * 下载完成后原地切换为「安装」。
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RecommendationDownloadDialog(
     app: RecommendedApp,
@@ -1193,9 +1195,15 @@ private fun RecommendationDownloadDialog(
                     Text(record?.errorMessage?.ifBlank { "下载失败" } ?: "下载失败")
                 } else {
                     val progress = record?.progress ?: 0
-                    // 与下载记录卡片一致，统一使用带平滑过渡的波浪进度条
-                    WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
-                    Text(if (progress > 0) "正在下载：$progress%" else "正在准备下载…")
+                    if (progress > 0) {
+                        // 接到服务器：确定态直线进度条
+                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        Text("正在下载：$progress%")
+                    } else {
+                        // 连接中：不确定态波浪进度条，无限滚动
+                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
+                        Text("正在连接服务器…")
+                    }
                 }
             }
         },
@@ -2690,7 +2698,7 @@ private fun AboutScreen(
                 val list = contributors
                 if (list == null) {
                     Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                        LoadingIndicator(modifier = Modifier.size(48.dp), polygons = listOf(MaterialShapes.SoftBurst, MaterialShapes.Cookie9Sided))
+                        LoadingIndicator(modifier = Modifier.size(48.dp), polygons = listOf(MaterialShapes.Clover4Leaf, MaterialShapes.Flower, MaterialShapes.Burst, MaterialShapes.Diamond))
                     }
                 } else if (list.isEmpty()) {
                     Text("暂无贡献者信息")

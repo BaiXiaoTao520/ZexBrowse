@@ -9,26 +9,22 @@ package com.zex.zexbrowse
 /**
  * 识别不再受支持的系统。
  *
- * 当前仅拦截 vivo 国内版 Funtouch OS：`ro.vivo.os.name` 为 Funtouch，
- * 且 `ro.vivo.product.overseas` 不为 yes（国内版）；海外版该属性为 yes，必须排除，不能误判。
- * OriginOS 不在拦截范围。
+ * 已停止对 vivo / iQOO 设备的支持（无论国内还是海外版），覆盖其两套系统：
+ * - Funtouch OS（`ro.vivo.os.name` 为 Funtouch）
+ * - OriginOS（`ro.vivo.os.name` 为 OriginOS）
  *
- * 魅族 Flyme 与 Flyme AIOS 已恢复支持，不再拦截。
+ * 不再区分国内/海外，也不再依赖 locale 判断，只要系统名命中上述任一值即拦截。
  */
 object UnsupportedSystem {
 
     /** 返回不受支持的系统名称；受支持时返回 null。 */
-    fun detect(): String? = if (isChinaFuntouch()) "Funtouch OS" else null
-
-    private fun isChinaFuntouch(): Boolean {
-        // 仅当系统名明确为 Funtouch 时才考虑（OriginOS 不在拦截范围）
-        if (!readProp("ro.vivo.os.name").equals("Funtouch", ignoreCase = true)) return false
-
-        // 排除海外版：ro.vivo.product.overseas 为 yes 即海外版；
-        // 另外若地区 locale 已明确为非中国，也一并排除，避免误判
-        if (readProp("ro.vivo.product.overseas").equals("yes", ignoreCase = true)) return false
-        if (readProp("ro.product.locale.region")?.equals("CN", ignoreCase = true) == false) return false
-        return true
+    fun detect(): String? {
+        val os = readProp("ro.vivo.os.name") ?: return null
+        return when {
+            os.equals("Funtouch", ignoreCase = true) -> "Funtouch OS"
+            os.equals("OriginOS", ignoreCase = true) -> "OriginOS"
+            else -> null
+        }
     }
 
     // 通过反射读取系统属性（android.os.SystemProperties 为隐藏 API）

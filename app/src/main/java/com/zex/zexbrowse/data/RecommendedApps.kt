@@ -9,6 +9,7 @@ package com.zex.zexbrowse.data
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Brush
+import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Storefront
@@ -192,6 +193,15 @@ val coolMonitorRecommendation = RecommendedApp(
     description = "CoolMonitor 安卓设备健康监控诊断工具，实时监测CPU/电池温度、后台耗电应用、WiFi网络风险，支持App权限审计、垃圾营销通知过滤、电池健康评估，内置AI智能分析设备异常并给出优化建议，纯本地数据处理不上传隐私，无广告免费使用"
 )
 
+val twilightToolboxRecommendation = RecommendedApp(
+    name = "暮光工具箱",
+    version = "",
+    summary = "一款秉承互联网分享精神以 Material Design 3 风格进行设计开发的多功能工具聚合工具箱",
+    downloadUrl = "https://qisuhe.pages.dev/",
+    icon = Icons.Rounded.Construction,
+    description = "一款秉承互联网分享精神以 Material Design 3 风格进行设计开发的多功能工具聚合工具箱"
+)
+
 /** 与 ZexNote 一致的推荐顺序 */
 val recommendedApps = listOf(
     appShareRecommendation,
@@ -199,5 +209,6 @@ val recommendedApps = listOf(
     starRingBrowserRecommendation,
     tomatoRecommendation,
     komiStoreRecommendation,
-    coolMonitorRecommendation
+    coolMonitorRecommendation,
+    twilightToolboxRecommendation
 )
