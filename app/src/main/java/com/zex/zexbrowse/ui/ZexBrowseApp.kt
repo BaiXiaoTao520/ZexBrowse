@@ -111,7 +111,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LoadingIndicator
@@ -1196,8 +1195,8 @@ private fun RecommendationDownloadDialog(
                 } else {
                     val progress = record?.progress ?: 0
                     if (progress > 0) {
-                        // 接到服务器：确定态直线进度条
-                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        // 确定态：沿用原来的平滑波浪进度条
+                        WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
                         Text("正在下载：$progress%")
                     } else {
                         // 连接中：不确定态波浪进度条，无限滚动
