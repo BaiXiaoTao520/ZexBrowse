@@ -396,7 +396,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val pending = pendingDownloads[tab.id]
         // 标签地址是下载直链（未被加载成页面、会被 onLoadRequest 拒绝）时，刷新按钮改为手动重新触发下载弹窗：
         // 既避免自动重试导致「点取消后反复弹出」，也避免一次性弹框被取消后「再也弹不出来」。
-        if (pending != null) notifyExternalDownload(pending) else tab.session.reload()
+        if (pending != null) {
+            notifyExternalDownload(pending)
+        } else if (tab.failed && tab.failedUrl.isNotBlank()) {
+            // 加载失败后 Gecko 已把会话地址改成 about:blank，直接 reload 只会重载空白页；
+            // 必须重新加载失败的原始网址，否则错误页里的「重新加载」和工具栏重试都会变白屏。
+            tab.session.loadUri(tab.failedUrl)
+        } else {
+            tab.session.reload()
+        }
     }
     /** 立即停止当前标签的加载（用于加载中的工具栏按钮，避免用户卡在加载状态） */
     fun stopLoading() { selected?.session?.stop() }
