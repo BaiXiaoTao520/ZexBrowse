@@ -53,7 +53,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
-        setForeground(createForegroundInfo(id, fileName, 0, false))
+        setForeground(createForegroundInfo(id, fileName, 0, true))
 
         try {
             val call = client.newCall(Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build())
@@ -65,6 +65,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 val total = body.contentLength()
                 var downloaded = 0L
                 var lastProgress = -1
+                var lastNotifyAt = 0L
                 val digest = MessageDigest.getInstance("SHA-256")
                 val output: OutputStream = if (uri.scheme == "file") {
                     FileOutputStream(File(uri.path.orEmpty()))
@@ -85,8 +86,12 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                             digest.update(buffer, 0, count)
                             downloaded += count
                             val progress = if (total > 0) ((downloaded * 100) / total).toInt() else 0
-                            if (progress != lastProgress) {
+                            // 百分比变化或距上次刷新超过 500ms 时刷新：
+                            // 只按百分比会让小文件从 0% 直接跳到 100%、通知永远看不到中间进度
+                            val now = System.currentTimeMillis()
+                            if (progress != lastProgress || now - lastNotifyAt >= 500L) {
                                 lastProgress = progress
+                                lastNotifyAt = now
                                 database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
                                 setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
                                 setForeground(createForegroundInfo(id, fileName, progress, total <= 0))
@@ -124,14 +129,22 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             .setContentText(if (indeterminate) "正在下载" else "$progress%")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setContentIntent(openAppPendingIntent())
             .setProgress(100, progress, indeterminate)
             .build()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(id.hashCode(), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            ForegroundInfo(foregroundNotificationId(id), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            ForegroundInfo(id.hashCode(), notification)
+            ForegroundInfo(foregroundNotificationId(id), notification)
         }
     }
+
+    /**
+     * 前台通知 ID：必须为非负整数。
+     * UUID 的 hashCode 为有符号整数，直接当通知 ID 可能得到负数，
+     * 部分系统会直接丢弃这类通知（表现为下载完全没有通知）。
+     */
+    private fun foregroundNotificationId(id: String): Int = id.hashCode() and Int.MAX_VALUE
 
     private fun notifyFinished(id: String, fileName: String, success: Boolean) {
         ensureFinishedChannel()
@@ -150,10 +163,10 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     }
 
     /**
-     * 完成通知 ID：翻转前台通知 ID 的最高位。
-     * xor 的结果恒不等于原值，因此与前台通知 ID 一定不同；不同下载之间也几乎不可能碰撞。
+     * 完成通知 ID：与前台通知 ID 不同即可。
+     * 前台 ID 已屏蔽符号位（and Int.MAX_VALUE），这里改用另一套映射，避免两者碰撞。
      */
-    private fun finishedNotificationId(id: String): Int = id.hashCode() xor Int.MIN_VALUE
+    private fun finishedNotificationId(id: String): Int = (id.hashCode() xor Int.MIN_VALUE) and Int.MAX_VALUE
 
     /** 点击通知回到应用 */
     private fun openAppPendingIntent(): android.app.PendingIntent {

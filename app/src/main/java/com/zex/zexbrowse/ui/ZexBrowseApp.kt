@@ -35,8 +35,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +65,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.BookmarkRemove
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -78,7 +82,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Cookie
 import androidx.compose.material.icons.rounded.ContactSupport
@@ -145,6 +151,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -180,11 +187,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.WebRequestError
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -213,12 +221,130 @@ private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse
 /** 联系我们的跳转地址 */
 private const val CONTACT_URL = "https://knocket.ai/u/zex"
 
-private val defaultQuickSites = listOf(
-    QuickSite("GitHub", "https://github.com", "⌘"),
-    QuickSite("Google", "https://www.google.com", "G"),
-    QuickSite("Mozilla", "https://www.mozilla.org", "M"),
-    QuickSite("百度", "https://www.baidu.com", "百")
-)
+/** 书签序列化：每行「标题|网址」，与 DataStore 中的存储格式一致 */
+private fun encodeBookmarks(sites: List<QuickSite>): String =
+    sites.joinToString("\n") { "${it.title}|${it.url}" }
+
+/**
+ * 书签反序列化。与旧版快捷站点不同，空数据返回空列表而非默认站点：
+ * 书签是用户自己的数据，全部删除后应当显示空态提示，而不是又冒出一批默认项。
+ */
+/**
+ * 网页加载失败时的错误页：显示目标网址、无法访问的结论，以及若干条可读的失败原因。
+ *
+ * 错误码直接使用 [org.mozilla.geckoview.WebRequestError] 中的符号常量比较，
+ * 不硬编码数值，避免内核升级后数值变动导致误判。
+ */
+@Composable
+private fun PageErrorView(
+    url: String,
+    errorCode: Int,
+    errorCategory: Int,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val reasons = remember(errorCode, errorCategory) { describeLoadFailure(errorCode, errorCategory) }
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(Icons.Default.WifiOff, null, modifier = Modifier.size(52.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(18.dp))
+            Text("无法访问此网站", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            // 同步显示请求失败的网址，方便用户核对是否输错或粘贴了错误链接
+            Text(
+                url,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(22.dp))
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                reasons.forEach { reason ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(8.dp))
+                        Text(reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+            Button(onClick = onRetry) {
+                Icon(Icons.Default.Refresh, null)
+                Spacer(Modifier.width(8.dp))
+                Text("重新加载")
+            }
+        }
+    }
+}
+
+/**
+ * 将 GeckoView 的错误码与分类翻译成给用户看的原因列表。
+ *
+ * 返回值至少包含两条通用建议，保证任何错误都有可读说明；
+ * 命中具体错误时会把最贴切的一条放在最前面。
+ *
+ * 不用 when 分支直接比对错误码：这些常量来自 Java 类的静态字段，
+ * 用 if/else 链更直白，也避开了“分支必须为编译期常量”的限制。
+ */
+private fun describeLoadFailure(errorCode: Int, errorCategory: Int): List<String> {
+    val specific = when {
+        errorCode == WebRequestError.ERROR_UNKNOWN_HOST -> "域名解析失败，可能是网址拼写有误或该网站已停止服务"
+        errorCode == WebRequestError.ERROR_OFFLINE -> "设备当前未连接到网络"
+        errorCode == WebRequestError.ERROR_NET_TIMEOUT -> "连接超时，服务器长时间没有响应"
+        errorCode == WebRequestError.ERROR_CONNECTION_REFUSED -> "服务器拒绝了连接请求"
+        errorCode == WebRequestError.ERROR_NET_INTERRUPT -> "网络连接中断，传输被意外切断"
+        errorCode == WebRequestError.ERROR_NET_RESET -> "连接被服务器重置"
+        errorCode == WebRequestError.ERROR_REDIRECT_LOOP -> "页面发生了过多的重定向，可能陷入了循环"
+        errorCode == WebRequestError.ERROR_PORT_BLOCKED -> "目标端口被拦截"
+        errorCode == WebRequestError.ERROR_SECURITY_SSL ||
+            errorCode == WebRequestError.ERROR_SECURITY_BAD_CERT ||
+            errorCode == WebRequestError.ERROR_BAD_HSTS_CERT -> "该网站的安全证书存在问题，连接不被信任"
+        errorCode == WebRequestError.ERROR_HTTPS_ONLY -> "该网站要求使用 HTTPS 访问"
+        errorCode == WebRequestError.ERROR_UNKNOWN_PROTOCOL -> "无法识别的链接协议"
+        errorCode == WebRequestError.ERROR_MALFORMED_URI -> "网址格式不正确"
+        errorCode == WebRequestError.ERROR_FILE_NOT_FOUND -> "要访问的文件不存在"
+        errorCode == WebRequestError.ERROR_FILE_ACCESS_DENIED -> "没有权限访问该文件"
+        errorCode == WebRequestError.ERROR_CORRUPTED_CONTENT -> "服务器返回的内容已损坏"
+        errorCode == WebRequestError.ERROR_CONTENT_CRASHED -> "页面渲染进程异常退出"
+        errorCode == WebRequestError.ERROR_UNSAFE_CONTENT_TYPE -> "返回的内容类型不被允许"
+        errorCode == WebRequestError.ERROR_INVALID_CONTENT_ENCODING -> "返回的内容编码无法解析"
+        errorCode == WebRequestError.ERROR_PROXY_CONNECTION_REFUSED -> "代理服务器拒绝了连接"
+        errorCode == WebRequestError.ERROR_UNKNOWN_PROXY_HOST -> "无法解析代理服务器地址"
+        errorCode == WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED -> "本地网络访问权限被拒绝"
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_MALWARE_URI -> "该网址被标记为恶意网站，已阻止访问"
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_UNWANTED_URI -> "该网址被标记为不受欢迎的网站，已阻止访问"
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_HARMFUL_URI -> "该网址被标记为有害网站，已阻止访问"
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_PHISHING_URI -> "该网址被判定为钓鱼网站，已阻止访问"
+        else -> null
+    }
+
+    val byCategory = when {
+        errorCategory == WebRequestError.ERROR_CATEGORY_NETWORK -> "网络连接异常"
+        errorCategory == WebRequestError.ERROR_CATEGORY_SECURITY -> "安全策略阻止了本次连接"
+        errorCategory == WebRequestError.ERROR_CATEGORY_CONTENT -> "页面内容无法正常加载"
+        errorCategory == WebRequestError.ERROR_CATEGORY_URI -> "网址无法被识别"
+        errorCategory == WebRequestError.ERROR_CATEGORY_PROXY -> "代理设置导致连接失败"
+        errorCategory == WebRequestError.ERROR_CATEGORY_SAFEBROWSING -> "网站安全检测阻止了本次访问"
+        else -> null
+    }
+
+    return buildList {
+        specific?.let { add(it) }
+        byCategory?.takeIf { it != specific }?.let { add(it) }
+        add("请检查网络连接后重试")
+        add("如果其它网站可以正常打开，请确认该网站本身是否正常运行")
+    }
+}
+
+private fun decodeBookmarks(raw: String): List<QuickSite> =
+    raw.split("\n").mapNotNull { line ->
+        val title = line.substringBefore('|').trim()
+        val url = line.substringAfter('|', "").trim()
+        if (title.isEmpty() || url.isEmpty()) null else QuickSite(title, url, title.take(1))
+    }
 
 private fun Context.findActivity(): android.app.Activity? {
     var current: Context? = this
@@ -773,6 +899,7 @@ private fun PageContent(
                 requestDefaultBrowser()
             },
             onHistory = { navigate(Page.HISTORY) },
+            onBookmarks = { navigate(Page.BOOKMARKS) },
             onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
             onSiteSettings = { navigate(Page.SITE_SETTINGS) },
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
@@ -816,6 +943,11 @@ private fun PageContent(
             onBack = goBack
         )
         Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
+        Page.BOOKMARKS -> BookmarksScreen(
+            settings = settings,
+            setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
+            onBack = goBack
+        )
         Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
         Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
             settings = settings,
@@ -924,7 +1056,7 @@ private fun ClockText() {
 @Composable
 private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    val quickSites = remember(settings.quickSites) { decodeQuickSites(settings.quickSites) }
+    val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -949,14 +1081,14 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
             // 应用推荐入口：点击进入推荐列表（位于快捷访问上方）
             AppRecommendationEntry(onClick = onAppRecommendations)
             Spacer(Modifier.height(20.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("快捷访问", style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { showQuickSiteDialog = true }) { Text("编辑") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("书签", style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = { showQuickSiteDialog = true }) { Text("添加") }
             }
-            QuickSiteGrid(
-                sites = quickSites,
+            BookmarkGrid(
+                sites = bookmarks,
                 onOpen = onOpen,
-                onRestore = { setQuickSites(defaultQuickSites.joinToString("\n") { "${it.title}|${it.url}" }) }
+                onDelete = { site -> setQuickSites(encodeBookmarks(bookmarks.filter { it.url != site.url })) }
             )
         }
     }
@@ -964,7 +1096,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     if (showQuickSiteDialog) {
         QuickSiteDialog(
             onAdd = { site ->
-                setQuickSites((quickSites + site).joinToString("\n") { "${it.title}|${it.url}" })
+                setQuickSites(encodeBookmarks(bookmarks + site))
                 showQuickSiteDialog = false
             },
             onDismiss = { showQuickSiteDialog = false }
@@ -1215,16 +1347,6 @@ private fun RecommendationDownloadDialog(
     )
 }
 
-private fun decodeQuickSites(raw: String): List<QuickSite> {
-    if (raw.isBlank()) return defaultQuickSites
-    val parsed = raw.split("\n").mapNotNull { line ->
-        val title = line.substringBefore('|').trim()
-        val url = line.substringAfter('|', "").trim()
-        if (title.isEmpty() || url.isEmpty()) null else QuickSite(title, url, title.take(1))
-    }
-    return parsed.ifEmpty { defaultQuickSites }
-}
-
 /**
  * 首页「应用推荐」入口卡片。
  *
@@ -1369,25 +1491,144 @@ private fun AddressInput(
 }
 
 @Composable
-private fun QuickSiteGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onRestore: () -> Unit) {
+private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onDelete: (QuickSite) -> Unit) {
     // 用普通 Column 而非 LazyColumn：本组件始终嵌在带 verticalScroll 的首页里，
     // 纵向可滚动组件不能在无限高度约束下测量（会直接抛异常导致启动闪退）；
-    // 快捷站点数量本就很少，无需懒加载。
+    // 书签数量本就很少，无需懒加载。
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        sites.chunked(2).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { site ->
-                    ElevatedCard(onClick = { onOpen(site.url) }, modifier = Modifier.weight(1f).height(92.dp)) {
-                        Column(Modifier.padding(14.dp)) {
-                            Text(site.icon, style = MaterialTheme.typography.headlineSmall)
-                            Text(site.title)
-                        }
+        if (sites.isEmpty()) {
+            Text(
+                "暂无书签，您可以点击手动添加按钮",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                textAlign = TextAlign.Center
+            )
+        } else {
+            sites.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { site ->
+                        BookmarkCard(site = site, onOpen = onOpen, onDelete = onDelete, modifier = Modifier.weight(1f))
                     }
+                    repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
-                repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        TextButton(onClick = onRestore, modifier = Modifier.fillMaxWidth()) { Text("恢复默认快捷站点") }
+    }
+}
+
+/** 书签卡片：长按删除 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onDelete: (QuickSite) -> Unit, modifier: Modifier = Modifier) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth().height(92.dp)
+        ) {
+            // 长按弹删除菜单；点击打开书签
+            Row(
+                Modifier.fillMaxSize()
+                    .combinedClickable(onClick = { onOpen(site.url) }, onLongClick = { menuExpanded = true })
+                    .padding(14.dp)
+            ) {
+                Column {
+                    Text(site.icon, style = MaterialTheme.typography.headlineSmall)
+                    Text(site.title, maxLines = 1)
+                }
+            }
+        }
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("删除书签") },
+                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                onClick = { menuExpanded = false; onDelete(site) }
+            )
+        }
+    }
+}
+
+/**
+ * 书签管理页：与首页书签卡片共用同一份数据（[BrowserSettings.quickSites]），
+ * 任一侧新增/删除都会立即反映到另一侧。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onBack: () -> Unit) {
+    val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("书签管理") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
+            actions = {
+                IconButton(onClick = { showAddDialog = true }) { Icon(Icons.Default.Add, "添加书签") }
+            }
+        )
+    }) { padding ->
+        if (bookmarks.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("暂无书签", style = MaterialTheme.typography.titleMedium)
+                    Text("长按列表中的书签即可删除", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { showAddDialog = true }) { Text("添加书签") }
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+                items(bookmarks, key = { it.url }) { site ->
+                    BookmarkManageRow(
+                        site = site,
+                        onDelete = { setQuickSites(encodeBookmarks(bookmarks.filter { it.url != site.url })) }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        QuickSiteDialog(
+            onAdd = { site ->
+                // 同一网址不重复添加，避免首页出现重复卡片
+                if (bookmarks.none { it.url == site.url }) setQuickSites(encodeBookmarks(bookmarks + site))
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+}
+
+/** 书签管理列表行：长按删除 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookmarkManageRow(site: QuickSite, onDelete: () -> Unit) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Box {
+        ListItem(
+            headlineContent = { Text(site.title, maxLines = 1) },
+            supportingContent = { Text(site.url, style = MaterialTheme.typography.bodySmall, maxLines = 1) },
+            leadingContent = {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Box(contentAlignment = Alignment.Center) { Text(site.icon, style = MaterialTheme.typography.titleMedium) }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = {}, onLongClick = { menuExpanded = true })
+                .padding(vertical = 2.dp)
+        )
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("删除书签") },
+                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                onClick = { menuExpanded = false; onDelete() }
+            )
+        }
     }
 }
 
@@ -1397,7 +1638,7 @@ private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
     var url by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加快捷站点") },
+        title = { Text("添加书签") },
         text = {
             Column {
                 OutlinedTextField(title, { title = it }, label = { Text("名称") })
@@ -1426,7 +1667,12 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     var showBrowserMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        // 用户拒绝了通知权限：前台服务仍会运行，但通知栏里看不到任何下载进度
+        if (!granted) {
+            Toast.makeText(context, "未授予通知权限，下载进度将只在应用内的下载记录中显示", Toast.LENGTH_LONG).show()
+        }
+    }
     // 网页文件选择：单/多选两个启动器，选中后回传给网页
     var filePickerCallback by remember { mutableStateOf<((Array<Uri>?) -> Unit)?>(null) }
     val filePickerSingle = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1446,6 +1692,28 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 
     LaunchedEffect(selectedTab?.url) {
         if (!inputFocused) input = selectedTab?.url.orEmpty()
+    }
+
+    // 当前网址是否已是书签：与首页书签卡片、设置页书签管理共用同一份数据，
+    // 用户在任一处增删后，这里的菜单文案会自动跟着变
+    val currentBookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
+    val currentUrl = selectedTab?.url.orEmpty()
+    val bookmarked = currentBookmarks.any { it.url == currentUrl }
+    val toggleBookmark: () -> Unit = {
+        if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
+            if (bookmarked) {
+                scope.launch { settingsStore.quickSites(encodeBookmarks(currentBookmarks.filter { it.url != currentUrl })) }
+            } else {
+                // 标题为空或为默认值时回退到域名，避免出现一批「新标签页」书签
+                val title = selectedTab?.title?.takeIf { it.isNotBlank() && it != "新标签页" }
+                    ?: Uri.parse(currentUrl).host?.removePrefix("www.")
+                    ?: currentUrl
+                scope.launch {
+                    settingsStore.quickSites(encodeBookmarks(currentBookmarks + QuickSite(title, currentUrl, title.take(1))))
+                }
+            }
+        }
+        showBrowserMenu = false
     }
 
     viewModel.onExternalDownload = { url -> scope.launch { downloadUrl = url } }
@@ -1511,6 +1779,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     IconButton(onClick = { showBrowserMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
                     DropdownMenu(expanded = showBrowserMenu, onDismissRequest = { showBrowserMenu = false }, offset = androidx.compose.ui.unit.DpOffset(0.dp, 48.dp)) {
                         DropdownMenuItem(text = { Text("电脑 UA 模式") }, leadingIcon = { if (selectedTab?.session?.settings?.userAgentOverride?.contains("X11") == true) Icon(Icons.Default.Check, null) else Icon(Icons.Default.Computer, null) }, onClick = { viewModel.toggleDesktopUserAgent(); showBrowserMenu = false })
+                        DropdownMenuItem(
+                            text = { Text(if (bookmarked) "删除书签" else "添加书签") },
+                            leadingIcon = { Icon(if (bookmarked) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
+                            onClick = toggleBookmark
+                        )
                         DropdownMenuItem(text = { Text("下载记录") }, leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { showBrowserMenu = false; onDownloads() })
                         DropdownMenuItem(text = { Text("浏览器设置") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showBrowserMenu = false; onSettings() })
                     }
@@ -1570,10 +1843,14 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     }
                 }
                 if (selectedTab.failed) {
-                    Text(
-                        "页面加载失败，请检查网络后重试。",
-                        modifier = Modifier.align(Alignment.CenterHorizontally).padding(12.dp),
-                        color = MaterialTheme.colorScheme.error
+                    // 错误页盖在 GeckoView 之上：失败时页面本身已无内容，
+                    // 但下层仍需保留渲染层，用户重试后无需重建视图
+                    PageErrorView(
+                        url = selectedTab.failedUrl.ifBlank { selectedTab.url },
+                        errorCode = selectedTab.errorCode,
+                        errorCategory = selectedTab.errorCategory,
+                        onRetry = { viewModel.reload() },
+                        modifier = Modifier.matchParentSize()
                     )
                 }
             }
@@ -1820,6 +2097,7 @@ private fun SettingsScreen(
     isDefaultBrowser: Boolean,
     onSetDefaultBrowser: () -> Unit,
     onHistory: () -> Unit,
+    onBookmarks: () -> Unit,
     onGeneralSettings: () -> Unit,
     onSiteSettings: () -> Unit,
     onCookieSettings: () -> Unit,
@@ -1850,6 +2128,7 @@ private fun SettingsScreen(
             SettingSearchItem("跳转至外部 APP 权限", "网页权限管理", listOf("外部", "跳转", "APP", "应用", "Intent", "权限"), onWebPermissions),
             SettingSearchItem("麦克风权限", "网页权限管理", listOf("麦克风", "录音", "权限", "语音", "音频"), onWebPermissions),
             SettingSearchItem("浏览历史", "浏览历史", listOf("历史", "访问", "记录", "足迹", "历史记录"), onHistory),
+            SettingSearchItem("书签管理", "书签管理", listOf("书签", "收藏", "收藏夹", "书签管理", "首页"), onBookmarks),
             SettingSearchItem("设为默认浏览器", "设为默认浏览器", listOf("默认", "浏览器", "角色", "默认应用", "默认浏览器"), onSetDefaultBrowser, accent = true, subtitle = "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验"),
             SettingSearchItem("外链诊断", "外链诊断", listOf("外链", "诊断", "Intent", "跳转", "链接"), { showLinkDiagnostics = true }),
             SettingSearchItem("关于 ZexBrowse", "关于 ZexBrowse", listOf("关于", "版本", "许可", "贡献者", "赞助", "Mirror", "CDK", "更新"), onAbout),
@@ -1864,6 +2143,7 @@ private fun SettingsScreen(
             SettingsEntryItem("隐私", cookieSettingsSubtitle(settings), Icons.Rounded.PrivacyTip, onCookieSettings),
             SettingsEntryItem("网页权限管理", "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
             SettingsEntryItem("浏览历史", "查看最近访问的网页", Icons.Default.History, onHistory),
+            SettingsEntryItem("书签管理", "管理首页书签，长按可删除", Icons.Rounded.Bookmarks, onBookmarks),
             SettingsEntryItem("设为默认浏览器", "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验", Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
             SettingsEntryItem("外链诊断", "查看最近一次外部跳转传入的原始信息", Icons.Default.Language, { showLinkDiagnostics = true }),
             SettingsEntryItem("关于 ZexBrowse", "版本、许可、贡献者与赞助支持", Icons.Default.Info, onAbout),
@@ -1964,6 +2244,7 @@ private fun settingsEntryIcon(title: String): androidx.compose.ui.graphics.vecto
     "隐私" -> Icons.Rounded.PrivacyTip
     "网页权限管理" -> Icons.Rounded.Security
     "浏览历史" -> Icons.Default.History
+    "书签管理" -> Icons.Rounded.Bookmarks
     "设为默认浏览器" -> Icons.Rounded.Public
     "外链诊断" -> Icons.Default.Language
     "关于 ZexBrowse" -> Icons.Default.Info

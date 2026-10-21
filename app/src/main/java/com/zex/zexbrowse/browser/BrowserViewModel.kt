@@ -26,12 +26,13 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
 import org.mozilla.geckoview.StorageController
 import java.net.URLEncoder
 import java.util.UUID
 
-data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false)
+data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val runtime = (application as ZexBrowseApplication).runtime
     private fun forceDarkApplication() = getApplication<Application>() as ZexBrowseApplication
@@ -206,9 +207,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url")
-                update(id) { it.copy(url = url, loading = true, failed = false, progress = 0) }
+                update(id) { it.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0) }
             }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
+            // 记录失败的具体错误码与分类，供错误页展示原因；
+            // 返回 null 表示不自定义错误页，由 Gecko 继续按默认方式处理
+            override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
+                update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = error.code, errorCategory = error.category) }
+                return null
+            }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
