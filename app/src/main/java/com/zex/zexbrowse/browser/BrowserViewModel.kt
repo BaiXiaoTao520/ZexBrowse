@@ -276,7 +276,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) { android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url"); update(id) { tab -> if (url.startsWith("about:") && tab.failed) tab else tab.copy(url = url) } } }
             // 记录失败的具体错误码与分类，供错误页展示原因；返回 null 表示不自定义错误页，交回 Gecko 默认处理。
             override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
-                update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = error.code, errorCategory = error.category) }
+                // 下载链接被 onLoadRequest 拒绝加载后，Gecko 仍会回调 onLoadError（加载被 abort），
+                // 这并非真正的加载失败，不能弹错误页，否则下载任何文件都会跳到错误页。
+                val pendingDownload = pendingDownloads[id]
+                val isDownloadAbort = (uri != null && uri.isDownloadUrl()) ||
+                    (pendingDownload != null && (uri == null || isSameDownloadTarget(uri, pendingDownload)))
+                if (!isDownloadAbort) {
+                    update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = error.code, errorCategory = error.category) }
+                }
                 return null
             }
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
