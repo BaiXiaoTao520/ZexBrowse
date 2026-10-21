@@ -197,6 +197,9 @@ enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS,
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
+/** 自定义浏览器标识：标题 + UA 内容 */
+private data class CustomUserAgent(val title: String, val ua: String)
+
 /** 设置搜索项：子选项标题 + 所属页面（作为副标题并决定图标）+ 可匹配关键词 + 点击跳转动作 */
 private data class SettingSearchItem(
     val title: String,
