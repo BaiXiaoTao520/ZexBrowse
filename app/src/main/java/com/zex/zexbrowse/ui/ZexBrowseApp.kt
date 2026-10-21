@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
@@ -1058,6 +1059,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     var query by rememberSaveable { mutableStateOf("") }
     val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
+    var editingBookmark by remember { mutableStateOf<QuickSite?>(null) }
 
     Scaffold(
         topBar = {
@@ -1088,18 +1090,31 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
             BookmarkGrid(
                 sites = bookmarks,
                 onOpen = onOpen,
+                onEdit = { editingBookmark = it },
                 onDelete = { site -> setQuickSites(encodeBookmarks(bookmarks.filter { it.url != site.url })) }
             )
         }
     }
 
     if (showQuickSiteDialog) {
-        QuickSiteDialog(
-            onAdd = { site ->
+        BookmarkDialog(
+            onSubmit = { site ->
                 setQuickSites(encodeBookmarks(bookmarks + site))
                 showQuickSiteDialog = false
             },
             onDismiss = { showQuickSiteDialog = false }
+        )
+    }
+
+    val editing = editingBookmark
+    if (editing != null) {
+        BookmarkDialog(
+            initial = editing,
+            onSubmit = { site ->
+                setQuickSites(encodeBookmarks(bookmarks.map { if (it.url == editing.url) site else it }))
+                editingBookmark = null
+            },
+            onDismiss = { editingBookmark = null }
         )
     }
 }
@@ -1491,7 +1506,7 @@ private fun AddressInput(
 }
 
 @Composable
-private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onDelete: (QuickSite) -> Unit) {
+private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onEdit: (QuickSite) -> Unit, onDelete: (QuickSite) -> Unit) {
     // 用普通 Column 而非 LazyColumn：本组件始终嵌在带 verticalScroll 的首页里，
     // 纵向可滚动组件不能在无限高度约束下测量（会直接抛异常导致启动闪退）；
     // 书签数量本就很少，无需懒加载。
@@ -1508,7 +1523,7 @@ private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onDel
             sites.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { site ->
-                        BookmarkCard(site = site, onOpen = onOpen, onDelete = onDelete, modifier = Modifier.weight(1f))
+                        BookmarkCard(site = site, onOpen = onOpen, onEdit = onEdit, onDelete = onDelete, modifier = Modifier.weight(1f))
                     }
                     repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -1517,16 +1532,16 @@ private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onDel
     }
 }
 
-/** 书签卡片：长按删除 */
+/** 书签卡片：长按弹菜单（编辑/删除） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onDelete: (QuickSite) -> Unit, modifier: Modifier = Modifier) {
+private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onEdit: (QuickSite) -> Unit, onDelete: (QuickSite) -> Unit, modifier: Modifier = Modifier) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box(modifier) {
         ElevatedCard(
             modifier = Modifier.fillMaxWidth().height(92.dp)
         ) {
-            // 长按弹删除菜单；点击打开书签
+            // 长按弹菜单；点击打开书签
             Row(
                 Modifier.fillMaxSize()
                     .combinedClickable(onClick = { onOpen(site.url) }, onLongClick = { menuExpanded = true })
@@ -1539,6 +1554,11 @@ private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onDelete: (Q
             }
         }
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("编辑书签") },
+                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                onClick = { menuExpanded = false; onEdit(site) }
+            )
             DropdownMenuItem(
                 text = { Text("删除书签") },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
@@ -1557,6 +1577,7 @@ private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onDelete: (Q
 private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -> Unit, onBack: () -> Unit) {
     val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingBookmark by remember { mutableStateOf<QuickSite?>(null) }
 
     Scaffold(topBar = {
         TopAppBar(
@@ -1571,7 +1592,7 @@ private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("暂无书签", style = MaterialTheme.typography.titleMedium)
-                    Text("长按列表中的书签即可删除", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("长按列表中的书签即可编辑或删除", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = { showAddDialog = true }) { Text("添加书签") }
                 }
             }
@@ -1580,6 +1601,7 @@ private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -
                 items(bookmarks, key = { it.url }) { site ->
                     BookmarkManageRow(
                         site = site,
+                        onEdit = { editingBookmark = site },
                         onDelete = { setQuickSites(encodeBookmarks(bookmarks.filter { it.url != site.url })) }
                     )
                 }
@@ -1588,8 +1610,8 @@ private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -
     }
 
     if (showAddDialog) {
-        QuickSiteDialog(
-            onAdd = { site ->
+        BookmarkDialog(
+            onSubmit = { site ->
                 // 同一网址不重复添加，避免首页出现重复卡片
                 if (bookmarks.none { it.url == site.url }) setQuickSites(encodeBookmarks(bookmarks + site))
                 showAddDialog = false
@@ -1597,12 +1619,24 @@ private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -
             onDismiss = { showAddDialog = false }
         )
     }
+
+    val editing = editingBookmark
+    if (editing != null) {
+        BookmarkDialog(
+            initial = editing,
+            onSubmit = { site ->
+                setQuickSites(encodeBookmarks(bookmarks.map { if (it.url == editing.url) site else it }))
+                editingBookmark = null
+            },
+            onDismiss = { editingBookmark = null }
+        )
+    }
 }
 
-/** 书签管理列表行：长按删除 */
+/** 书签管理列表行：长按弹菜单（编辑/删除） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookmarkManageRow(site: QuickSite, onDelete: () -> Unit) {
+private fun BookmarkManageRow(site: QuickSite, onEdit: () -> Unit, onDelete: () -> Unit) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
         ListItem(
@@ -1624,6 +1658,11 @@ private fun BookmarkManageRow(site: QuickSite, onDelete: () -> Unit) {
         )
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
             DropdownMenuItem(
+                text = { Text("编辑书签") },
+                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                onClick = { menuExpanded = false; onEdit() }
+            )
+            DropdownMenuItem(
                 text = { Text("删除书签") },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menuExpanded = false; onDelete() }
@@ -1632,20 +1671,22 @@ private fun BookmarkManageRow(site: QuickSite, onDelete: () -> Unit) {
     }
 }
 
+/** 书签对话框：initial 为 null 时是「添加」，否则是「编辑」并预填当前值 */
 @Composable
-private fun QuickSiteDialog(onAdd: (QuickSite) -> Unit, onDismiss: () -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
+private fun BookmarkDialog(initial: QuickSite? = null, onSubmit: (QuickSite) -> Unit, onDismiss: () -> Unit) {
+    var title by remember(initial) { mutableStateOf(initial?.title ?: "") }
+    var url by remember(initial) { mutableStateOf(initial?.url ?: "") }
+    val isEdit = initial != null
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加书签") },
+        title = { Text(if (isEdit) "编辑书签" else "添加书签") },
         text = {
             Column {
                 OutlinedTextField(title, { title = it }, label = { Text("名称") })
                 OutlinedTextField(url, { url = it }, label = { Text("网址") })
             }
         },
-        confirmButton = { TextButton(onClick = { if (title.isNotBlank() && url.isNotBlank()) onAdd(QuickSite(title, url, title.take(1))) }) { Text("添加") } },
+        confirmButton = { TextButton(onClick = { if (title.isNotBlank() && url.isNotBlank()) onSubmit(QuickSite(title, url, title.take(1))) }) { Text(if (isEdit) "保存" else "添加") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }
@@ -1703,6 +1744,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
             if (bookmarked) {
                 scope.launch { settingsStore.quickSites(encodeBookmarks(currentBookmarks.filter { it.url != currentUrl })) }
+                Toast.makeText(context, "书签已删除", Toast.LENGTH_SHORT).show()
             } else {
                 // 标题为空或为默认值时回退到域名，避免出现一批「新标签页」书签
                 val title = selectedTab?.title?.takeIf { it.isNotBlank() && it != "新标签页" }
@@ -1711,6 +1753,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 scope.launch {
                     settingsStore.quickSites(encodeBookmarks(currentBookmarks + QuickSite(title, currentUrl, title.take(1))))
                 }
+                Toast.makeText(context, "书签已添加", Toast.LENGTH_SHORT).show()
             }
         }
         showBrowserMenu = false
