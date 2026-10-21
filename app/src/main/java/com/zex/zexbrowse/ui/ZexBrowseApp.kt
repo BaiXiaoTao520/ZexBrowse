@@ -1841,17 +1841,18 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                             modifier = Modifier.fillMaxSize()
                         )
                     }
-                }
-                if (selectedTab.failed) {
                     // 错误页盖在 GeckoView 之上：失败时页面本身已无内容，
-                    // 但下层仍需保留渲染层，用户重试后无需重建视图
-                    PageErrorView(
-                        url = selectedTab.failedUrl.ifBlank { selectedTab.url },
-                        errorCode = selectedTab.errorCode,
-                        errorCategory = selectedTab.errorCategory,
-                        onRetry = { viewModel.reload() },
-                        modifier = Modifier.matchParentSize()
-                    )
+                    // 但下层仍需保留渲染层，用户重试后无需重建视图。
+                    // 必须写在 Box 内部才能使用 matchParentSize 铺满整个网页区域。
+                    if (selectedTab.failed) {
+                        PageErrorView(
+                            url = selectedTab.failedUrl.ifBlank { selectedTab.url },
+                            errorCode = selectedTab.errorCode,
+                            errorCategory = selectedTab.errorCategory,
+                            onRetry = { viewModel.reload() },
+                            modifier = Modifier.matchParentSize()
+                        )
+                    }
                 }
             }
         }

@@ -210,11 +210,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 update(id) { it.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0) }
             }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
-            // 记录失败的具体错误码与分类，供错误页展示原因；
-            // 返回 null 表示不自定义错误页，由 Gecko 继续按默认方式处理
-            override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
+            // 记录失败的具体错误码与分类，供错误页展示原因。
+            // 返回 GeckoResult 而不是 null：与本项目其它重写方法一致，
+            // 用 GeckoResult.fromValue(null) 表示「不自定义错误页，交回 Gecko 默认处理」。
+            override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String> {
                 update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = error.code, errorCategory = error.category) }
-                return null
+                return GeckoResult.fromValue(null)
             }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
