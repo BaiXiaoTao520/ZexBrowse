@@ -207,7 +207,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url")
-                update(id) { it.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0) }
+                update(id) { tab ->
+                    // 加载失败后 Gecko 会导航到 about:blank 之类的内部页；
+                    // 此时必须保留 failed 与失败网址，否则错误页会被冲掉、变成空白页。
+                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true)
+                    else tab.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
+                }
             }
             override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
@@ -268,7 +273,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
         })
         session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {
-            override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) { android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url"); update(id) { it.copy(url = url) } } }
+            override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) { android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url"); update(id) { tab -> if (url.startsWith("about:") && tab.failed) tab else tab.copy(url = url) } } }
             // 记录失败的具体错误码与分类，供错误页展示原因；返回 null 表示不自定义错误页，交回 Gecko 默认处理。
             override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
                 update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = error.code, errorCategory = error.category) }
