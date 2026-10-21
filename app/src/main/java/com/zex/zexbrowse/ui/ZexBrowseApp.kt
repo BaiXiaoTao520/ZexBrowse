@@ -347,6 +347,17 @@ private fun decodeBookmarks(raw: String): List<QuickSite> =
         if (title.isEmpty() || url.isEmpty()) null else QuickSite(title, url, title.take(1))
     }
 
+/** 自定义 UA 列表编解码，每行「标题|UA内容」 */
+private fun decodeCustomUserAgents(raw: String): List<CustomUserAgent> =
+    raw.split("\n").mapNotNull { line ->
+        val title = line.substringBefore('|').trim()
+        val ua = line.substringAfter('|', "").trim()
+        if (title.isEmpty() || ua.isEmpty()) null else CustomUserAgent(title, ua)
+    }
+
+private fun encodeCustomUserAgents(list: List<CustomUserAgent>): String =
+    list.joinToString("\n") { "${it.title}|${it.ua}" }
+
 private fun Context.findActivity(): android.app.Activity? {
     var current: Context? = this
     while (current is android.content.ContextWrapper) {
@@ -983,11 +994,11 @@ private fun PageContent(
         )
         Page.CUSTOM_USER_AGENT -> CustomUserAgentScreen(
             settings = settings,
-            onSave = { title, value ->
-                scope.launch { settingsStore.customUserAgent(title, value); settingsStore.userAgentMode("custom") }
-                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                goBack()
+            setUserAgents = { scope.launch { settingsStore.customUserAgents(it) } },
+            selectUserAgent = { title, ua ->
+                scope.launch { settingsStore.customUserAgent(title, ua); settingsStore.userAgentMode("custom") }
             },
+            resetUserAgent = { scope.launch { settingsStore.userAgentMode("geckoview") } },
             onBack = goBack
         )
         Page.CLIPBOARD_PERMISSION -> ClipboardPermissionScreen(
@@ -2414,16 +2425,133 @@ private fun CustomSearchScreen(settings: BrowserSettings, onSave: (String, Strin
 @Composable
 private fun UserAgentScreen(settings: BrowserSettings, onSelect: (String) -> Unit, onSimplified: (Boolean) -> Unit, onCustom: () -> Unit, onBack: () -> Unit) {
     val agents = listOf("geckoview" to "默认 GeckoView", "android_chrome" to "Android Chrome", "desktop_chrome" to "桌面 Chrome", "desktop_firefox" to "桌面 Firefox")
+    val customCount = decodeCustomUserAgents(settings.customUserAgents).size
     SelectionScreen("浏览器标识", onBack) {
         agents.forEach { (value, title) -> item { ChoiceItem(title, settings.userAgentMode == value) { onSelect(value) } } }
         item { SwitchRow("简化浏览器标识", "减少 User-Agent 中的设备信息", settings.simplifiedUserAgent, onSimplified, leading = Icons.Default.Computer) }
-        item { ListItem(headlineContent = { Text(settings.customUserAgentTitle) }, supportingContent = { Text("自定义浏览器标识") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
+        item { ListItem(headlineContent = { Text("自定义浏览器标识") }, supportingContent = { Text(if (customCount > 0) "$customCount 个" else "未添加") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CustomUserAgentScreen(settings: BrowserSettings, onSave: (String, String) -> Unit, onBack: () -> Unit) {
-    EditorScreen("自定义浏览器标识", settings.customUserAgentTitle, settings.customUserAgent, "浏览器标识内容", onSave, onBack)
+private fun CustomUserAgentScreen(
+    settings: BrowserSettings,
+    setUserAgents: (String) -> Unit,
+    selectUserAgent: (String, String) -> Unit,
+    resetUserAgent: () -> Unit,
+    onBack: () -> Unit
+) {
+    val agents = remember(settings.customUserAgents) { decodeCustomUserAgents(settings.customUserAgents) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<CustomUserAgent?>(null) }
+
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("自定义浏览器标识") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
+            actions = { IconButton(onClick = { showAddDialog = true }) { Icon(Icons.Default.Add, "添加") } }
+        )
+    }) { padding ->
+        if (agents.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("暂无自定义浏览器标识", style = MaterialTheme.typography.titleMedium)
+                    Text("点击右上角添加", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { showAddDialog = true }) { Text("添加") }
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+                items(agents, key = { it.title }) { agent ->
+                    val selected = settings.userAgentMode == "custom" && settings.customUserAgentTitle == agent.title
+                    CustomUserAgentRow(
+                        agent = agent,
+                        selected = selected,
+                        onSelect = { selectUserAgent(agent.title, agent.ua) },
+                        onEdit = { editing = agent },
+                        onDelete = {
+                            setUserAgents(encodeCustomUserAgents(agents.filter { it.title != agent.title }))
+                            if (selected) resetUserAgent()
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        CustomUserAgentDialog(
+            onSubmit = { agent ->
+                if (agents.none { it.title == agent.title }) setUserAgents(encodeCustomUserAgents(agents + agent))
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+
+    val editingAgent = editing
+    if (editingAgent != null) {
+        CustomUserAgentDialog(
+            initial = editingAgent,
+            onSubmit = { agent ->
+                setUserAgents(encodeCustomUserAgents(agents.map { if (it.title == editingAgent.title) agent else it }))
+                // 若编辑的是当前选中的，同步更新生效内容
+                if (settings.customUserAgentTitle == editingAgent.title) selectUserAgent(agent.title, agent.ua)
+                editing = null
+            },
+            onDismiss = { editing = null }
+        )
+    }
+}
+
+/** 自定义 UA 列表行：点击选中，长按弹编辑/删除 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CustomUserAgentRow(agent: CustomUserAgent, selected: Boolean, onSelect: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Box {
+        ListItem(
+            headlineContent = { Text(agent.title, maxLines = 1) },
+            supportingContent = { Text(agent.ua, style = MaterialTheme.typography.bodySmall, maxLines = 2) },
+            leadingContent = { if (selected) Icon(Icons.Default.Check, null) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onSelect, onLongClick = { menuExpanded = true })
+        )
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("编辑") },
+                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                onClick = { menuExpanded = false; onEdit() }
+            )
+            DropdownMenuItem(
+                text = { Text("删除") },
+                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                onClick = { menuExpanded = false; onDelete() }
+            )
+        }
+    }
+}
+
+/** 自定义 UA 对话框：initial 为 null 时是「添加」，否则是「编辑」 */
+@Composable
+private fun CustomUserAgentDialog(initial: CustomUserAgent? = null, onSubmit: (CustomUserAgent) -> Unit, onDismiss: () -> Unit) {
+    var title by remember(initial) { mutableStateOf(initial?.title ?: "") }
+    var ua by remember(initial) { mutableStateOf(initial?.ua ?: "") }
+    val isEdit = initial != null
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isEdit) "编辑浏览器标识" else "添加浏览器标识") },
+        text = {
+            Column {
+                OutlinedTextField(title, { title = it }, label = { Text("标题") }, singleLine = true)
+                OutlinedTextField(ua, { ua = it }, label = { Text("浏览器标识内容") }, minLines = 4)
+            }
+        },
+        confirmButton = { TextButton(onClick = { if (title.isNotBlank() && ua.isNotBlank()) onSubmit(CustomUserAgent(title.trim(), ua.trim())) }) { Text(if (isEdit) "保存" else "添加") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable

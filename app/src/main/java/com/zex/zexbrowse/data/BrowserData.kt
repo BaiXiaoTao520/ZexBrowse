@@ -127,6 +127,8 @@ data class BrowserSettings(
     val userAgentMode: String = "geckoview",
     val customUserAgentTitle: String = "自定义",
     val customUserAgent: String = "",
+    /** 自定义 UA 列表，每行「标题|内容」，与自定义搜索、书签同格式 */
+    val customUserAgents: String = "",
     val simplifiedUserAgent: Boolean = false,
     val searchEngine: String = "google",
     val customSearchTitle: String = "自定义搜索",
@@ -168,6 +170,7 @@ class SettingsStore(private val context: Context) {
     private val userAgentModeKey = stringPreferencesKey("user_agent_mode")
     private val customUserAgentTitleKey = stringPreferencesKey("custom_user_agent_title")
     private val customUserAgentKey = stringPreferencesKey("custom_user_agent")
+    private val customUserAgentsKey = stringPreferencesKey("custom_user_agents")
     private val simplifiedUserAgentKey = booleanPreferencesKey("simplified_user_agent")
     private val searchEngineKey = stringPreferencesKey("search_engine")
     private val customSearchTitleKey = stringPreferencesKey("custom_search_title")
@@ -203,6 +206,7 @@ class SettingsStore(private val context: Context) {
             userAgentMode = preferences[userAgentModeKey] ?: "geckoview",
             customUserAgentTitle = preferences[customUserAgentTitleKey] ?: "自定义",
             customUserAgent = preferences[customUserAgentKey] ?: "",
+            customUserAgents = preferences[customUserAgentsKey] ?: "",
             simplifiedUserAgent = preferences[simplifiedUserAgentKey] ?: false,
             searchEngine = preferences[searchEngineKey] ?: "google",
             customSearchTitle = preferences[customSearchTitleKey] ?: "自定义搜索",
@@ -252,6 +256,7 @@ class SettingsStore(private val context: Context) {
         preferences[customUserAgentKey] = value
     }
     suspend fun customUserAgent(value: String) = customUserAgent("自定义", value)
+    suspend fun customUserAgents(value: String) = update { it[customUserAgentsKey] = value }
     suspend fun simplifiedUserAgent(value: Boolean) = update { it[simplifiedUserAgentKey] = value }
     suspend fun searchEngine(value: String) = update { it[searchEngineKey] = value }
     suspend fun customSearch(title: String, url: String) = update { preferences ->
