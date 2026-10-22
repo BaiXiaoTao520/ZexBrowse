@@ -2904,7 +2904,12 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onDownload(fileName, expectedHash) }) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载") } },
+        confirmButton = {
+            // 解析中禁用：否则会把 download.aspx 作为文件名入队，用户看到的与实际落盘不一致
+            TextButton(enabled = !resolving, onClick = { onDownload(fileName, expectedHash) }) {
+                Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载")
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }

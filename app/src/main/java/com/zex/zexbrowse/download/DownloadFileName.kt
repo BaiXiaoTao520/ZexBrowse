@@ -53,27 +53,44 @@ object DownloadFileName {
     }
 
     /**
-     * 通过网络探测真实文件名（HEAD 请求读 Content-Disposition）。
-     * 失败、超时或不带该响应头时返回 null，由调用方保留原名称。
+     * 通过网络探测真实文件名（读 Content-Disposition）。
+     *
+     * 不用 HEAD：OpenList/Alist、SharePoint、OneDrive 等站点的下载入口
+     * 普遍不支持 HEAD（返回 405），导致永远拿不到响应头。
+     * 改用带 Range: bytes=0-0 的 GET：服务器只返回首字节，开销极小，
+     * 且兼容绝大多数会带 Content-Disposition 的实现。
      */
     suspend fun resolve(url: String): String? {
         fromUrl(url)?.let { return it }
         return runCatching {
             val client = OkHttpClient.Builder()
-                .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .build()
             val request = Request.Builder()
                 .url(url)
-                .head()
+                .get()
                 .header("User-Agent", DOWNLOAD_USER_AGENT)
+                .header("Range", "bytes=0-0")
                 .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                val disposition = response.header("Content-Disposition") ?: return@use null
-                parseContentDisposition(disposition)
+                // 206/200 都可能有 Content-Disposition；只读头部，不消费整个 body
+                val disposition = response.header("Content-Disposition")
+                val parsed = if (disposition != null) parseContentDisposition(disposition) else null
+                // 解析结果仍是通用入口时视为无效，交由调用方保留原名
+                parsed?.takeIf { !isGeneric(it) }
             }
         }.getOrNull()
+    }
+
+    /**
+     * 用已建立的响应头解析文件名（供下载 Worker 复用，避免重复请求）。
+     */
+    fun fromContentDisposition(value: String?): String? {
+        if (value.isNullOrBlank()) return null
+        return parseContentDisposition(value)
     }
 
     /** 从 Content-Disposition 中提取文件名，支持 RFC 5987 的 filename* 形式 */
@@ -107,10 +124,11 @@ object DownloadFileName {
 
     /**
      * 结合当前名称与解析结果，给出最终应使用的文件名。
-     * 当前名称本身已合法时优先保留（尊重服务器给出的原始名）。
+     * 当前名称本身已合法时优先保留（尊重服务器给出的原始名）；
+     * 解析结果本身仍是通用名时视为无效，不采用。
      */
     fun prefer(current: String, resolved: String?): String {
-        if (resolved.isNullOrBlank()) return current
+        if (resolved.isNullOrBlank() || isGeneric(resolved)) return current
         return if (isGeneric(current)) resolved else current
     }
 }
