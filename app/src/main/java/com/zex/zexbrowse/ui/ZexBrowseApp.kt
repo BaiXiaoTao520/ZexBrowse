@@ -3275,14 +3275,18 @@ private fun UpdateDialog(release: ReleaseInfo, preferMirror: Boolean, onDismiss:
  * 柠枺镜像高速下载通道卡片（位于发现新版本弹窗内）。
  *
  * 仅当构建期注入了 API 配置时才渲染，未配置的公开构建不会出现空壳入口。
- * 点击打开启动器详情页，由站点完成 PoW 验证后发放一次性 token 下载。
+ * 点击打开启动器详情页，由站点完成 PoW 验证后发放一次性 token 下载；
+ * 跳转后同时关闭弹窗，避免弹窗滞留在页面上。
  */
 @Composable
-private fun LemwoodChannelCard(downloadUrl: String?, siteUrl: String?) {
+private fun LemwoodChannelCard(downloadUrl: String?, siteUrl: String?, onNavigate: () -> Unit) {
     val context = LocalContext.current
     val target = downloadUrl?.takeIf { it.isNotBlank() } ?: siteUrl?.takeIf { it.isNotBlank() } ?: return
     Card(
-        onClick = { openInBrowser(context, target) },
+        onClick = {
+            openInBrowser(context, target)
+            onNavigate()
+        },
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large
     ) {
@@ -3357,7 +3361,8 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
                 if (LemwoodMirror.isAvailable) {
                     LemwoodChannelCard(
                         downloadUrl = release.lemwoodDownloadUrl,
-                        siteUrl = release.lemwoodSiteUrl
+                        siteUrl = release.lemwoodSiteUrl,
+                        onNavigate = onDismiss
                     )
                 }
             }
@@ -3384,7 +3389,13 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
                     enabled = mirrorReady && browserUrl != null,
                     // 权重 + fill=false：宽度不够时标签可换行，不会把「取消」挤出弹窗
                     modifier = Modifier.weight(1f, fill = false),
-                    onClick = { browserUrl?.let { target -> openInBrowser(context, target) } }
+                    onClick = {
+                        browserUrl?.let { target ->
+                            openInBrowser(context, target)
+                            // 跳转后关闭弹窗，与柠枺通道行为一致
+                            onDismiss()
+                        }
+                    }
                 ) {
                     Icon(Icons.Rounded.Speed, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
