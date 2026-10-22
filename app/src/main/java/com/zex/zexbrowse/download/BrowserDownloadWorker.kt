@@ -53,6 +53,11 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
+        // 先用 NotificationManager 直接发出「准备中」通知：
+        // setForeground 走 WorkManager 的前台服务启动流程（Android 12+ 异步），
+        // 紧接着的阻塞网络请求会让通知迟迟不出现，用户以为没反应。
+        // 直发通知即时可见，随后 setForeground 升级为前台服务（同一通知 ID，不闪重复）。
+        postPreparingNotification(id, fileName)
         setForeground(createForegroundInfo(id, fileName, 0, true))
 
         try {
@@ -118,6 +123,27 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             database.downloadDao().finishWithMessage(id, if (cancelled) "cancelled" else "failed", if (cancelled) "下载已取消" else (error.message ?: "未知错误"))
             if (!cancelled) notifyFinished(id, fileName, false)
             Result.failure()
+        }
+    }
+
+    /**
+     * 立即发出「准备中」通知，不依赖 WorkManager 前台服务的启动时机。
+     * 与 setForeground 使用同一通知 ID，升级为前台服务时原地更新，不会出现两条通知。
+     */
+    private fun postPreparingNotification(id: String, fileName: String) {
+        ensureChannel()
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(fileName.ifBlank { "正在下载" })
+            .setContentText("正在连接服务器…")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openAppPendingIntent())
+            .setProgress(0, 0, true)
+            .build()
+        runCatching {
+            applicationContext.getSystemService(NotificationManager::class.java)
+                .notify(foregroundNotificationId(id), notification)
         }
     }
 

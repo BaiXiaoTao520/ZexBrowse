@@ -85,6 +85,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 记录「地址是下载直链、未能加载成页面」的标签对应的下载网址。
     // 这类标签会话停在 about:blank，刷新无意义；改为用工具栏刷新按钮手动重新触发下载弹窗。
     private val pendingDownloads = HashMap<String, String>()
+    // 待确认的加载失败：Gecko 的 onPageStop/onLoadError 与 onExternalResponse（下载信号）
+    // 回调时序不确定，下载可能先触发失败回调。这里先延迟一小段时间再确认失败，
+    // 若期间收到下载信号则取消，避免把「下载」误判成「页面加载失败」而弹出错误页。
+    private val pendingFailures = HashMap<String, Runnable>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
@@ -160,6 +164,22 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         pendingLoadAttempts.remove(id)
     }
 
+    /** 延迟确认加载失败：等待可能的下载信号，避免下载场景误弹错误页 */
+    private fun scheduleFailure(id: String, uri: String?, errorCode: Int, errorCategory: Int) {
+        cancelPendingFailure(id)
+        val task = Runnable {
+            pendingFailures.remove(id)
+            update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = errorCode, errorCategory = errorCategory) }
+        }
+        pendingFailures[id] = task
+        mainHandler.postDelayed(task, FailureConfirmDelayMillis)
+    }
+
+    /** 收到下载信号时取消待确认的失败，确保下载不会弹错误页 */
+    private fun cancelPendingFailure(id: String) {
+        pendingFailures.remove(id)?.let { mainHandler.removeCallbacks(it) }
+    }
+
     /**
      * 判断两个地址是否指向同一份下载：忽略查询串与锚点的差异。
      * 刷新下载直链时 URL 可能与首次记录时略有出入（如追加的跟踪参数），
@@ -207,6 +227,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url")
+                // 新一次加载开始，上一次排队的失败确认作废，避免中途误弹错误页
+                cancelPendingFailure(id)
                 update(id) { tab ->
                     // 加载失败后 Gecko 会导航到 about:blank 之类的内部页；
                     // 此时必须保留 failed 与失败网址，否则错误页会被冲掉、变成空白页。
@@ -214,12 +236,29 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     else tab.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
                 }
             }
-            override fun onPageStop(session: GeckoSession, success: Boolean) { update(id) { it.copy(loading = false, failed = !success, progress = if (success) 100 else it.progress) }; if (success && !incognito) saveHistory(id) }
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+                update(id) { it.copy(loading = false, progress = if (success) 100 else it.progress) }
+                if (success) {
+                    cancelPendingFailure(id)
+                    if (!incognito) saveHistory(id)
+                } else {
+                    val tab = _tabs.value.firstOrNull { it.id == id }
+                    // 已知是下载（或地址本身是下载直链）时直接忽略，不弹错误页
+                    val isDownloadAbort = pendingDownloads[id] != null || (tab?.url?.isDownloadUrl() == true)
+                    if (!isDownloadAbort) scheduleFailure(id, tab?.url, 0, 0)
+                }
+            }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
         })
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
-            override fun onExternalResponse(session: GeckoSession, response: WebResponse) { pendingDownloads[id] = response.uri; clearPending(id); notifyExternalDownload(response.uri) }
+            override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                // 收到下载信号：立即取消可能已排队的「加载失败」，避免下载时误弹错误页
+                cancelPendingFailure(id)
+                pendingDownloads[id] = response.uri
+                clearPending(id)
+                notifyExternalDownload(response.uri)
+            }
         })
         session.setPromptDelegate(object : GeckoSession.PromptDelegate {
             // 网页触发文件选择（如上传图片/视频）时，交由界面层拉起系统文件选择器，选择完成后回传给网页。
@@ -281,14 +320,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val pendingDownload = pendingDownloads[id]
                 val isDownloadAbort = (uri != null && uri.isDownloadUrl()) ||
                     (pendingDownload != null && (uri == null || isSameDownloadTarget(uri, pendingDownload)))
-                if (!isDownloadAbort) {
-                    update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = error.code, errorCategory = error.category) }
-                }
+                if (!isDownloadAbort) scheduleFailure(id, uri, error.code, error.category)
                 return null
             }
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 if (uri.isDownloadUrl()) {
+                    cancelPendingFailure(id)
                     pendingDownloads[id] = uri
                     clearPending(id)
                     notifyExternalDownload(uri)
@@ -300,6 +338,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 if (uri.isDownloadUrl()) {
+                    cancelPendingFailure(id)
                     clearPending(id)
                     notifyExternalDownload(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
@@ -310,6 +349,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) = update(id) { it.copy(canGoForward = canGoForward) }
             override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
                 if (uri.isDownloadUrl()) {
+                    cancelPendingFailure(id)
                     notifyExternalDownload(uri)
                     return null
                 }
@@ -323,6 +363,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
         clearPending(id)
+        cancelPendingFailure(id)
         pendingDownloads.remove(id)
         runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
@@ -396,10 +437,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             if (!pendingInitialLoads.containsKey(tab.id)) runCatching { tab.session.reload() }
         }
     }
-    fun load(input: String) { val target = normalize(input); selected?.session?.loadUri(target) }
+    fun load(input: String) { val target = normalize(input); selected?.let { cancelPendingFailure(it.id); it.session.loadUri(target) } }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
     fun reload() {
         val tab = selected ?: return
+        // 手动重试时先清掉待确认失败，避免旧计时器在新一次加载过程中再次弹出错误页
+        cancelPendingFailure(tab.id)
         val pending = pendingDownloads[tab.id]
         // 标签地址是下载直链（未被加载成页面、会被 onLoadRequest 拒绝）时，刷新按钮改为手动重新触发下载弹窗：
         // 既避免自动重试导致「点取消后反复弹出」，也避免一次性弹框被取消后「再也弹不出来」。
@@ -455,6 +498,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private companion object {
         const val MaxPendingLoadAttempts = 20
         const val PendingLoadRetryMillis = 400L
+        /** 失败确认延迟：等待可能的下载信号（onExternalResponse）到达，避免误弹错误页 */
+        const val FailureConfirmDelayMillis = 900L
         /** 极少数情况下取不到默认 UA 时的兜底版本，应与 app/build.gradle.kts 的 geckoview 主版本一致 */
         const val FALLBACK_ENGINE_VERSION = "158.0"
     }

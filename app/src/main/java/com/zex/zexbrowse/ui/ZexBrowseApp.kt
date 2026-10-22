@@ -175,6 +175,7 @@ import com.zex.zexbrowse.data.SearchSuggestions
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.data.recommendedApps
+import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadManager
 import com.zex.zexbrowse.download.UpdateDownloadResult
 import com.zex.zexbrowse.ExternalLinkDiagnostics
@@ -2874,13 +2875,26 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
     val context = LocalContext.current
     val isApk = url.substringBefore('?').endsWith(".apk", ignoreCase = true)
     var expectedHash by rememberSaveable { mutableStateOf("") }
-    val fileName = url.substringAfterLast('/').substringBefore('?').ifBlank { "download" }
+    // 初始名称取 URL 末段；若它是 download.aspx 这类通用入口，则异步探测真实文件名
+    val initialName = url.substringAfterLast('/').substringBefore('?').ifBlank { "download" }
+    var fileName by remember(url) { mutableStateOf(initialName) }
+    var resolving by remember(url) { mutableStateOf(DownloadFileName.isGeneric(initialName)) }
+    LaunchedEffect(url) {
+        if (!DownloadFileName.isGeneric(initialName)) return@LaunchedEffect
+        val resolved = DownloadFileName.resolve(url)
+        if (resolved != null) fileName = resolved
+        resolving = false
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("下载文件") },
         text = {
             Column {
                 Text(fileName)
+                if (resolving) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("正在获取文件信息…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = { copyDownloadLink(context, url); Toast.makeText(context, "已复制下载链接", Toast.LENGTH_SHORT).show() }) { Text("复制下载链接") }
                 if (isApk) {
