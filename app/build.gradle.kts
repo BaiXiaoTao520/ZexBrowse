@@ -4,6 +4,12 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// GeckoView 内核版本：单一来源。依赖坐标与 BuildConfig 都从这里取值，
+// 避免升级内核时漏改某一处、导致 UA 声称的版本与实际内核不一致。
+val geckoViewVersion = "158.0.20261007201254"
+// 仅保留主版本号（如 "158.0"），供 UA 生成使用
+val geckoViewMajorVersion = geckoViewVersion.split('.').take(2).joinToString(".")
+
 android {
     namespace = "com.zex.zexbrowse"
     compileSdk = 37
@@ -12,9 +18,12 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 36
-        versionCode = 49
-        versionName = "6.3.3"
+        versionCode = 51
+        versionName = "6.3.5"
         ndk { abiFilters += "arm64-v8a" }
+
+        // GeckoView 内核主版本号（如 "158.0"），供 UA 生成与兜底使用
+        buildConfigField("String", "GECKOVIEW_VERSION", "\"$geckoViewMajorVersion\"")
 
         // Mirror 酱资源 ID：不从源码硬编码（避免公开仓库暴露），
         // 由构建环境变量 MIRRORCHYAN_RES_ID 注入（CI 用 Secrets，本地可在 ~/.gradle/gradle.properties 配置）。
@@ -122,6 +131,6 @@ dependencies {
     // GeckoView 内核：升级到 158（2026-10），替代原先的 131（2024-10）。
     // 旧版本落后 27 个版本，累积了大量已修复的高危漏洞（沙箱逃逸、UAF、同源绕过等），
     // 浏览器内核直接渲染不可信网页，必须保持更新。
-    implementation("org.mozilla.geckoview:geckoview:158.0.20261007201254")
+    implementation("org.mozilla.geckoview:geckoview:$geckoViewVersion")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
