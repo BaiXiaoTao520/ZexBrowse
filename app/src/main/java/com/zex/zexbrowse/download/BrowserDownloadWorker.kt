@@ -20,6 +20,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.zex.zexbrowse.data.BrowserDatabase
 import kotlinx.coroutines.CancellationException
+import com.zex.zexbrowse.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.job
@@ -39,7 +40,7 @@ internal val DOWNLOAD_USER_AGENT: String by lazy {
     val ua = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
     val version = Regex("Firefox/([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
         ?: Regex("rv:([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
-        ?: "158.0"
+        ?: BuildConfig.GECKOVIEW_VERSION
     "Mozilla/5.0 (Android 14; Mobile; rv:$version) Gecko/20100101 Firefox/$version"
 }
 

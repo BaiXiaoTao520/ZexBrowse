@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.Construction
+import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Storefront
@@ -202,6 +203,15 @@ val twilightToolboxRecommendation = RecommendedApp(
     description = "一款秉承互联网分享精神以 Material Design 3 风格进行设计开发的多功能工具聚合工具箱"
 )
 
+val aEmulatorRecommendation = RecommendedApp(
+    name = "AEmulator",
+    version = "v0.0.0.3",
+    summary = "一款能够模拟旧版 Android 系统固件的 Android 模拟器",
+    downloadUrl = "https://v4.gh-proxy.org/https://github.com/uxazu/AEmulator/releases/download/0.0.0.3/app.aemu.apk",
+    icon = Icons.Rounded.Memory,
+    description = "AEmulator boots a real Android 2.3–17 system image straight from a firmware file you already have: a recovery ZIP, an Odin archive, a Google factory image or a GSI. Old 32-bit firmware (2.3–4.4) runs through a patched QEMU, Android 5.0–17 runs natively on the phone’s arm64 cores. The kernel’s binder is emulated, graphics use your phone’s GPU and sound goes through Android’s audio stack — everything runs inside a normal app."
+)
+
 /** 与 ZexNote 一致的推荐顺序 */
 val recommendedApps = listOf(
     appShareRecommendation,
@@ -210,5 +220,6 @@ val recommendedApps = listOf(
     tomatoRecommendation,
     komiStoreRecommendation,
     coolMonitorRecommendation,
-    twilightToolboxRecommendation
+    twilightToolboxRecommendation,
+    aEmulatorRecommendation
 )

@@ -11,6 +11,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.zex.zexbrowse.BuildConfig
 import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.HistoryEntity
@@ -500,8 +501,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         const val PendingLoadRetryMillis = 400L
         /** 失败确认延迟：等待可能的下载信号（onExternalResponse）到达，避免误弹错误页 */
         const val FailureConfirmDelayMillis = 900L
-        /** 极少数情况下取不到默认 UA 时的兜底版本，应与 app/build.gradle.kts 的 geckoview 主版本一致 */
-        const val FALLBACK_ENGINE_VERSION = "158.0"
+        /** 极少数情况下取不到默认 UA 时的兜底版本，取自构建配置，与依赖坐标保持同一来源 */
+        val FALLBACK_ENGINE_VERSION = BuildConfig.GECKOVIEW_VERSION
     }
     private fun update(id: String, transform: (BrowserTab) -> BrowserTab) {
         // 内容未变化时不重新赋值，避免 StateFlow 发出等价列表导致无谓重组
