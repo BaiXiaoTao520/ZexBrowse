@@ -33,43 +33,53 @@ class UpdateChecker(
 ) {
 
     /**
-     * 获取最新版本信息。
+     * 检查是否有新版本。本地已是最新或所有来源都不可用时返回 null。
      *
-     * 版本来源优先柠枺镜像（国内连通性好、带官方 SHA-256），拿不到时回退 GitHub Releases。
-     * 两者都失败时返回 null。
+     * 版本号以镜像站的轻量版本表为准（只取版本号，不拉资产列表）；
+     * 确认有新版本后才去取资产，避免每次检查都拉完整版本列表。
+     * 镜像站不可用时回退 GitHub Releases。
      */
     suspend fun latest(): ReleaseInfo? {
-        val lemwood = lemwoodLatest()
         val github = githubLatest()
 
-        // 柠枺可用：以它为版本来源（与 GitHub 比较，取更高的一方，避免镜像同步滞后掩盖新版本）
-        if (lemwood != null) {
-            if (github == null || !isNewer(github.version, lemwood.version)) return lemwood
-            // GitHub 版本更高：版本号以 GitHub 为准，但保留柠枺的站点入口
-            return github.copy(lemwoodSiteUrl = lemwood.lemwoodSiteUrl)
+        // 镜像站有更新时优先用它：国内连通性好，且带官方 SHA-256
+        val lemwoodVersion = LemwoodMirror.latestVersion(client)
+        val lemwood = if (lemwoodVersion != null && isNewer(lemwoodVersion)) {
+            lemwoodRelease(lemwoodVersion)
+        } else null
+
+        return when {
+            // 镜像站取不到资产：回退 GitHub
+            lemwood == null -> github?.takeIf { isNewer(it.version) }
+            // GitHub 版本更高：以 GitHub 为准，避免镜像同步滞后掩盖新版本
+            github != null && isNewer(github.version, lemwood.version) -> github
+            // 走镜像站下载，更新说明仍用 GitHub 的（镜像站不提供）
+            else -> lemwood.copy(notes = github?.notes.orEmpty())
         }
-        return github
     }
 
     /**
-     * 从柠枺镜像获取最新版本及其 APK 资产信息。
+     * 按已知版本号取镜像站的资产信息（直链与官方 SHA-256）。
      *
-     * 站点未配置或请求失败时返回 null，由调用方回退 GitHub。
+     * 资产列表查不到时返回 null，由调用方回退 GitHub。
      */
-    private suspend fun lemwoodLatest(): ReleaseInfo? {
-        if (!LemwoodMirror.isAvailable) return null
+    private suspend fun lemwoodRelease(version: String): ReleaseInfo? {
         val releases = LemwoodMirror.releases(client) ?: return null
         val siteUrl = LemwoodMirror.siteUrl().takeIf { it.isNotBlank() }
-        val tag = releases.assetsByTag.keys.firstOrNull() ?: return null
+        // tag 形如 v6.3.6，与 version 去掉 v 后的形式对齐
+        val tag = releases.assetsByTag.keys.firstOrNull {
+            it.removePrefix("v").removePrefix("V") == version
+        } ?: return null
         val asset = releases.assetsByTag[tag]
             ?.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+            ?: return null
         return ReleaseInfo(
-            version = releases.latestVersion,
-            // 镜像站不提供更新说明，留给 GitHub 补全（同版本时）
+            version = version,
+            // 镜像站不提供更新说明，留空时界面显示「暂无更新说明」
             notes = "",
-            downloadUrl = asset?.url.orEmpty(),
-            lemwoodAssetUrl = asset?.url?.takeIf { it.isNotBlank() },
-            lemwoodSha256 = asset?.sha256?.takeIf { it.isNotBlank() },
+            downloadUrl = asset.url,
+            lemwoodAssetUrl = asset.url.takeIf { it.isNotBlank() },
+            lemwoodSha256 = asset.sha256.takeIf { it.isNotBlank() },
             lemwoodSiteUrl = siteUrl
         )
     }

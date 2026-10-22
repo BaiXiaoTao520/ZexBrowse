@@ -20,13 +20,12 @@ import org.json.JSONObject
  * LEMWOOD_API_BASE / LEMWOOD_LAUNCHER_ID），源码中不出现，避免公开仓库暴露接入点。
  * 未注入时 [isAvailable] 为 false，界面上不显示该入口。
  *
- * 官方文档（https://miawa.cn/apidocs）的最小下载流程：
- * 1. GET  /api/v2/launchers/{id}          → 版本列表，assets[].url 为下载直链；
- * 2. POST /api/v2/downloads/prepare       → 返回一次性 download_token（5 分钟内有效）；
- * 3. GET  {download_url}?token=...        → 消费 token 下载（单次消费，响应带 x-content-sha256）。
+ * 官方文档（https://miawa.cn/apidocs）的两个接口：
+ * 1. GET /api/v2/latest                   → 全站版本表，data[{启动器 ID}] 为最新版本号；
+ * 2. GET /api/v2/launchers/{id}          → 本应用的版本列表，assets[].url 为下载直链。
  *
- * 未带 token 的直链会 302 到 /verify 验证页（浏览器用户的 PoW 流程）；
- * 走 prepare 接口的应用可直接取得 token 在应用内下载，无需跳转浏览器。
+ * 检查更新时先查 [latestVersion]（响应体小、字段少），确认有新版本后才查 [releases] 取资产。
+ * 未带 token 的直链会 302 到 /verify 验证页，下载需由浏览器完成站点的人机验证。
  */
 object LemwoodMirror {
 
@@ -44,8 +43,6 @@ object LemwoodMirror {
 
     /** 查询结果：版本列表（最新在前） */
     data class Releases(
-        /** 最新版本号，去掉前缀 v */
-        val latestVersion: String,
         /** 各版本资产；key 为 "v6.3.5" 这类带 v 前缀的 tag 名 */
         val assetsByTag: Map<String, List<Asset>>
     )
@@ -54,9 +51,35 @@ object LemwoodMirror {
         val name: String,
         val size: Long,
         val sha256: String,
-        /** 下载直链（未带 token，访问会 302 到验证页；需经 [prepare] 换取带 token 的地址） */
+        /** 下载直链（未带 token，访问会 302 到验证页） */
         val url: String
     )
+
+    /**
+     * 查询本应用在镜像站上的最新版本号（去掉 v 前缀）。
+     *
+     * 走全站版本表 `/api/v2/latest`，一次拿到所有启动器的版本，响应比资产列表小得多；
+     * 任何失败都不抛出，返回 null 由调用方回退。
+     */
+    suspend fun latestVersion(client: OkHttpClient): String? = withContext(Dispatchers.IO) {
+        if (!isAvailable) return@withContext null
+        runCatching {
+            val request = Request.Builder()
+                .url("$apiBase/latest")
+                .header("Accept", "application/json")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val body = response.body ?: return@use null
+                val root = runCatching { JSONObject(body.string()) }.getOrNull() ?: return@use null
+                if (!root.isNull("error")) return@use null
+                val data = root.optJSONObject("data") ?: return@use null
+                data.optString(launcherId).trim()
+                    .removePrefix("v").removePrefix("V")
+                    .takeIf { it.isNotBlank() }
+            }
+        }.getOrNull()
+    }
 
     /**
      * 查询本应用的版本列表。任何失败都不抛出，返回 null 由调用方回退。
@@ -106,7 +129,6 @@ object LemwoodMirror {
             assetsByTag[tag] = assets
         }
         if (assetsByTag.isEmpty()) return null
-        val latest = assetsByTag.keys.first().removePrefix("v").removePrefix("V")
-        return Releases(latestVersion = latest, assetsByTag = assetsByTag)
+        return Releases(assetsByTag = assetsByTag)
     }
 }
