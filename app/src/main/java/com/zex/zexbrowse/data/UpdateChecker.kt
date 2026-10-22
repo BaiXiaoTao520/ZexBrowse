@@ -130,8 +130,10 @@ data class ReleaseInfo(
     val mirrorDownloadUrl: String? = null,
     /** Mirror 酱返回的提示信息（如 CDK 失效原因），供界面展示 */
     val mirrorMessage: String? = null,
-    /** 柠枺镜像提供的下载地址；未配置或无更新时为 null */
-    val lemwoodDownloadUrl: String? = null,
+    /** 柠枺镜像提供的下载直链（未带令牌，在浏览器中访问会自动 302 到验证页） */
+    val lemwoodAssetUrl: String? = null,
+    /** 柠枺镜像对应资产的官方 SHA-256，可用于下载校验 */
+    val lemwoodSha256: String? = null,
     /** 柠枺镜像站点入口，供用户查看发布页 */
     val lemwoodSiteUrl: String? = null
 )
@@ -156,15 +158,15 @@ class UpdateChecker(
         val github = githubLatest()
         val mirror = MirrorChyan.latest(cdk, client)
 
-        // Mirror 酱未接入 / 网络失败：直接用 GitHub 结果（并补上柠枺入口）
-        if (mirror == null) return github?.withLemwood()
+        // Mirror 酱未接入 / 网络失败：以 GitHub 结果为准，并补上柠枺信息
+        if (mirror == null) return github?.pickVersion()
 
         val mirrorMessage = mirror.message.takeIf { it.isNotBlank() }
 
         // 平台返回业务错误（如 CDK 错误/过期/次数用尽）时仍会带上版本信息，
         // 按官方流程图：错误只影响「能否拿到高速下载 url」，不应丢弃版本号。
         if (mirror.version.isBlank()) {
-            return github?.copy(mirrorMessage = mirrorMessage)?.withLemwood()
+            return github?.copy(mirrorMessage = mirrorMessage)?.pickVersion()
         }
 
         // 功能未开放时不构造任何 Mirror 酱地址，避免下游误展示入口
@@ -175,7 +177,7 @@ class UpdateChecker(
             return github.copy(
                 mirrorUrl = mirrorUrl,
                 mirrorMessage = mirrorMessage
-            ).withLemwood()
+            ).pickVersion()
         }
 
         val sameVersion = github != null && !isNewer(github.version, mirror.version) && !isNewer(mirror.version, github.version)
@@ -187,20 +189,30 @@ class UpdateChecker(
             mirrorUrl = mirrorUrl,
             mirrorDownloadUrl = if (MirrorChyan.isAvailable) mirror.downloadUrl.takeIf { it.isNotBlank() } else null,
             mirrorMessage = mirrorMessage
-        ).withLemwood()
+        ).pickVersion()
     }
 
-    /** 把柠枺镜像信息附加到结果上；未配置时保持原样 */
-    private fun ReleaseInfo.withLemwood(): ReleaseInfo {
-        // 只要配置齐备就给出入口：目标地址是固定的启动器详情页，
-        // 不依赖版本查询是否成功。否则站点维护/接口限流时，
-        // 即使入口可用也会被误判为「暂无可用下载入口」。
+    /**
+     * 定为最终结果：若柠枺镜像有同一版本的资产，则附上其直链与官方 SHA-256。
+     *
+     * 版本号以 GitHub / Mirror 酱的比较结果为准，柠枺仅提供高速下载源；
+     * 站点未同步到该版本时也能正常展示，只是没有高速通道。
+     */
+    private suspend fun ReleaseInfo.pickVersion(): ReleaseInfo {
         if (!LemwoodMirror.isAvailable) return this
+        val siteUrl = LemwoodMirror.siteUrl().takeIf { it.isNotBlank() }
+        val releases = LemwoodMirror.releases(client) ?: return copy(lemwoodSiteUrl = siteUrl)
+        // tag 形如 v6.3.5，与 version 去掉 v 后的形式对齐
+        val tag = releases.assetsByTag.keys.firstOrNull {
+            it.removePrefix("v").removePrefix("V") == version
+        } ?: return copy(lemwoodSiteUrl = siteUrl)
+        val asset = releases.assetsByTag[tag]
+            ?.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+            ?: return copy(lemwoodSiteUrl = siteUrl)
         return copy(
-            // 下载一律走启动器详情页：站点需在此完成 PoW 验证后发放一次性 token，
-            // 直接拼 download_path 会绕过验证机制。
-            lemwoodDownloadUrl = LemwoodMirror.launcherPageUrl().takeIf { it.isNotBlank() },
-            lemwoodSiteUrl = LemwoodMirror.siteUrl().takeIf { it.isNotBlank() }
+            lemwoodAssetUrl = asset.url.takeIf { it.isNotBlank() },
+            lemwoodSha256 = asset.sha256.takeIf { it.isNotBlank() },
+            lemwoodSiteUrl = siteUrl
         )
     }
 

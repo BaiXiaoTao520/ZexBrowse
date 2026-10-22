@@ -3139,7 +3139,7 @@ private fun AboutScreen(
                 }
             }) { Text("贡献者") }
             SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
-            SwitchRow("优先使用高速下载通道", "默认关闭；开启且高速通道可用时优先走它，否则始终走 GitHub 直链", settings.preferMirrorDownload, setPreferMirrorDownload, leading = Icons.Rounded.Speed)
+            SwitchRow("优先使用高速下载通道", "默认关闭；开启且高速通道可用时优先使用，否则走 GitHub 直链", settings.preferMirrorDownload, setPreferMirrorDownload, leading = Icons.Rounded.Speed)
             // Mirror 酱高速下载：卡片式入口，内含 CDK 输入与说明
             MirrorChyanCard(cdk = settings.mirrorCdk, setCdk = setMirrorCdk)
             // 赞助与支持：与其它入口保持相同的卡片样式
@@ -3275,11 +3275,15 @@ private fun UpdateDialog(release: ReleaseInfo, preferMirror: Boolean, onDismiss:
  * 柠枺镜像高速下载通道卡片（位于发现新版本弹窗内）。
  *
  * 仅当构建期注入了 API 配置时才渲染，未配置的公开构建不会出现空壳入口。
- * 点击打开启动器详情页，由站点完成 PoW 验证后发放一次性 token 下载；
- * 跳转后同时关闭弹窗，避免弹窗滞留在页面上。
+ * 下载必须经浏览器完成站点的人机验证（PoW）后才能拿到文件，
+ * 因此点击只负责跳转，不在应用内直接拉取。
  */
 @Composable
-private fun LemwoodChannelCard(downloadUrl: String?, siteUrl: String?, onNavigate: () -> Unit) {
+private fun LemwoodChannelCard(
+    downloadUrl: String?,
+    siteUrl: String?,
+    onNavigate: () -> Unit
+) {
     val context = LocalContext.current
     val target = downloadUrl?.takeIf { it.isNotBlank() } ?: siteUrl?.takeIf { it.isNotBlank() } ?: return
     Card(
@@ -3358,9 +3362,10 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
                 }
                 // 柠枺镜像高速下载通道：与其它入口保持一致的卡片样式；
                 // 未配置时整块不渲染，避免公开构建里出现空壳入口。
+                // 下载需在浏览器完成站点的人机验证（PoW），因此点击只做跳转。
                 if (LemwoodMirror.isAvailable) {
                     LemwoodChannelCard(
-                        downloadUrl = release.lemwoodDownloadUrl,
+                        downloadUrl = release.lemwoodAssetUrl,
                         siteUrl = release.lemwoodSiteUrl,
                         onNavigate = onDismiss
                     )
