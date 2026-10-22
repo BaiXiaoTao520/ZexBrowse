@@ -6,8 +6,14 @@
 
 package com.zex.zexbrowse.download
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.net.URLDecoder
 
 /**
@@ -19,8 +25,9 @@ import java.net.URLDecoder
  * 无法按类型打开文件。
  *
  * 解析顺序（先本地、后网络，网络请求失败时静默回退）：
- * 1. URL 查询参数中的显式文件名（filename / name / file 等）；
- * 2. 响应头 `Content-Disposition` 的 filename / filename*（RFC 5987）。
+ * 1. OpenList/Alist 的分享页路径：直接调它的 API 拿真实文件名；
+ * 2. URL 查询参数中的显式文件名（filename / name / file 等）；
+ * 3. 响应头 `Content-Disposition` 的 filename / filename*（RFC 5987）。
  */
 object DownloadFileName {
 
@@ -52,6 +59,81 @@ object DownloadFileName {
         return null
     }
 
+    /** 是否为常见网盘/对象存储域名（这类地址的 API 探测无意义） */
+    private fun isCloudStorageUrl(url: String): Boolean {
+        val host = url.substringAfter("://", "").substringBefore('/').lowercase()
+        return listOf(
+            "microsoftpersonalcontent.com", "sharepoint.com", "onedrive", "1drv.ms",
+            "aliyundrive.com", "alipan.com", "lanzou", "pan.baidu.com", "123pan.com",
+            "115.com", "quark.cn", "uc.cn", "weiyun.com", "jianguoyun.com",
+            "amazonaws.com", "aliyuncs.com", "myqcloud.com", "googleusercontent.com"
+        ).any { host.contains(it) }
+    }
+
+    /**
+     * OpenList / Alist 站点：通过其 API 拿真实文件名。
+     *
+     * 这类站点把目录页渲染成 SPA（`/fingerprintpay/` 返回 text/html），
+     * 实际文件列表在 `/api/fs/list`，单文件信息在 `/api/fs/get`。
+     * 后者的 `name` 字段就是真实文件名，而 `raw_url` 往往指向网盘
+     * （如 SharePoint 的 `download.aspx`），无 token 时会 302 到登录页，
+     * 根本拿不到 `Content-Disposition`。因此必须在 API 层取名字。
+     *
+     * 支持两种输入：
+     * - 具体文件页：`/dir/sub/file.ext` → 直接调 fs/get；
+     * - 目录页：`/dir/` → 调 fs/list 取目录下第一个文件（用户通常点的就是这一项）。
+     */
+    suspend fun fromOpenList(url: String): String? {
+        val parsed = url.toHttpUrlOrNull() ?: return null
+        val segments = parsed.pathSegments.filter { it.isNotBlank() }
+        if (segments.isEmpty()) return null
+
+        val origin = "${parsed.scheme}://${parsed.host}" + if (parsed.port != 80 && parsed.port != 443) ":${parsed.port}" else ""
+        val client = OkHttpClient.Builder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val jsonType = "application/json; charset=utf-8".toMediaType()
+
+        suspend fun postJson(path: String, body: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+            runCatching {
+                val request = Request.Builder()
+                    .url("$origin/api/fs/$path")
+                    .header("User-Agent", DOWNLOAD_USER_AGENT)
+                    .post(body.toString().toRequestBody(jsonType))
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use null
+                    val text = response.body?.string() ?: return@use null
+                    val root = JSONObject(text)
+                    if (root.optInt("code", -1) != 200) null else root.optJSONObject("data")
+                }
+            }.getOrNull()
+        }
+
+        val fullPath = "/" + segments.joinToString("/")
+        // 先当作文件路径查
+        postJson("get", JSONObject().put("path", fullPath).put("password", ""))?.let { data ->
+            if (!data.optBoolean("is_dir", false)) {
+                data.optString("name").takeIf { it.isNotBlank() }?.let { return it }
+            }
+        }
+        // 不是文件（或路径不存在）时，当作目录列出内容，取第一个文件
+        postJson(
+            "list",
+            JSONObject().put("path", fullPath).put("password", "").put("page", 1).put("per_page", 100).put("refresh", false)
+        )?.let { data ->
+            val content = data.optJSONArray("content") ?: return@let
+            for (i in 0 until content.length()) {
+                val item = content.optJSONObject(i) ?: continue
+                if (item.optBoolean("is_dir", false)) continue
+                val name = item.optString("name")
+                if (name.isNotBlank()) return name
+            }
+        }
+        return null
+    }
+
     /**
      * 通过网络探测真实文件名（读 Content-Disposition）。
      *
@@ -62,6 +144,11 @@ object DownloadFileName {
      */
     suspend fun resolve(url: String): String? {
         fromUrl(url)?.let { return it }
+        // OpenList/Alist 站点：文件信息只能从它的 API 拿（raw_url 多为网盘且需登录）。
+        // 仅在 URL 不是网盘直链时才尝试，否则会对 SharePoint 等域名发无效请求、白等超时。
+        if (!isCloudStorageUrl(url)) {
+            fromOpenList(url)?.let { if (!isGeneric(it)) return it }
+        }
         return runCatching {
             val client = OkHttpClient.Builder()
                 .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
