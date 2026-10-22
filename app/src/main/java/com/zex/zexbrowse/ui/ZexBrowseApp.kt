@@ -169,7 +169,6 @@ import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.LemwoodMirror
-import com.zex.zexbrowse.data.MirrorChyan
 import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.SearchSuggestions
@@ -555,7 +554,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
     LaunchedEffect(settings.autoCheckUpdates) {
         if (settings.autoCheckUpdates) {
-            val checker = UpdateChecker(cdk = settings.mirrorCdk)
+            val checker = UpdateChecker()
             startupUpdate = runCatching { checker.latest() }.getOrNull()?.takeIf { checker.isNewer(it.version) }
         }
     }
@@ -791,7 +790,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     }
                 }
             }
-            startupUpdate?.let { release -> UpdateDialog(release = release, preferMirror = settings.preferMirrorDownload, onDismiss = { startupUpdate = null }) }
+            startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
             if (sponsorInfo) SponsorDialog(onDismiss = { sponsorInfo = false })
             if (showFirstRunStorageHint && startupUpdate == null) {
                 AlertDialog(
@@ -1042,8 +1041,6 @@ private fun PageContent(
         Page.ABOUT -> AboutScreen(
             settings = settings,
             setAutoCheckUpdates = { scope.launch { settingsStore.autoCheckUpdates(it) } },
-            setMirrorCdk = { scope.launch { settingsStore.mirrorCdk(it) } },
-            setPreferMirrorDownload = { scope.launch { settingsStore.preferMirrorDownload(it) } },
             onSponsor = onSponsor,
             onBack = goBack
         )
@@ -2191,7 +2188,7 @@ private fun SettingsScreen(
             SettingSearchItem("书签管理", "书签管理", listOf("书签", "收藏", "收藏夹", "书签管理", "首页"), onBookmarks),
             SettingSearchItem("设为默认浏览器", "设为默认浏览器", listOf("默认", "浏览器", "角色", "默认应用", "默认浏览器"), onSetDefaultBrowser, accent = true, subtitle = "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验"),
             SettingSearchItem("外链诊断", "外链诊断", listOf("外链", "诊断", "Intent", "跳转", "链接"), { showLinkDiagnostics = true }),
-            SettingSearchItem("关于 ZexBrowse", "关于 ZexBrowse", listOf("关于", "版本", "许可", "贡献者", "赞助", "Mirror", "CDK", "更新"), onAbout),
+            SettingSearchItem("关于 ZexBrowse", "关于 ZexBrowse", listOf("关于", "版本", "许可", "贡献者", "赞助", "更新"), onAbout),
             SettingSearchItem("联系我们", "联系我们", listOf("联系", "反馈", "建议", "问题"), onContactUs)
         )
     }
@@ -2937,168 +2934,12 @@ private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
     LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, wavelength = 24.dp)
 }
 
-/**
- * 「Mirror 酱高速下载」卡片。
- *
- * 平台方（Mirror 酱商务）建议新项目先稳定运行一段时间后再接入，
- * 因此在功能开放前展示为「熄灭」状态：整条卡片暗淡、不可点击、无水波纹，
- * 副标题标注「暂不可用」，也不展示无法使用的 CDK 输入。
- * 待平台确认接入后，把构建开关打开即自动恢复为正常可点击状态（无需改代码）。
- *
- * 水波纹说明：使用 [Card] 的 onClick 重载，水波纹与卡片圆角形状一致；
- * 熄灭态下 enabled = false，不响应点击也不显示水波纹。
- */
-@Composable
-private fun MirrorChyanCard(cdk: String, setCdk: (String) -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val available = MirrorChyan.isAvailable
-    var showInfo by remember { mutableStateOf(false) }
-    var draft by remember(cdk) { mutableStateOf(cdk) }
-    var verifying by remember { mutableStateOf(false) }
-    var verdict by remember { mutableStateOf<String?>(null) }
-    val shape = MaterialTheme.shapes.large
-    // 熄灭态统一使用 38% 不透明度（Material disabled 标准值），
-    // 包括卡片内容区里用显式颜色的图标方块、副标题与箭头，
-    // 否则会出现「卡片变暗但文字/图标仍然高亮」的漏光感。
-    val disabledAlpha = 0.38f
-    val iconContainer = if (available) MaterialTheme.colorScheme.tertiaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = disabledAlpha)
-    val iconTint = if (available) MaterialTheme.colorScheme.onTertiaryContainer
-        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-    val subtitleColor = if (available) MaterialTheme.colorScheme.onSurfaceVariant
-        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-    val arrowColor = if (available) MaterialTheme.colorScheme.onSurfaceVariant
-        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-    // 卡片本身也显式给出禁用配色（不依赖 CardDefaults 的默认值），
-    // 与上面各子项使用同一套 38% 不透明度，整体看起来才是均匀的「熄灭」而不是斑驳的灰。
-    val cardColors = if (available) CardDefaults.cardColors() else CardDefaults.cardColors(
-        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = disabledAlpha),
-        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = disabledAlpha)
-    )
-    Card(
-        onClick = { showInfo = true },
-        modifier = Modifier.fillMaxWidth(),
-        enabled = available,
-        colors = cardColors,
-        shape = shape
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                modifier = Modifier.size(44.dp),
-                color = iconContainer,
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Speed, null, tint = iconTint) }
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Mirror 酱高速下载", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when {
-                        !available -> "暂不可用"
-                        cdk.isBlank() -> "未填写激活密钥（CDK）"
-                        else -> "已填写激活密钥（CDK）"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = subtitleColor
-                )
-            }
-            Icon(Icons.Default.ArrowForward, null, tint = arrowColor)
-        }
-    }
-    if (showInfo) {
-        AlertDialog(
-            onDismissRequest = { showInfo = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Speed, null)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Mirror 酱高速下载")
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text("Mirror 酱是国内第三方应用分发平台，为开源项目提供高速 CDN 镜像，可免梯下载最新安装包。", style = MaterialTheme.typography.bodyMedium)
-                    Text("在 Mirror 酱项目页获取激活密钥后填入下方，更新与下载即可使用高速通道；不填也可正常检查更新，下载会自动回退到 GitHub。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = { draft = it.trim(); verdict = null },
-                        label = { Text("激活密钥（CDK）") },
-                        placeholder = { Text("选填") },
-                        singleLine = true,
-                        enabled = available && !verifying,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (available) {
-                        OutlinedButton(
-                            enabled = !verifying,
-                            onClick = {
-                                if (draft.isBlank()) {
-                                    verdict = "请先填写激活密钥"
-                                } else {
-                                    verifying = true
-                                    verdict = null
-                                    scope.launch {
-                                        val result = runCatching { UpdateChecker().verifyCdk(draft) }.getOrNull()
-                                        verdict = when {
-                                            result == null -> "验证失败：网络异常或服务未响应，请稍后重试"
-                                            result.isBlank() -> "密钥有效，可使用高速下载"
-                                            else -> result
-                                        }
-                                        verifying = false
-                                    }
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Rounded.VerifiedUser, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (verifying) "正在验证…" else "验证密钥")
-                        }
-                    }
-                    verdict?.let { text ->
-                        Text(
-                            text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (text.startsWith("密钥有效")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
-                    }
-                    Text("密钥仅保存在本机，不会随代码或日志上传。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Mirror 酱为付费第三方服务，与本项目相互独立；未获取 CDK 时仍可在项目页查看版本信息。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    setCdk(draft)
-                    showInfo = false
-                    val url = MirrorChyan.projectUrl(source = "zexbrowse_app_settings")
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .onFailure { Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show() }
-                }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("保存并前往 Mirror 酱") }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { setCdk(draft); showInfo = false }) { Text("仅保存") }
-                    TextButton(onClick = { showInfo = false }) { Text("取消") }
-                }
-            }
-        )
-    }
-}
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AboutScreen(
     settings: BrowserSettings,
     setAutoCheckUpdates: (Boolean) -> Unit,
-    setMirrorCdk: (String) -> Unit,
-    setPreferMirrorDownload: (Boolean) -> Unit,
     onSponsor: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -3139,9 +2980,6 @@ private fun AboutScreen(
                 }
             }) { Text("贡献者") }
             SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
-            SwitchRow("优先使用高速下载通道", "默认关闭；开启且高速通道可用时优先使用，否则走 GitHub 直链", settings.preferMirrorDownload, setPreferMirrorDownload, leading = Icons.Rounded.Speed)
-            // Mirror 酱高速下载：卡片式入口，内含 CDK 输入与说明
-            MirrorChyanCard(cdk = settings.mirrorCdk, setCdk = setMirrorCdk)
             // 赞助与支持：与其它入口保持相同的卡片样式
             SettingsEntry(
                 title = "赞助与支持",
@@ -3155,7 +2993,7 @@ private fun AboutScreen(
                 onClick = {
                     checking = true
                     scope.launch {
-                        val checker = UpdateChecker(cdk = settings.mirrorCdk)
+                        val checker = UpdateChecker()
                         runCatching { checker.latest() }
                             .onSuccess { release ->
                                 if (release != null && checker.isNewer(release.version)) {
@@ -3208,7 +3046,7 @@ private fun AboutScreen(
         )
     }
 
-    update?.let { release -> UpdateDialog(release = release, preferMirror = settings.preferMirrorDownload, onDismiss = { update = null }) }
+    update?.let { release -> UpdateDialog(release = release, onDismiss = { update = null }) }
     message?.let { content ->
         AlertDialog(
             onDismissRequest = { message = null },
@@ -3259,15 +3097,15 @@ private fun SponsorDialog(onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun UpdateDialog(release: ReleaseInfo, preferMirror: Boolean, onDismiss: () -> Unit) {
+private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
     // 用户点了「下载」后切换到独立下载窗口；为空表示仍在简介窗口
     var stage by remember { mutableStateOf<ReleaseInfo?>(null) }
 
     val current = stage
     if (current == null) {
-        UpdateIntroDialog(release = release, preferMirror = preferMirror, onStartDownload = { stage = release }, onDismiss = onDismiss)
+        UpdateIntroDialog(release = release, onStartDownload = { stage = release }, onDismiss = onDismiss)
     } else {
-        UpdateDownloadDialog(release = current, preferMirror = preferMirror, onBack = onDismiss)
+        UpdateDownloadDialog(release = current, onBack = onDismiss)
     }
 }
 
@@ -3323,11 +3161,8 @@ private fun LemwoodChannelCard(
 
 /** 发现新版本的简介窗口：只负责展示更新说明并提供下载入口 */
 @Composable
-private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onStartDownload: () -> Unit, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    // 应用内下载：仅在 Mirror 酱可用且拿到直链时优先用之，否则回退 GitHub
-    val mirrorUrl = if (MirrorChyan.isAvailable && preferMirror) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null
-    val effectiveUrl = mirrorUrl ?: release.downloadUrl
+private fun UpdateIntroDialog(release: ReleaseInfo, onStartDownload: () -> Unit, onDismiss: () -> Unit) {
+    val effectiveUrl = release.downloadUrl
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -3346,16 +3181,6 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(release.notes.ifBlank { "暂无更新说明" })
-                }
-                // 下载通道标注：让用户知道即将走哪条通道，以及为什么
-                Text(
-                    if (mirrorUrl != null) "下载通道：Mirror 酱高速通道" else "下载通道：GitHub 直链",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                // Mirror 酱返回的提示（如 CDK 失效、次数用完），让用户知道回退原因
-                release.mirrorMessage?.takeIf { it.isNotBlank() }?.let { hint ->
-                    Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
                 if (effectiveUrl.isBlank()) {
                     Text("未获取到可用的下载地址，可稍后重试或前往项目页手动下载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -3382,36 +3207,7 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
                 Text("下载")
             }
         },
-        dismissButton = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Mirror酱高速下载：跳转浏览器打开。
-                // 功能未开放时保持熄灭状态；可用时优先用返回的带时效直链；未填 CDK 时打开项目页。
-                val mirrorReady = MirrorChyan.isAvailable
-                val browserUrl = if (mirrorReady) {
-                    release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } ?: release.mirrorUrl
-                } else null
-                TextButton(
-                    enabled = mirrorReady && browserUrl != null,
-                    // 权重 + fill=false：宽度不够时标签可换行，不会把「取消」挤出弹窗
-                    modifier = Modifier.weight(1f, fill = false),
-                    onClick = {
-                        browserUrl?.let { target ->
-                            openInBrowser(context, target)
-                            // 跳转后关闭弹窗，与柠枺通道行为一致
-                            onDismiss()
-                        }
-                    }
-                ) {
-                    Icon(Icons.Rounded.Speed, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        if (mirrorReady) "Mirror酱高速下载" else "Mirror酱高速下载（暂不可用）",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-                TextButton(onClick = onDismiss) { Text("取消") }
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }
 
@@ -3422,13 +3218,12 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun UpdateDownloadDialog(release: ReleaseInfo, preferMirror: Boolean, onBack: () -> Unit) {
+private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val fileName = "ZexBrowse-${release.version}.apk"
-    val mirrorUrl = if (MirrorChyan.isAvailable && preferMirror) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null
-    val effectiveUrl = mirrorUrl ?: release.downloadUrl
-    val channel = if (mirrorUrl != null) "Mirror 酱高速通道" else "GitHub 直链"
+    val effectiveUrl = release.downloadUrl
+    val channel = if (release.lemwoodAssetUrl != null) "镜像站高速通道" else "GitHub 直链"
 
     var downloadJob by remember { mutableStateOf<Job?>(null) }
     // attempt 变化会重启 LaunchedEffect，用于「重试」

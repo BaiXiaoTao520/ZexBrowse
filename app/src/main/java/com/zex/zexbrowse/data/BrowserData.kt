@@ -151,10 +151,6 @@ data class BrowserSettings(
     val clipboardReadPolicy: String = "ask",
     val micPolicy: String = "ask",
     val externalAppPolicy: String = "ask",
-    /** Mirror 酱激活密钥（CDK）；为空时仅能查询版本、无法使用高速下载 */
-    val mirrorCdk: String = "",
-    /** 有更新时是否优先走高速下载通道（如 Mirror 酱）；默认关闭，关闭时始终走 GitHub */
-    val preferMirrorDownload: Boolean = false,
     /** 硬件加速：开启时 GeckoView 使用 SurfaceView 后端（默认），关闭后改用 TextureView 以降低部分机型的渲染开销 */
     val hardwareAcceleration: Boolean = true,
     val sitePermissions: Map<String, String> = emptyMap(),
@@ -192,8 +188,6 @@ class SettingsStore(private val context: Context) {
     private val clipboardReadPolicyKey = stringPreferencesKey("clipboard_read_policy")
     private val micPolicyKey = stringPreferencesKey("mic_policy")
     private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
-    private val mirrorCdkKey = stringPreferencesKey("mirror_cdk")
-    private val preferMirrorDownloadKey = booleanPreferencesKey("prefer_mirror_download")
     private val hardwareAccelerationKey = booleanPreferencesKey("hardware_acceleration")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
     private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
@@ -228,8 +222,6 @@ class SettingsStore(private val context: Context) {
             clipboardReadPolicy = preferences[clipboardReadPolicyKey] ?: "ask",
             micPolicy = preferences[micPolicyKey] ?: "ask",
             externalAppPolicy = preferences[externalAppPolicyKey] ?: "ask",
-            mirrorCdk = preferences[mirrorCdkKey] ?: "",
-            preferMirrorDownload = preferences[preferMirrorDownloadKey] ?: false,
             hardwareAcceleration = preferences[hardwareAccelerationKey] ?: true,
             sitePermissions = (preferences[sitePermissionsKey] ?: "")
                 .split("\n")
@@ -274,7 +266,6 @@ class SettingsStore(private val context: Context) {
     suspend fun autoCheckUpdates(value: Boolean) = update { it[autoCheckUpdatesKey] = value }
     suspend fun storageHintShown(value: Boolean) = update { it[storageHintShownKey] = value }
     suspend fun defaultBrowserHintShown(value: Boolean) = update { it[defaultBrowserHintShownKey] = value }
-    suspend fun preferMirrorDownload(value: Boolean) = update { it[preferMirrorDownloadKey] = value }
     suspend fun hardwareAcceleration(value: Boolean) = update { it[hardwareAccelerationKey] = value }
     suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
     suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
@@ -299,8 +290,6 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun clearSearchHistory() = update { it[searchHistoryKey] = "" }
-    // 仅本地保存 CDK，不写入日志、不上传到除 Mirror 酱外的任何服务
-    suspend fun mirrorCdk(value: String) = update { it[mirrorCdkKey] = value }
     suspend fun setSitePermission(key: String, value: String) = update { preferences ->
         val current = preferences[sitePermissionsKey] ?: ""
         val entries = current.split("\n").filter { it.isNotBlank() && it.substringBefore('=') != key }
