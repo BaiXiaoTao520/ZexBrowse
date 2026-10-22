@@ -52,6 +52,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val url = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
+        // 下载过程中可能被响应头纠正为真实文件名，后续通知与记录都用这个变量
+        var displayName = fileName
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
         // 先用 NotificationManager 直接发出「准备中」通知：
         // setForeground 走 WorkManager 的前台服务启动流程（Android 12+ 异步），
@@ -66,6 +68,16 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             val response = call.execute()
             response.use {
                 check(it.isSuccessful) { "下载失败：${it.code}" }
+                // 兜底：若入队时仍未拿到真实文件名，用本次下载的响应头纠正，
+                // 保证「显示的文件名」与「实际落盘文件名」一致。
+                if (DownloadFileName.isGeneric(displayName)) {
+                    val fromHeader = DownloadFileName.fromContentDisposition(it.header("Content-Disposition"))
+                    if (fromHeader != null && !DownloadFileName.isGeneric(fromHeader)) {
+                        displayName = fromHeader
+                        database.downloadDao().rename(id, displayName)
+                        setForeground(createForegroundInfo(id, displayName, 0, true))
+                    }
+                }
                 val body = it.body ?: error("下载响应内容为空")
                 val total = body.contentLength()
                 var downloaded = 0L
@@ -99,7 +111,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                                 lastNotifyAt = now
                                 database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
                                 setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
-                                setForeground(createForegroundInfo(id, fileName, progress, total <= 0))
+                                setForeground(createForegroundInfo(id, displayName, progress, total <= 0))
                             }
                         }
                     }
@@ -111,7 +123,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
                 val status = if (expectedHash.isNotBlank() && !hash.equals(expectedHash, true)) "hash_mismatch" else "completed"
                 database.downloadDao().complete(id, status, hash)
-                notifyFinished(id, fileName, status == "completed")
+                notifyFinished(id, displayName, status == "completed")
                 cancellationHandle.dispose()
                 Result.success()
             }
@@ -121,7 +133,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         } catch (error: Throwable) {
             val cancelled = isStopped
             database.downloadDao().finishWithMessage(id, if (cancelled) "cancelled" else "failed", if (cancelled) "下载已取消" else (error.message ?: "未知错误"))
-            if (!cancelled) notifyFinished(id, fileName, false)
+            if (!cancelled) notifyFinished(id, displayName, false)
             Result.failure()
         }
     }

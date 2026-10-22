@@ -24,12 +24,21 @@ class DownloadScheduler(private val context: Context) {
     private val workManager = WorkManager.getInstance(context)
 
     suspend fun enqueue(url: String, fileName: String, expectedHash: String, useExternalDirectory: Boolean, externalTreeUri: String): String {
-        val target = createTargetUri(fileName, useExternalDirectory, externalTreeUri)
+        // 创建目标文件之前必须先确定真实文件名：
+        // OpenList/Alist、SharePoint 等站点的下载入口常为 download.aspx，
+        // 末段并非真实文件名。若先用它建文件，之后再改就晚了（文件已落盘）。
+        // 界面层已解析过时这里不会重复请求（prefer 会保留非通用名）。
+        val finalName = if (DownloadFileName.isGeneric(fileName)) {
+            DownloadFileName.prefer(fileName, DownloadFileName.resolve(url))
+        } else {
+            fileName
+        }
+        val target = createTargetUri(finalName, useExternalDirectory, externalTreeUri)
         val id = UUID.randomUUID().toString()
         database.downloadDao().save(
             DownloadEntity(
                 id = id,
-                fileName = fileName,
+                fileName = finalName,
                 sourceUrl = url,
                 targetUri = target.toString(),
                 expectedSha256 = expectedHash.trim()
@@ -39,7 +48,7 @@ class DownloadScheduler(private val context: Context) {
             .putString(BrowserDownloadWorker.KEY_ID, id)
             .putString(BrowserDownloadWorker.KEY_URL, url)
             .putString(BrowserDownloadWorker.KEY_URI, target.toString())
-            .putString(BrowserDownloadWorker.KEY_FILE_NAME, fileName)
+            .putString(BrowserDownloadWorker.KEY_FILE_NAME, finalName)
             .putString(BrowserDownloadWorker.KEY_EXPECTED_HASH, expectedHash.trim())
             .build()
         workManager.enqueue(OneTimeWorkRequestBuilder<BrowserDownloadWorker>().setInputData(input).addTag(id).build())
