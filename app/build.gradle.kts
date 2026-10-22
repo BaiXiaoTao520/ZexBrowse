@@ -34,6 +34,22 @@ android {
             ?: project.findProperty("mirrorchyan.enabled")?.toString()
             ?: "false").trim().equals("true", ignoreCase = true)
         buildConfigField("boolean", "MIRRORCHYAN_ENABLED", mirrorEnabled.toString())
+
+        // 柠枺镜像（Lemwood）高速下载服务。
+        // API 域名与启动器 ID 均不从源码硬编码：公开仓库不应暴露接入点，
+        // 由构建环境变量注入（CI 用 Secrets，本地可在 ~/.gradle/gradle.properties 配置）。
+        // 未注入时功能自动隐藏，用户不会看到半成品入口。
+        val lemwoodApiBase: String = (System.getenv("LEMWOOD_API_BASE")
+            ?: project.findProperty("lemwood.apiBase")?.toString()
+            ?: "").trim()
+        val escapedApiBase = lemwoodApiBase.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "LEMWOOD_API_BASE", "\"$escapedApiBase\"")
+
+        val lemwoodLauncherId: String = (System.getenv("LEMWOOD_LAUNCHER_ID")
+            ?: project.findProperty("lemwood.launcherId")?.toString()
+            ?: "").trim()
+        val escapedLauncherId = lemwoodLauncherId.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "LEMWOOD_LAUNCHER_ID", "\"$escapedLauncherId\"")
     }
 
     splits {
