@@ -129,7 +129,11 @@ data class ReleaseInfo(
     /** Mirror 酱高速下载地址（带时效）；未提供时为 null */
     val mirrorDownloadUrl: String? = null,
     /** Mirror 酱返回的提示信息（如 CDK 失效原因），供界面展示 */
-    val mirrorMessage: String? = null
+    val mirrorMessage: String? = null,
+    /** 柠枺镜像提供的下载地址；未配置或无更新时为 null */
+    val lemwoodDownloadUrl: String? = null,
+    /** 柠枺镜像站点入口，供用户查看发布页 */
+    val lemwoodSiteUrl: String? = null
 )
 
 data class Contributor(val name: String, val avatarUrl: String, val contributions: Int)
@@ -151,16 +155,18 @@ class UpdateChecker(
     suspend fun latest(): ReleaseInfo? {
         val github = githubLatest()
         val mirror = MirrorChyan.latest(cdk, client)
+        // 柠枺镜像：无密钥、配置齐备即可用；失败不影响主流程
+        val lemwood = LemwoodMirror.latest(client)
 
-        // Mirror 酱未接入 / 网络失败：直接用 GitHub 结果
-        if (mirror == null) return github
+        // Mirror 酱未接入 / 网络失败：直接用 GitHub 结果（并补上柠枺信息）
+        if (mirror == null) return github?.withLemwood(lemwood)
 
         val mirrorMessage = mirror.message.takeIf { it.isNotBlank() }
 
         // 平台返回业务错误（如 CDK 错误/过期/次数用尽）时仍会带上版本信息，
         // 按官方流程图：错误只影响「能否拿到高速下载 url」，不应丢弃版本号。
         if (mirror.version.isBlank()) {
-            return github?.copy(mirrorMessage = mirrorMessage)
+            return github?.copy(mirrorMessage = mirrorMessage)?.withLemwood(lemwood)
         }
 
         // 功能未开放时不构造任何 Mirror 酱地址，避免下游误展示入口
@@ -171,7 +177,7 @@ class UpdateChecker(
             return github.copy(
                 mirrorUrl = mirrorUrl,
                 mirrorMessage = mirrorMessage
-            )
+            ).withLemwood(lemwood)
         }
 
         val sameVersion = github != null && !isNewer(github.version, mirror.version) && !isNewer(mirror.version, github.version)
@@ -183,6 +189,17 @@ class UpdateChecker(
             mirrorUrl = mirrorUrl,
             mirrorDownloadUrl = if (MirrorChyan.isAvailable) mirror.downloadUrl.takeIf { it.isNotBlank() } else null,
             mirrorMessage = mirrorMessage
+        ).withLemwood(lemwood)
+    }
+
+    /** 把柠枺镜像信息附加到结果上；未配置时保持原样 */
+    private fun ReleaseInfo.withLemwood(result: LemwoodMirror.Result?): ReleaseInfo {
+        if (!LemwoodMirror.isAvailable || result == null) return this
+        return copy(
+            // 下载一律走启动器详情页：站点需在此完成 PoW 验证后发放一次性 token，
+            // 直接拼 download_path 会绕过验证机制。
+            lemwoodDownloadUrl = LemwoodMirror.launcherPageUrl().takeIf { it.isNotBlank() },
+            lemwoodSiteUrl = LemwoodMirror.siteUrl().takeIf { it.isNotBlank() }
         )
     }
 

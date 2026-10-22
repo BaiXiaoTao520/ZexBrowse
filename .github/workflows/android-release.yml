@@ -82,6 +82,10 @@ jobs:
           # MIRRORCHYAN_ENABLED 默认关闭（平台方建议新项目稳定后再接入）；开放后设为 true 即可启用。
           MIRRORCHYAN_RES_ID: ${{ secrets.MIRRORCHYAN_RES_ID }}
           MIRRORCHYAN_ENABLED: ${{ vars.MIRRORCHYAN_ENABLED || 'false' }}
+          # 柠枺镜像高速下载服务：API 域名与启动器 ID 均通过 Secrets 注入，
+          # 不写入源码，避免在公开仓库暴露接入点。未配置时应用自动隐藏该入口。
+          LEMWOOD_API_BASE: ${{ secrets.LEMWOOD_API_BASE }}
+          LEMWOOD_LAUNCHER_ID: ${{ secrets.LEMWOOD_LAUNCHER_ID }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: 生成 APK SHA-256 校验文件

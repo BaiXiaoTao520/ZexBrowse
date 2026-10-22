@@ -168,6 +168,7 @@ import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.DownloadEntity
+import com.zex.zexbrowse.data.LemwoodMirror
 import com.zex.zexbrowse.data.MirrorChyan
 import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
@@ -3261,6 +3262,50 @@ private fun UpdateDialog(release: ReleaseInfo, preferMirror: Boolean, onDismiss:
     }
 }
 
+/**
+ * 柠枺镜像高速下载通道卡片（位于发现新版本弹窗内）。
+ *
+ * 仅当构建期注入了 API 配置时才渲染，未配置的公开构建不会出现空壳入口。
+ * 点击后优先直达该版本的下载入口；拿不到时打开站点发布页。
+ */
+@Composable
+private fun LemwoodChannelCard(downloadUrl: String?, siteUrl: String?) {
+    val context = LocalContext.current
+    val target = downloadUrl?.takeIf { it.isNotBlank() } ?: siteUrl?.takeIf { it.isNotBlank() }
+    val ready = target != null
+    Card(
+        onClick = { target?.let { openInBrowser(context, it) } },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = ready,
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Speed, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("柠枺镜像高速通道", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (ready) "需在网页完成验证后下载" else "暂无可用下载入口",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 /** 发现新版本的简介窗口：只负责展示更新说明并提供下载入口 */
 @Composable
 private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onStartDownload: () -> Unit, onDismiss: () -> Unit) {
@@ -3268,7 +3313,6 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
     // 应用内下载：仅在 Mirror 酱可用且拿到直链时优先用之，否则回退 GitHub
     val mirrorUrl = if (MirrorChyan.isAvailable && preferMirror) release.mirrorDownloadUrl?.takeIf { it.isNotBlank() } else null
     val effectiveUrl = mirrorUrl ?: release.downloadUrl
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -3300,6 +3344,14 @@ private fun UpdateIntroDialog(release: ReleaseInfo, preferMirror: Boolean, onSta
                 }
                 if (effectiveUrl.isBlank()) {
                     Text("未获取到可用的下载地址，可稍后重试或前往项目页手动下载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                // 柠枺镜像高速下载通道：与其它入口保持一致的卡片样式；
+                // 未配置时整块不渲染，避免公开构建里出现空壳入口。
+                if (LemwoodMirror.isAvailable) {
+                    LemwoodChannelCard(
+                        downloadUrl = release.lemwoodDownloadUrl,
+                        siteUrl = release.lemwoodSiteUrl
+                    )
                 }
             }
         },
