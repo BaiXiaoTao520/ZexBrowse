@@ -138,15 +138,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // loadUri 会被静默丢弃，故在确认页面真正开始加载（onPageStart）前保留待加载项并重试。
     private fun loadPending(id: String) {
         val target = pendingInitialLoads[id] ?: return
-        // 直链下载地址不会被加载成页面：交由下载流程处理一次即可。
-        // 否则每次重试都会被 onLoadRequest 判定为下载并再次弹窗，导致弹窗反复出现、无法关闭。
-        if (target.isDownloadUrl()) {
-            // 记录该标签对应的下载直链，供工具栏刷新按钮手动重新触发下载
-            pendingDownloads[id] = target
-            clearPending(id)
-            notifyExternalDownload(target)
-            return
-        }
         val tab = _tabs.value.firstOrNull { it.id == id }
         // 不能用 tab.url / tab.loading 判断是否已开始加载：会话初挂载会先产生 about:blank，
         // 把 tab.url 填成非空、并可能触发一次 onPageStart，从而提前清除待加载地址，
@@ -244,8 +235,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     if (!incognito) saveHistory(id)
                 } else {
                     val tab = _tabs.value.firstOrNull { it.id == id }
-                    // 已知是下载（或地址本身是下载直链）时直接忽略，不弹错误页
-                    val isDownloadAbort = pendingDownloads[id] != null || (tab?.url?.isDownloadUrl() == true)
+                    // 已收到下载信号（onExternalResponse）时忽略此次 abort，不弹错误页
+                    val isDownloadAbort = pendingDownloads[id] != null
                     if (!isDownloadAbort) scheduleFailure(id, tab?.url, 0, 0)
                 }
             }
@@ -316,44 +307,26 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) { android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url"); update(id) { tab -> if (url.startsWith("about:") && tab.failed) tab else tab.copy(url = url) } } }
             // 记录失败的具体错误码与分类，供错误页展示原因；返回 null 表示不自定义错误页，交回 Gecko 默认处理。
             override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
-                // 下载链接被 onLoadRequest 拒绝加载后，Gecko 仍会回调 onLoadError（加载被 abort），
-                // 这并非真正的加载失败，不能弹错误页，否则下载任何文件都会跳到错误页。
+                // 已收到下载信号时，Gecko 会因导航被下载接管而回调 onLoadError，
+                // 这并非真正的加载失败，不能弹错误页。
                 val pendingDownload = pendingDownloads[id]
-                val isDownloadAbort = (uri != null && uri.isDownloadUrl()) ||
-                    (pendingDownload != null && (uri == null || isSameDownloadTarget(uri, pendingDownload)))
+                val isDownloadAbort = pendingDownload != null && (uri == null || isSameDownloadTarget(uri, pendingDownload))
                 if (!isDownloadAbort) scheduleFailure(id, uri, error.code, error.category)
                 return null
             }
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
+                // 下载交给 Gecko 自己判断（onExternalResponse）：
+                // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
-                if (uri.isDownloadUrl()) {
-                    cancelPendingFailure(id)
-                    pendingDownloads[id] = uri
-                    clearPending(id)
-                    notifyExternalDownload(uri)
-                    return GeckoResult.fromValue(AllowOrDeny.DENY)
-                }
                 if (uri.isExternalAppUri()) { requestExternalApp(uri); return GeckoResult.fromValue(AllowOrDeny.DENY) }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
-                val uri = request.uri
-                if (uri.isDownloadUrl()) {
-                    cancelPendingFailure(id)
-                    clearPending(id)
-                    notifyExternalDownload(uri)
-                    return GeckoResult.fromValue(AllowOrDeny.DENY)
-                }
                 return null
             }
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) = update(id) { it.copy(canGoBack = canGoBack) }
             override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) = update(id) { it.copy(canGoForward = canGoForward) }
             override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
-                if (uri.isDownloadUrl()) {
-                    cancelPendingFailure(id)
-                    notifyExternalDownload(uri)
-                    return null
-                }
                 if (uri.isExternalAppUri()) { requestExternalApp(uri); return null }
                 return GeckoResult.fromValue(createNewSessionForUri(uri, incognito))
             }
@@ -515,11 +488,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             } else tab
         }
         if (changed) _tabs.value = next
-    }
-    private fun String.isDownloadUrl(): Boolean {
-        val path = substringBefore('?').substringBefore('#').lowercase()
-        return listOf(".apk", ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".pdf", ".exe", ".msi", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".iso", ".img", ".dmg")
-            .any { path.endsWith(it) }
     }
     // 需交给外部应用打开的链接：非浏览器自身处理的 scheme（http/https 及本地/内部 scheme 之外的自定义 scheme、intent: 等）
     private fun String.isExternalAppUri(): Boolean {

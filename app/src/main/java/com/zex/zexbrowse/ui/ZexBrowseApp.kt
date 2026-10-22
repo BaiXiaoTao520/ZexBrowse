@@ -1221,9 +1221,78 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
 }
 
 /** 交给系统打开网页类链接（系统默认浏览器或用户选择的应用） */
+/**
+ * 用外部浏览器打开链接。
+ *
+ * 本应用自身也注册了 http(s) 的 VIEW intent-filter。被设为默认浏览器时，
+ * 直接 startActivity 会把链接交回自己，随即被本应用的下载拦截接管；
+ * 而柠枺镜像的下载地址带一次性令牌，被二次请求后一律返回 403
+ * （令牌只在首次成功响应时消费）。因此系统解析到本应用时，改从已安装的
+ * 其它浏览器里挑一个显式启动，确保链接交给外部浏览器，
+ * 让站点的 PoW 验证在网页里正常完成。
+ */
 private fun openInBrowser(context: android.content.Context, url: String) {
-    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    @Suppress("DEPRECATION")
+    val resolvedPackage = context.packageManager
+        .resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        ?.activityInfo?.packageName
+
+    if (resolvedPackage == null || resolvedPackage != context.packageName) {
+        // 未解析到、或已解析到外部应用：直接启动（已设默认浏览器时系统会自己交给它）
+        runCatching { context.startActivity(intent) }
+            .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+        return
+    }
+
+    // 解析到了自己：挑一个能处理 http 链接的外部浏览器显式打开
+    val external = externalBrowserPackage(context, url)
+    if (external != null) {
+        intent.setPackage(external)
+        val launched = runCatching { context.startActivity(intent) }.isSuccess
+        if (launched) return
+    }
+    // 没有其它可用浏览器时，至少交给系统应用选择器
+    runCatching { context.startActivity(Intent.createChooser(intent, "选择浏览器").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+}
+
+/**
+ * 找一个能处理网页链接的外部浏览器包名（排除本应用）。
+ *
+ * 优先系统当前默认的网页处理器，其次按常见浏览器的包名前缀挑选；
+ * 都不可用时用 [queryIntentActivities] 的结果兑底。
+ */
+private fun externalBrowserPackage(context: Context, url: String): String? {
+    val pm = context.packageManager
+    // 带上 BROWSABLE，与 manifest 中 <queries> 的声明一致，否则 Android 11+ 看不到其它浏览器
+    val probe = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        .addCategory(Intent.CATEGORY_BROWSABLE)
+
+    // 1) 用户已设默认浏览器（外部）时直接用它
+    @Suppress("DEPRECATION")
+    val preferred = pm.resolveActivity(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        ?.activityInfo?.packageName
+    if (preferred != null && preferred != context.packageName) return preferred
+
+    // 2) 按常见浏览器包名优先挑选，避免选中 WebView 壳或无关应用
+    val knownBrowsers = listOf(
+        "com.android.chrome", "com.chrome.beta", "com.chrome.dev",
+        "com.microsoft.emmx", "org.mozilla.firefox", "com.brave.browser",
+        "com.opera.browser", "com.opera.mini.native", "com.sec.android.app.sbrowser",
+        "com.UCMobile", "com.uc.browser", "com.quark.browser", "com.tencent.mtt",
+        "com.baidu.browser.apps", "com.vivo.browser", "com.miui.browser",
+        "com.huawei.browser", "com.heytap.browser", "com.android.browser", "org.chromium.chrome"
+    )
+    val installed = pm.queryIntentActivities(probe, 0)
+        .mapNotNull { it.activityInfo?.packageName }
+        .filter { it != context.packageName }
+        .toSet()
+    if (installed.isEmpty()) return null
+    knownBrowsers.firstOrNull { it in installed }?.let { return it }
+
+    // 3) 兜底：任一可处理链接的外部应用
+    return installed.firstOrNull()
 }
 
 /**
