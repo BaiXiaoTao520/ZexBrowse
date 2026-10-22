@@ -2890,12 +2890,21 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
         onDismissRequest = onDismiss,
         title = { Text("下载文件") },
         text = {
-            Column {
-                Text(fileName)
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 if (resolving) {
                     Spacer(Modifier.height(6.dp))
                     Text("正在获取文件信息…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                Spacer(Modifier.height(12.dp))
+                // 文件名可编辑：部分站点（网盘跳转、需登录的下载入口）拿不到真实文件名，
+                // 此时用户可手动修正，避免落盘成 download.aspx 这类无意义名字。
+                OutlinedTextField(
+                    value = fileName,
+                    onValueChange = { fileName = it },
+                    label = { Text("保存文件名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = { copyDownloadLink(context, url); Toast.makeText(context, "已复制下载链接", Toast.LENGTH_SHORT).show() }) { Text("复制下载链接") }
                 if (isApk) {
@@ -2907,7 +2916,7 @@ private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, on
         },
         confirmButton = {
             // 解析中禁用：否则会把 download.aspx 作为文件名入队，用户看到的与实际落盘不一致
-            TextButton(enabled = !resolving, onClick = { onDownload(fileName, expectedHash) }) {
+            TextButton(enabled = !resolving && fileName.isNotBlank(), onClick = { onDownload(fileName, expectedHash) }) {
                 Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载")
             }
         },
