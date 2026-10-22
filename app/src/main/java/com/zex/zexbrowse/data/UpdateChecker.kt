@@ -155,18 +155,16 @@ class UpdateChecker(
     suspend fun latest(): ReleaseInfo? {
         val github = githubLatest()
         val mirror = MirrorChyan.latest(cdk, client)
-        // 柠枺镜像：无密钥、配置齐备即可用；失败不影响主流程
-        val lemwood = LemwoodMirror.latest(client)
 
-        // Mirror 酱未接入 / 网络失败：直接用 GitHub 结果（并补上柠枺信息）
-        if (mirror == null) return github?.withLemwood(lemwood)
+        // Mirror 酱未接入 / 网络失败：直接用 GitHub 结果（并补上柠枺入口）
+        if (mirror == null) return github?.withLemwood()
 
         val mirrorMessage = mirror.message.takeIf { it.isNotBlank() }
 
         // 平台返回业务错误（如 CDK 错误/过期/次数用尽）时仍会带上版本信息，
         // 按官方流程图：错误只影响「能否拿到高速下载 url」，不应丢弃版本号。
         if (mirror.version.isBlank()) {
-            return github?.copy(mirrorMessage = mirrorMessage)?.withLemwood(lemwood)
+            return github?.copy(mirrorMessage = mirrorMessage)?.withLemwood()
         }
 
         // 功能未开放时不构造任何 Mirror 酱地址，避免下游误展示入口
@@ -177,7 +175,7 @@ class UpdateChecker(
             return github.copy(
                 mirrorUrl = mirrorUrl,
                 mirrorMessage = mirrorMessage
-            ).withLemwood(lemwood)
+            ).withLemwood()
         }
 
         val sameVersion = github != null && !isNewer(github.version, mirror.version) && !isNewer(mirror.version, github.version)
@@ -189,12 +187,15 @@ class UpdateChecker(
             mirrorUrl = mirrorUrl,
             mirrorDownloadUrl = if (MirrorChyan.isAvailable) mirror.downloadUrl.takeIf { it.isNotBlank() } else null,
             mirrorMessage = mirrorMessage
-        ).withLemwood(lemwood)
+        ).withLemwood()
     }
 
     /** 把柠枺镜像信息附加到结果上；未配置时保持原样 */
-    private fun ReleaseInfo.withLemwood(result: LemwoodMirror.Result?): ReleaseInfo {
-        if (!LemwoodMirror.isAvailable || result == null) return this
+    private fun ReleaseInfo.withLemwood(): ReleaseInfo {
+        // 只要配置齐备就给出入口：目标地址是固定的启动器详情页，
+        // 不依赖版本查询是否成功。否则站点维护/接口限流时，
+        // 即使入口可用也会被误判为「暂无可用下载入口」。
+        if (!LemwoodMirror.isAvailable) return this
         return copy(
             // 下载一律走启动器详情页：站点需在此完成 PoW 验证后发放一次性 token，
             // 直接拼 download_path 会绕过验证机制。
