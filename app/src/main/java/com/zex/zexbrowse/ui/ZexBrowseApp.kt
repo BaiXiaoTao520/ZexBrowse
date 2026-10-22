@@ -3275,17 +3275,15 @@ private fun UpdateDialog(release: ReleaseInfo, preferMirror: Boolean, onDismiss:
  * 柠枺镜像高速下载通道卡片（位于发现新版本弹窗内）。
  *
  * 仅当构建期注入了 API 配置时才渲染，未配置的公开构建不会出现空壳入口。
- * 点击后优先直达该版本的下载入口；拿不到时打开站点发布页。
+ * 点击打开启动器详情页，由站点完成 PoW 验证后发放一次性 token 下载。
  */
 @Composable
 private fun LemwoodChannelCard(downloadUrl: String?, siteUrl: String?) {
     val context = LocalContext.current
-    val target = downloadUrl?.takeIf { it.isNotBlank() } ?: siteUrl?.takeIf { it.isNotBlank() }
-    val ready = target != null
+    val target = downloadUrl?.takeIf { it.isNotBlank() } ?: siteUrl?.takeIf { it.isNotBlank() } ?: return
     Card(
-        onClick = { target?.let { openInBrowser(context, it) } },
+        onClick = { openInBrowser(context, target) },
         modifier = Modifier.fillMaxWidth(),
-        enabled = ready,
         shape = MaterialTheme.shapes.large
     ) {
         Row(
@@ -3305,7 +3303,7 @@ private fun LemwoodChannelCard(downloadUrl: String?, siteUrl: String?) {
             Column(Modifier.weight(1f)) {
                 Text("柠枺镜像高速通道", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    if (ready) "需在网页完成验证后下载" else "暂无可用下载入口",
+                    "需在网页完成验证后下载",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
