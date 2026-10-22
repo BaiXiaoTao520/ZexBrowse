@@ -3103,32 +3103,26 @@ private fun UpdateDialog(release: ReleaseInfo, onDismiss: () -> Unit) {
 
     val current = stage
     if (current == null) {
-        UpdateIntroDialog(release = release, onStartDownload = { stage = release }, onDismiss = onDismiss)
+        UpdateIntroDialog(
+            release = release,
+            onStartDownload = { stage = release },
+            onDismiss = onDismiss
+        )
     } else {
         UpdateDownloadDialog(release = current, onBack = onDismiss)
     }
 }
 
 /**
- * 柠枺镜像高速下载通道卡片（位于发现新版本弹窗内）。
+ * 镜像站高速下载通道卡片（位于发现新版本弹窗内）。
  *
- * 仅当构建期注入了 API 配置时才渲染，未配置的公开构建不会出现空壳入口。
- * 下载必须经浏览器完成站点的人机验证（PoW）后才能拿到文件，
- * 因此点击只负责跳转，不在应用内直接拉取。
+ * 仅当镜像站已同步该版本时才渲染。下载前需在网页完成站点的人机验证（PoW），
+ * 因此点击只负责用浏览器打开直链，验证与下载都由站点页面完成。
  */
 @Composable
-private fun LemwoodChannelCard(
-    downloadUrl: String?,
-    siteUrl: String?,
-    onNavigate: () -> Unit
-) {
-    val context = LocalContext.current
-    val target = downloadUrl?.takeIf { it.isNotBlank() } ?: siteUrl?.takeIf { it.isNotBlank() } ?: return
+private fun LemwoodChannelCard(onClick: () -> Unit) {
     Card(
-        onClick = {
-            openInBrowser(context, target)
-            onNavigate()
-        },
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large
     ) {
@@ -3147,7 +3141,7 @@ private fun LemwoodChannelCard(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("柠枺镜像高速通道", style = MaterialTheme.typography.titleSmall)
+                Text("镜像站高速通道", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "需在网页完成验证后下载",
                     style = MaterialTheme.typography.bodySmall,
@@ -3161,7 +3155,12 @@ private fun LemwoodChannelCard(
 
 /** 发现新版本的简介窗口：只负责展示更新说明并提供下载入口 */
 @Composable
-private fun UpdateIntroDialog(release: ReleaseInfo, onStartDownload: () -> Unit, onDismiss: () -> Unit) {
+private fun UpdateIntroDialog(
+    release: ReleaseInfo,
+    onStartDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
     val effectiveUrl = release.downloadUrl
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -3182,24 +3181,25 @@ private fun UpdateIntroDialog(release: ReleaseInfo, onStartDownload: () -> Unit,
                 ) {
                     Text(release.notes.ifBlank { "暂无更新说明" })
                 }
-                if (effectiveUrl.isBlank()) {
+                // 无 GitHub 直链但可走镜像站时，不当作错误提示
+                if (effectiveUrl.isBlank() && !release.lemwoodAvailable) {
                     Text("未获取到可用的下载地址，可稍后重试或前往项目页手动下载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
-                // 柠枺镜像高速下载通道：与其它入口保持一致的卡片样式；
-                // 未配置时整块不渲染，避免公开构建里出现空壳入口。
-                // 下载需在浏览器完成站点的人机验证（PoW），因此点击只做跳转。
-                if (LemwoodMirror.isAvailable) {
+                // 镜像站高速通道：站点已同步该版本时才渲染，
+                // 未配置的公开构建不会出现空壳入口。
+                if (LemwoodMirror.isAvailable && release.lemwoodAvailable) {
                     LemwoodChannelCard(
-                        downloadUrl = release.lemwoodAssetUrl,
-                        siteUrl = release.lemwoodSiteUrl,
-                        onNavigate = onDismiss
+                        onClick = {
+                            openInBrowser(context, LemwoodMirror.apkDownloadUrl(release.version))
+                            onDismiss()
+                        }
                     )
                 }
             }
         },
         confirmButton = {
             Button(
-                enabled = effectiveUrl.isNotBlank(),
+                enabled = effectiveUrl.isNotBlank() || release.lemwoodAvailable,
                 onClick = onStartDownload
             ) {
                 Icon(Icons.Default.Download, null)
@@ -3223,7 +3223,7 @@ private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val fileName = "ZexBrowse-${release.version}.apk"
     val effectiveUrl = release.downloadUrl
-    val channel = if (release.lemwoodAssetUrl != null) "镜像站高速通道" else "GitHub 直链"
+    val channel = "GitHub 直链"
 
     var downloadJob by remember { mutableStateOf<Job?>(null) }
     // attempt 变化会重启 LaunchedEffect，用于「重试」
@@ -3238,7 +3238,11 @@ private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
     val requestUrl = if (attempt == 0) effectiveUrl else effectiveUrl.suffixQuery("retry" to attempt.toString())
 
     LaunchedEffect(effectiveUrl, attempt) {
-        if (effectiveUrl.isBlank()) { connecting = false; error = "未获取到可用的下载地址"; return@LaunchedEffect }
+        if (effectiveUrl.isBlank()) {
+            connecting = false
+            error = "未获取到可用的下载地址"
+            return@LaunchedEffect
+        }
         downloadJob?.cancel()
         downloadJob = null
         progress = 0
