@@ -56,6 +56,9 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         // 下载过程中可能被响应头纠正为真实文件名，后续通知与记录都用这个变量
         var displayName = fileName
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
+        // 本地捕获文件：onExternalResponse 时 Gecko 已把响应体拉下来存到临时文件。
+        // 存在且可用时直接读它落盘，全程不再发第二次 HTTP 请求（一次性令牌二次请求会 403）。
+        val localBin = inputData.getString(KEY_LOCAL_SOURCE)?.let(::File)?.takeIf { it.exists() }
         // 先用 NotificationManager 直接发出「准备中」通知：
         // setForeground 走 WorkManager 的前台服务启动流程（Android 12+ 异步），
         // 紧接着的阻塞网络请求会让通知迟迟不出现，用户以为没反应。
@@ -63,71 +66,96 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         postPreparingNotification(id, fileName)
         setForeground(createForegroundInfo(id, fileName, 0, true))
 
+        var input: java.io.InputStream? = null
+        var httpResponse: okhttp3.Response? = null
+        var call: okhttp3.Call? = null
+        var cancellationHandle: kotlinx.coroutines.DisposableHandle? = null
         try {
-            val call = client.newCall(Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build())
-            val cancellationHandle = kotlin.coroutines.coroutineContext.job.invokeOnCompletion { if (it is CancellationException) call.cancel() }
-            val response = call.execute()
-            response.use {
-                check(it.isSuccessful) { "下载失败：${it.code}" }
+            var total = -1L
+            if (localBin != null) {
+                // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完
+                val base = localBin.name.removeSuffix(".bin")
+                val doneFile = File(localBin.parentFile, "$base.done")
+                val failFile = File(localBin.parentFile, "$base.fail")
+                val deadline = System.currentTimeMillis() + LOCAL_WAIT_TIMEOUT_MS
+                while (System.currentTimeMillis() < deadline && !doneFile.exists() && !failFile.exists()) {
+                    if (isStopped) throw CancellationException("下载已取消")
+                    Thread.sleep(150)
+                }
+                if (doneFile.exists()) {
+                    input = localBin.inputStream()
+                    total = localBin.length()
+                }
+            }
+
+            // 无本地捕获文件（普通下载页面直接给 URL、或 capture 失败/超时）：回退到网络下载
+            if (input == null) {
+                val c = client.newCall(Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build())
+                call = c
+                cancellationHandle = kotlin.coroutines.coroutineContext.job.invokeOnCompletion { if (it is CancellationException) c.cancel() }
+                val response = c.execute()
+                if (!response.isSuccessful) { response.close(); error("下载失败：${response.code}") }
                 // 兜底：若入队时仍未拿到真实文件名，用本次下载的响应头纠正，
                 // 保证「显示的文件名」与「实际落盘文件名」一致。
                 if (DownloadFileName.isGeneric(displayName)) {
-                    val fromHeader = DownloadFileName.fromContentDisposition(it.header("Content-Disposition"))
+                    val fromHeader = DownloadFileName.fromContentDisposition(response.header("Content-Disposition"))
                     if (fromHeader != null && !DownloadFileName.isGeneric(fromHeader)) {
                         displayName = fromHeader
                         database.downloadDao().rename(id, displayName)
                         setForeground(createForegroundInfo(id, displayName, 0, true))
                     }
                 }
-                val body = it.body ?: error("下载响应内容为空")
-                val total = body.contentLength()
-                var downloaded = 0L
-                var lastProgress = -1
-                var lastNotifyAt = 0L
-                val digest = MessageDigest.getInstance("SHA-256")
-                val output: OutputStream = if (uri.scheme == "file") {
-                    FileOutputStream(File(uri.path.orEmpty()))
-                } else {
-                    applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选位置")
-                }
-                body.byteStream().use { input ->
-                    output.buffered().use { stream ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (true) {
-                            if (isStopped) {
-                                call.cancel()
-                                throw CancellationException("下载已取消")
-                            }
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            stream.write(buffer, 0, count)
-                            digest.update(buffer, 0, count)
-                            downloaded += count
-                            val progress = if (total > 0) ((downloaded * 100) / total).toInt() else 0
-                            // 百分比变化或距上次刷新超过 500ms 时刷新：
-                            // 只按百分比会让小文件从 0% 直接跳到 100%、通知永远看不到中间进度
-                            val now = System.currentTimeMillis()
-                            if (progress != lastProgress || now - lastNotifyAt >= 500L) {
-                                lastProgress = progress
-                                lastNotifyAt = now
-                                database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
-                                setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
-                                setForeground(createForegroundInfo(id, displayName, progress, total <= 0))
-                            }
+                val body = response.body ?: run { response.close(); error("下载响应内容为空") }
+                httpResponse = response
+                input = body.byteStream()
+                total = body.contentLength()
+            }
+
+            var downloaded = 0L
+            var lastProgress = -1
+            var lastNotifyAt = 0L
+            val digest = MessageDigest.getInstance("SHA-256")
+            val output: OutputStream = if (uri.scheme == "file") {
+                FileOutputStream(File(uri.path.orEmpty()))
+            } else {
+                applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选位置")
+            }
+            input!!.use { streamIn ->
+                output.buffered().use { stream ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        if (isStopped) {
+                            call?.cancel()
+                            throw CancellationException("下载已取消")
+                        }
+                        val count = streamIn.read(buffer)
+                        if (count < 0) break
+                        stream.write(buffer, 0, count)
+                        digest.update(buffer, 0, count)
+                        downloaded += count
+                        val progress = if (total > 0) ((downloaded * 100) / total).toInt() else 0
+                        // 百分比变化或距上次刷新超过 500ms 时刷新：
+                        // 只按百分比会让小文件从 0% 直接跳到 100%、通知永远看不到中间进度
+                        val now = System.currentTimeMillis()
+                        if (progress != lastProgress || now - lastNotifyAt >= 500L) {
+                            lastProgress = progress
+                            lastNotifyAt = now
+                            database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
+                            setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
+                            setForeground(createForegroundInfo(id, displayName, progress, total <= 0))
                         }
                     }
                 }
-                if (isStopped) {
-                    call.cancel()
-                    throw CancellationException("下载已取消")
-                }
-                val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-                val status = if (expectedHash.isNotBlank() && !hash.equals(expectedHash, true)) "hash_mismatch" else "completed"
-                database.downloadDao().complete(id, status, hash)
-                notifyFinished(id, displayName, status == "completed")
-                cancellationHandle.dispose()
-                Result.success()
             }
+            if (isStopped) {
+                call?.cancel()
+                throw CancellationException("下载已取消")
+            }
+            val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+            val status = if (expectedHash.isNotBlank() && !hash.equals(expectedHash, true)) "hash_mismatch" else "completed"
+            database.downloadDao().complete(id, status, hash)
+            notifyFinished(id, displayName, status == "completed")
+            Result.success()
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消") }
             throw cancelled
@@ -136,6 +164,17 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             database.downloadDao().finishWithMessage(id, if (cancelled) "cancelled" else "failed", if (cancelled) "下载已取消" else (error.message ?: "未知错误"))
             if (!cancelled) notifyFinished(id, displayName, false)
             Result.failure()
+        } finally {
+            runCatching { input?.close() }
+            runCatching { httpResponse?.close() }
+            runCatching { cancellationHandle?.dispose() }
+            // 清掉本地临时捕获文件（无论成功失败都不再需要）
+            if (localBin != null) {
+                val base = localBin.name.removeSuffix(".bin")
+                runCatching { localBin.delete() }
+                runCatching { File(localBin.parentFile, "$base.done").delete() }
+                runCatching { File(localBin.parentFile, "$base.fail").delete() }
+            }
         }
     }
 
@@ -250,6 +289,10 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         const val KEY_FILE_NAME = "file_name"
         const val KEY_EXPECTED_HASH = "expected_hash"
         const val KEY_PROGRESS = "progress"
+        // 本地已捕获的响应体临时文件路径（onExternalResponse 当场读下来的那份数据）
+        const val KEY_LOCAL_SOURCE = "local_source"
+        // 等待捕获完成的超时：capture 为异步，可能晚于 Worker 启动；超时则回退网络下载
+        private const val LOCAL_WAIT_TIMEOUT_MS = 120_000L
         private const val CHANNEL_ID = "browser_downloads"
         private const val FINISHED_CHANNEL_ID = "browser_downloads_done"
     }

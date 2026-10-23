@@ -15,8 +15,10 @@ import com.zex.zexbrowse.BuildConfig
 import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.HistoryEntity
+import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
+import com.zex.zexbrowse.data.LemwoodMirror
 import com.zex.zexbrowse.data.SecurityScanner
 import com.zex.zexbrowse.media.MediaPlaybackController
 import kotlinx.coroutines.Dispatchers
@@ -32,9 +34,14 @@ import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
 import org.mozilla.geckoview.StorageController
 import java.net.URLEncoder
+import java.io.File
+import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
+// 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
+class CapturedBody(val bin: File, val done: File, val fail: File)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val runtime = (application as ZexBrowseApplication).runtime
     private fun forceDarkApplication() = getApplication<Application>() as ZexBrowseApplication
@@ -88,6 +95,35 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val handler = externalDownloadHandler
         if (handler != null) handler(url) else bufferedExternalDownloads.addLast(url)
     }
+    /**
+     * 将 onExternalResponse 交下来的响应体读完存到临时文件。
+     *
+     * body 流有读超时（默认 30 秒），且不能跨回调长时间留着，所以必须立刻在后台读完。
+     * 读完写 done 标记，读失败写 fail 标记；Worker 据此选择「本地文件落盘」还是「回退网络」。
+     */
+    private fun captureDownloadBody(url: String, response: WebResponse) {
+        val body = response.body ?: return
+        val dir = File(getApplication<Application>().cacheDir, "download-capture")
+        val id = UUID.randomUUID().toString()
+        val bin = File(dir, "$id.bin")
+        val done = File(dir, "$id.done")
+        val fail = File(dir, "$id.fail")
+        // 先同步登记文件句柄，确保紧接着的 enqueueDownload 能取到（不依赖后台是否已执行）
+        capturedBodies[url] = CapturedBody(bin, done, fail)
+        applicationScope.launch(Dispatchers.IO) {
+            try {
+                dir.mkdirs()
+                // 顺手清掉一天前的残留（用户取消下载时可能留下临时文件）
+                val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+                dir.listFiles()?.forEach { if (it.lastModified() < cutoff) runCatching { it.delete() } }
+                body.use { input -> bin.outputStream().use { out -> input.copyTo(out, DEFAULT_BUFFER_SIZE) } }
+                done.writeText(bin.length().toString())
+            } catch (t: Throwable) {
+                runCatching { bin.delete() }
+                runCatching { fail.writeText(t.message ?: "capture failed") }
+            }
+        }
+    }
     // 界面层注入：网页请求选择文件（<input type="file"> 等）时回调。
     // 参数：mimeTypes（可为空）、是否允许多选、结果回调（用户选中的文件 URI，取消为 null）。
     var filePickerHandler: ((Array<out String>?, Boolean, (Array<Uri>?) -> Unit) -> Unit)? = null
@@ -120,6 +156,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 若期间收到下载信号则取消，避免把「下载」误判成「页面加载失败」而弹出错误页。
     private val pendingFailures = HashMap<String, Runnable>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    // 下载响应体捕获：Gecko 在 onExternalResponse 时已把响应体拉了下来，body 流只在回调期间有效，
+    // 必须当场读走存成临时文件。之后下载直接从本地文件落盘，不再用 URL 第二次请求，
+    // 从根本上避开柠枺等站点「一次性令牌二次请求 → 403」的问题。
+    // key = 下载地址
+    private val capturedBodies = ConcurrentHashMap<String, CapturedBody>()
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
@@ -298,6 +339,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 cancelPendingFailure(id)
                 pendingDownloads[id] = response.uri
                 clearPending(id)
+                // 仅对柠枺镜像下载就地捕获响应体（它的一次性令牌二次请求必 403）。
+                // 普通站点下载保持原有「弹框 → 按 URL 下载」流程不变，避免大文件在确认前占双份磁盘。
+                if (isLemwoodUrl(response.uri)) captureDownloadBody(response.uri, response)
                 notifyExternalDownload(response.uri)
             }
         })
@@ -513,18 +557,30 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      */
     fun enqueueDownload(url: String, fileName: String, expectedHash: String, onEnqueued: (String) -> Unit = {}) {
         selected?.let { tab -> if (pendingDownloads[tab.id] == url) pendingDownloads.remove(tab.id) }
+        // 若 onExternalResponse 已把响应体捕获到临时文件，取下它的路径传给 Worker，
+        // Worker 直接读本地文件落盘，不再用 URL 请求（一次性令牌二次请求会 403）。
+        val captured = capturedBodies.remove(url)
         viewModelScope.launch {
             val id = runCatching {
                 downloadScheduler.enqueue(
                     url, fileName, expectedHash,
                     browserSettings.downloadDirectoryMode == "external",
-                    browserSettings.externalDownloadTreeUri
+                    browserSettings.externalDownloadTreeUri,
+                    captured?.bin?.absolutePath
                 )
             }.getOrNull()
             if (id != null) onEnqueued(id)
         }
     }
     fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
+    /** 该地址是否已有本地捕获的响应体（用于下载弹框跳过可能二次消费令牌的网络名字探测） */
+    fun hasCapturedBody(url: String): Boolean = capturedBodies.containsKey(url)
+    /** 判断 URL 是否属于柠枺镜像站（仅它的下载需要就地捕获响应体） */
+    private fun isLemwoodUrl(url: String): Boolean {
+        if (!LemwoodMirror.isAvailable) return false
+        val site = LemwoodMirror.siteUrl()
+        return site.isNotBlank() && url.startsWith(site)
+    }
     fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
     fun clearHistory() { applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
     fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
