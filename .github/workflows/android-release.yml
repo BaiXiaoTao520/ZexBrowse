@@ -79,7 +79,9 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           # 柠枺镜像高速下载服务：API 域名与启动器 ID 均通过 Secrets 注入，
-          # 不写入源码，避免在公开仓库暴露接入点。未配置时应用自动隐藏该入口。
+          # 不写入源码，避免在公开仓库暴露接入点。
+          # 构建脚本会校验这两项：缺失或格式错误时直接拒绝构建，
+          # 避免产出「入口静默消失」的残废包。
           LEMWOOD_API_BASE: ${{ secrets.LEMWOOD_API_BASE }}
           LEMWOOD_LAUNCHER_ID: ${{ secrets.LEMWOOD_LAUNCHER_ID }}
         run: ./gradlew assembleRelease --stacktrace

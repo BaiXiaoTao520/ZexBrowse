@@ -270,6 +270,26 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
+            override fun onSecurityChange(session: GeckoSession, securityInfo: GeckoSession.ProgressDelegate.SecurityInformation) {
+                // 证书与混合内容状态由 Gecko 判定，比自己去解析 URL 可靠
+                val mixedActive = securityInfo.mixedModeActive
+                val mixedPassive = securityInfo.mixedModePassive
+                val hasCert = securityInfo.certificate != null
+                val secure = securityInfo.isSecure && !securityInfo.isException
+                update(id) { tab ->
+                    tab.copy(
+                        risk = SecurityScanner.assess(
+                            url = tab.url,
+                            isSecure = secure,
+                            mixedActive = mixedActive,
+                            mixedPassive = mixedPassive,
+                            hasCertificate = hasCert,
+                            // 传入 GeckoView 自己的常量，不靠硬编码数值
+                            contentLoaded = GeckoSession.ProgressDelegate.SecurityInformation.CONTENT_LOADED
+                        )
+                    )
+                }
+            }
         })
         session.setContentDelegate(object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) { update(id) { it.copy(title = title?.takeIf(String::isNotBlank) ?: it.title) } }
@@ -341,26 +361,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                         if (url.startsWith("about:") && tab.failed) tab
                         else tab.copy(url = url, risk = risk)
                     }
-                }
-            }
-            override fun onSecurityChange(session: GeckoSession, securityInfo: GeckoSession.ProgressDelegate.SecurityInformation) {
-                // 证书与混合内容状态由 Gecko 判定，比自己去解析 URL 可靠
-                val mixedActive = securityInfo.mixedModeActive
-                val mixedPassive = securityInfo.mixedModePassive
-                val hasCert = securityInfo.certificate != null
-                val secure = securityInfo.isSecure && !securityInfo.isException
-                update(id) { tab ->
-                    tab.copy(
-                        risk = SecurityScanner.assess(
-                            url = tab.url,
-                            isSecure = secure,
-                            mixedActive = mixedActive,
-                            mixedPassive = mixedPassive,
-                            hasCertificate = hasCert,
-                            // 传入 GeckoView 自己的常量，不靠硬编码数值
-                            contentLoaded = GeckoSession.ProgressDelegate.SecurityInformation.CONTENT_LOADED
-                        )
-                    )
                 }
             }
             // 记录失败的具体错误码与分类，供错误页展示原因；返回 null 表示不自定义错误页，交回 Gecko 默认处理。
