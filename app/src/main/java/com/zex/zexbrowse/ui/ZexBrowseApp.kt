@@ -1236,80 +1236,153 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     }
 }
 
-/** 交给系统打开网页类链接（系统默认浏览器或用户选择的应用） */
 /**
  * 用外部浏览器打开链接。
  *
- * 本应用自身也注册了 http(s) 的 VIEW intent-filter。被设为默认浏览器时，
- * 直接 startActivity 会把链接交回自己，随即被本应用的下载拦截接管；
- * 而柠枺镜像的下载地址带一次性令牌，被二次请求后一律返回 403
- * （令牌只在首次成功响应时消费）。因此系统解析到本应用时，改从已安装的
- * 其它浏览器里挑一个显式启动，确保链接交给外部浏览器，
- * 让站点的 PoW 验证在网页里正常完成。
+ * 设计原则：永远不替用户指定「用哪个浏览器」。
+ *
+ * Android 没有公开 API 可以查询「别人的默认浏览器是谁」（RoleManager 只公开
+ * isRoleAvailable / isRoleHeld / createRequestRoleIntent）。能反映当前默认处理器的
+ * 公开手段只有 resolveActivity。因此：
+ *
+ * 1. resolveActivity 返回的是真浏览器 → 它就是用户设置的默认浏览器，直接用它；
+ * 2. 返回的不是浏览器（应用宝、微信等抢占了 http）→ 不自作主张挑一个，
+ *    而是弹系统选择器并仅保留真浏览器，由用户自己决定；
+ * 3. 设备上只有一个浏览器时，直接用那个（不存在选择余地）。
+ */
+/**
+ * 打开柠枺镜像下载链接。
+ *
+ * 优先在本应用自己的浏览器内打开：GeckoView 是 Firefox 内核，HTTPS 下
+ * `isSecureContext` 与 `crypto.subtle` 可用，站点的 PoW 验证页能在页面里正常完成。
+ * 验证通过后页面跳转到带令牌的下载地址，Gecko 触发 onExternalResponse，
+ * 此时 body 流被当场读走存成临时文件，Worker 直接用这份本地数据落盘，
+ * **全程只请求一次**，不会因为二次请求消耗令牌而 403。
+ *
+ * 回退：若无法交给本应用自己（极少见），再交给外部浏览器。
+ */
+private fun openMirrorDownload(context: Context, url: String) {
+    // 交给本应用自己：显式 setPackage 自身，经 MainActivity.onNewIntent 进入本应用浏览器标签。
+    // 不能用 openInBrowser——那个函数刻意避开自身（那是为“跳浏览器”场景设计的）。
+    val self = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        .setPackage(context.packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(self) }.isSuccess) return
+    // 回退：本应用无法拉起时，交给外部浏览器
+    openInBrowser(context, url)
+}
+
+/**
+ * 用外部浏览器打开普通网页类链接（联系我们、关于页主页、赞助页等）。
+ *
+ * 这类链接不涉及一次性令牌，本应用自己打开也不会出问题，所以正常交给
+ * 用户设置的默认处理器即可；只在默认处理器不是浏览器（应用宝、微信等抢占）
+ * 时，才改从真浏览器里选，避免链接莫名跳进应用商店。
  */
 private fun openInBrowser(context: android.content.Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    @Suppress("DEPRECATION")
-    val resolvedPackage = context.packageManager
-        .resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
-        ?.activityInfo?.packageName
+    val pm = context.packageManager
 
-    if (resolvedPackage == null || resolvedPackage != context.packageName) {
-        // 未解析到、或已解析到外部应用：直接启动（已设默认浏览器时系统会自己交给它）
-        runCatching { context.startActivity(intent) }
-            .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+    // 1) 默认处理器：最好是真浏览器，要么就是本应用（本应用也是浏览器）
+    @Suppress("DEPRECATION")
+    val defaultPkg = pm.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        ?.activityInfo?.packageName
+    if (defaultPkg != null && (defaultPkg == context.packageName || isRealBrowser(pm, defaultPkg))) {
+        // 直接 startActivity 即可：若默认是本应用，系统会自己路由回当前应用
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+    }
+
+    // 2) 默认处理器不是浏览器：改从真浏览器里挑
+    val browsers = installedBrowsers(context, intent)
+    if (browsers.size == 1) {
+        intent.setPackage(browsers.first())
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+        intent.setPackage(null)
+    }
+
+    // 3) 仍有多个候选：交给选择器（已排除非浏览器）
+    showBrowserChooser(context, intent)
+}
+
+/** 列出能处理该链接的真实浏览器（排除本应用） */
+private fun installedBrowsers(context: Context, view: Intent): List<String> {
+    val pm = context.packageManager
+    return pm.queryIntentActivities(view, 0)
+        .mapNotNull { it.activityInfo?.packageName }
+        .distinct()
+        .filter { it != context.packageName && isRealBrowser(pm, it) }
+}
+
+/**
+ * 弹系统选择器，并把非浏览器应用从候选里排除。
+ *
+ * EXTRA_EXCLUDE_COMPONENTS 能逐项排除，这里把所有「非真浏览器」与自身都排掉，
+ * 这样选择器里只剩浏览器。且它仍然是系统原生选择器，用户可在其中勾选「始终」。
+ */
+private fun showBrowserChooser(context: Context, view: Intent) {
+    val pm = context.packageManager
+    val excluded = pm.queryIntentActivities(view, 0)
+        .filter { info ->
+            val pkg = info.activityInfo.packageName
+            pkg == context.packageName || !isRealBrowser(pm, pkg)
+        }
+        .map { android.content.ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+        .distinct()
+        .toTypedArray()
+
+    val handlers = installedBrowsers(context, view)
+    if (handlers.isEmpty()) {
+        Toast.makeText(context, "未找到浏览器，请先安装 Chrome、Edge 等浏览器", Toast.LENGTH_LONG).show()
         return
     }
 
-    // 解析到了自己：挑一个能处理 http 链接的外部浏览器显式打开
-    val external = externalBrowserPackage(context, url)
-    if (external != null) {
-        intent.setPackage(external)
-        val launched = runCatching { context.startActivity(intent) }.isSuccess
-        if (launched) return
-    }
-    // 没有其它可用浏览器时，至少交给系统应用选择器
-    runCatching { context.startActivity(Intent.createChooser(intent, "选择浏览器").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    val chooser = Intent.createChooser(view, "选择浏览器").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (excluded.isNotEmpty()) chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, excluded)
+    runCatching { context.startActivity(chooser) }
         .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
 }
 
 /**
- * 找一个能处理网页链接的外部浏览器包名（排除本应用）。
+ * 判断一个包是不是真正的浏览器。
  *
- * 优先系统当前默认的网页处理器，其次按常见浏览器的包名前缀挑选；
- * 都不可用时用 [queryIntentActivities] 的结果兑底。
+ * 两个依据任一成立即可：
+ * 1. 能响应 ACTION_MAIN + CATEGORY_APP_BROWSER（安卓给浏览器专用的入口类别）；
+ * 2. 在已知浏览器白名单里（兼底未声明 APP_BROWSER 的真浏览器）；
+ *
+ * 应用宝、微信、淘宝这类只声明普通 http VIEW 的应用两者都不满足，会被排除。
  */
-private fun externalBrowserPackage(context: Context, url: String): String? {
-    val pm = context.packageManager
-    // 带上 BROWSABLE，与 manifest 中 <queries> 的声明一致，否则 Android 11+ 看不到其它浏览器
-    val probe = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        .addCategory(Intent.CATEGORY_BROWSABLE)
-
-    // 1) 用户已设默认浏览器（外部）时直接用它
-    @Suppress("DEPRECATION")
-    val preferred = pm.resolveActivity(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
-        ?.activityInfo?.packageName
-    if (preferred != null && preferred != context.packageName) return preferred
-
-    // 2) 按常见浏览器包名优先挑选，避免选中 WebView 壳或无关应用
-    val knownBrowsers = listOf(
-        "com.android.chrome", "com.chrome.beta", "com.chrome.dev",
-        "com.microsoft.emmx", "org.mozilla.firefox", "com.brave.browser",
-        "com.opera.browser", "com.opera.mini.native", "com.sec.android.app.sbrowser",
-        "com.UCMobile", "com.uc.browser", "com.quark.browser", "com.tencent.mtt",
-        "com.baidu.browser.apps", "com.vivo.browser", "com.miui.browser",
-        "com.huawei.browser", "com.heytap.browser", "com.android.browser", "org.chromium.chrome"
-    )
-    val installed = pm.queryIntentActivities(probe, 0)
-        .mapNotNull { it.activityInfo?.packageName }
-        .filter { it != context.packageName }
-        .toSet()
-    if (installed.isEmpty()) return null
-    knownBrowsers.firstOrNull { it in installed }?.let { return it }
-
-    // 3) 兜底：任一可处理链接的外部应用
-    return installed.firstOrNull()
+private fun isRealBrowser(pm: android.content.pm.PackageManager, pkg: String): Boolean {
+    if (pkg in KNOWN_BROWSERS) return true
+    return runCatching {
+        val browserIntent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_APP_BROWSER)
+            .setPackage(pkg)
+        pm.queryIntentActivities(browserIntent, 0).isNotEmpty()
+    }.getOrDefault(false)
 }
+
+/**
+ * 已知浏览器包名。
+ *
+ * 用于兼底未声明 CATEGORY_APP_BROWSER 的真浏览器，避免把它们误判为非浏览器。
+ * 不含应用宝（com.tencent.android.qqdownloader）、微信、淘宝等应用商店/社交类应用。
+ */
+private val KNOWN_BROWSERS = setOf(
+    "com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary",
+    "com.microsoft.emmx", "org.mozilla.firefox", "org.mozilla.firefox_beta",
+    "com.brave.browser", "com.opera.browser", "com.opera.mini.native",
+    "com.sec.android.app.sbrowser", "org.chromium.chrome",
+    "com.UCMobile", "com.uc.browser", "com.quark.browser", "com.tencent.mtt",
+    "com.baidu.browser.apps", "com.baidu.searchbox.lite", "com.vivo.browser",
+    "com.miui.browser", "com.android.browser", "com.oppo.browser",
+    "com.heytap.browser", "com.coloros.browser", "com.bbk.browser",
+    "com.transsion.phoenix", "com.ecosia.android", "com.duckduckgo.mobile.android",
+    "org.mozilla.focus", "com.yandex.browser", "com.qwant.mobile",
+    "com.browser", "com.androidhtmlviewer", "org.lineageos.jelly",
+    // 专为轻量/第三方浏览器留位；不收录应用宝、微信、淘宝、QQ 等
+    "com.kiwibrowser.browser", "com.explore.web.browser", "com.hsv.freeadblockerbrowser",
+    "com.jamal2367.maxthonbrowser", "com.leesc.chrome", "org.chromium.webview_shell"
+)
 
 /**
  * 推荐条目卡片。
@@ -2176,6 +2249,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     if (downloadUrl != null) {
         DownloadDialog(
             url = downloadUrl!!,
+            skipResolve = viewModel.hasCapturedBody(downloadUrl!!),
             onDownload = { fileName, expected ->
                 expectedHash = expected
                 selectedFileName = fileName
@@ -3216,15 +3290,17 @@ private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheck
 }
 
 @Composable
-private fun DownloadDialog(url: String, onDownload: (String, String) -> Unit, onDismiss: () -> Unit) {
+private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload: (String, String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val isApk = url.substringBefore('?').endsWith(".apk", ignoreCase = true)
     var expectedHash by rememberSaveable { mutableStateOf("") }
     // 初始名称取 URL 末段；若它是 download.aspx 这类通用入口，则异步探测真实文件名
     val initialName = url.substringAfterLast('/').substringBefore('?').ifBlank { "download" }
     var fileName by remember(url) { mutableStateOf(initialName) }
-    var resolving by remember(url) { mutableStateOf(DownloadFileName.isGeneric(initialName)) }
+    // skipResolve：已有本地捕获的响应体时不得再发网络探测——对一次性令牌地址二次请求会 403
+    var resolving by remember(url) { mutableStateOf(!skipResolve && DownloadFileName.isGeneric(initialName)) }
     LaunchedEffect(url) {
+        if (skipResolve) { resolving = false; return@LaunchedEffect }
         if (!DownloadFileName.isGeneric(initialName)) return@LaunchedEffect
         val resolved = DownloadFileName.resolve(url)
         if (resolved != null) fileName = resolved
@@ -3537,7 +3613,7 @@ private fun UpdateIntroDialog(
                 if (LemwoodMirror.isAvailable && release.lemwoodAvailable) {
                     LemwoodChannelCard(
                         onClick = {
-                            openInBrowser(context, LemwoodMirror.apkDownloadUrl(release.version))
+                            openMirrorDownload(context, LemwoodMirror.apkDownloadUrl(release.version))
                             onDismiss()
                         }
                     )

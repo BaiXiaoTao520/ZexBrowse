@@ -23,12 +23,16 @@ class DownloadScheduler(private val context: Context) {
     private val database = BrowserDatabase.create(context)
     private val workManager = WorkManager.getInstance(context)
 
-    suspend fun enqueue(url: String, fileName: String, expectedHash: String, useExternalDirectory: Boolean, externalTreeUri: String): String {
+    suspend fun enqueue(url: String, fileName: String, expectedHash: String, useExternalDirectory: Boolean, externalTreeUri: String, localSourceBin: String? = null): String {
         // 创建目标文件之前必须先确定真实文件名：
         // OpenList/Alist、SharePoint 等站点的下载入口常为 download.aspx，
         // 末段并非真实文件名。若先用它建文件，之后再改就晚了（文件已落盘）。
         // 界面层已解析过时这里不会重复请求（prefer 会保留非通用名）。
-        val finalName = if (DownloadFileName.isGeneric(fileName)) {
+        // 【关键】若有本地捕获文件，绝不能再去 resolve(url) 发网络探测：
+        // 那会对一次性令牌地址发生二次请求→ 403。直接沿用传入的已知名字。
+        val finalName = if (localSourceBin != null) {
+            fileName.ifBlank { "download" }
+        } else if (DownloadFileName.isGeneric(fileName)) {
             DownloadFileName.prefer(fileName, DownloadFileName.resolve(url))
         } else {
             fileName
@@ -50,6 +54,7 @@ class DownloadScheduler(private val context: Context) {
             .putString(BrowserDownloadWorker.KEY_URI, target.toString())
             .putString(BrowserDownloadWorker.KEY_FILE_NAME, finalName)
             .putString(BrowserDownloadWorker.KEY_EXPECTED_HASH, expectedHash.trim())
+            .putString(BrowserDownloadWorker.KEY_LOCAL_SOURCE, localSourceBin)
             .build()
         workManager.enqueue(OneTimeWorkRequestBuilder<BrowserDownloadWorker>().setInputData(input).addTag(id).build())
         return id
