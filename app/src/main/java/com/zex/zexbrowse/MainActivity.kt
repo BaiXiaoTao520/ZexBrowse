@@ -7,7 +7,6 @@
 package com.zex.zexbrowse
 
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
@@ -77,15 +76,6 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             lp.preferredRefreshRate = best.refreshRate
             window.attributes = lp
-            // Android 11+ 可显式声明期望帧率，进一步避免被系统降至低频
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                runCatching {
-                    window.setFrameRate(
-                        best.refreshRate,
-                        android.view.WindowManager.LayoutParams.FRAME_RATE_COMPATIBILITY_DEFAULT
-                    )
-                }
-            }
         }
     }
 
