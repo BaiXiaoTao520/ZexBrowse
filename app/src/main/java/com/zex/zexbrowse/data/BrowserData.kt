@@ -157,7 +157,9 @@ data class BrowserSettings(
     /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
     val siteMicPermissions: Map<String, String> = emptyMap(),
     /** 首页搜索框的搜索历史（新→旧，最多保留 10 条） */
-    val searchHistory: List<String> = emptyList()
+    val searchHistory: List<String> = emptyList(),
+    /** 安全防护模式：enhanced（增强）/ standard（标准）/ basic（基础） */
+    val securityMode: String = "standard"
 )
 
 class SettingsStore(private val context: Context) {
@@ -192,6 +194,7 @@ class SettingsStore(private val context: Context) {
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
     private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
     private val searchHistoryKey = stringPreferencesKey("search_history")
+    private val securityModeKey = stringPreferencesKey("security_mode")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -233,7 +236,8 @@ class SettingsStore(private val context: Context) {
                 .associate { it.substringBefore('=') to it.substringAfter('=') },
             searchHistory = (preferences[searchHistoryKey] ?: "")
                 .split("\n")
-                .filter { it.isNotBlank() }
+                .filter { it.isNotBlank() },
+            securityMode = preferences[securityModeKey] ?: "standard"
         )
     }
 
@@ -270,6 +274,7 @@ class SettingsStore(private val context: Context) {
     suspend fun clipboardReadPolicy(value: String) = update { it[clipboardReadPolicyKey] = value }
     suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
     suspend fun externalAppPolicy(value: String) = update { it[externalAppPolicyKey] = value }
+    suspend fun securityMode(value: String) = update { it[securityModeKey] = value }
 
     /** 记录一次搜索：去重后置顶，仅保留最近 10 条 */
     suspend fun addSearchHistory(keyword: String) = update { preferences ->

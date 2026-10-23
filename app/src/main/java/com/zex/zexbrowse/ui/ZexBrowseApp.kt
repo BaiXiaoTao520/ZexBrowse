@@ -98,6 +98,14 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.GppGood
+import androidx.compose.material.icons.rounded.GppMaybe
+import androidx.compose.material.icons.rounded.GppBad
+import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Phishing
+import androidx.compose.material.icons.rounded.Policy
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VerifiedUser
@@ -116,6 +124,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -178,6 +187,7 @@ import com.zex.zexbrowse.data.recommendedApps
 import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadManager
 import com.zex.zexbrowse.download.UpdateDownloadResult
+import com.zex.zexbrowse.data.SecurityScanner
 import com.zex.zexbrowse.ExternalLinkDiagnostics
 import com.zex.zexbrowse.BuildConfig
 import coil.compose.AsyncImage
@@ -194,7 +204,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -920,6 +930,7 @@ private fun PageContent(
             onSiteSettings = { navigate(Page.SITE_SETTINGS) },
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
             onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
+            onSecurity = { navigate(Page.SECURITY) },
             onAbout = { navigate(Page.ABOUT) },
             onContactUs = { openInBrowser(context, CONTACT_URL) },
             onBack = goBack
@@ -956,6 +967,11 @@ private fun PageContent(
             onClipboard = { navigate(Page.CLIPBOARD_PERMISSION) },
             onExternalApp = { navigate(Page.EXTERNAL_APP_PERMISSION) },
             onMic = { navigate(Page.MIC_PERMISSION) },
+            onBack = goBack
+        )
+        Page.SECURITY -> SecuritySettingsScreen(
+            settings = settings,
+            onSelectMode = { mode -> scope.launch { settingsStore.securityMode(mode) } },
             onBack = goBack
         )
         Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
@@ -1480,6 +1496,103 @@ private fun AppRecommendationEntry(onClick: () -> Unit) {
     }
 }
 
+/**
+ * 地址栏的护盾标识。
+ *
+ * 图标随结论变化：安全为实心护盾，未加密为开口锁，可疑为感叹护盾，危险为尖叉护盾。
+ * 颜色同步变化，点击后由父层弹窗解释具体原因。
+ */
+@Composable
+private fun ShieldBadge(
+    assessment: SecurityScanner.RiskAssessment,
+    onClick: () -> Unit
+) {
+    val (icon, tint) = when (assessment.level) {
+        SecurityScanner.RiskLevel.SAFE -> Icons.Rounded.GppGood to MaterialTheme.colorScheme.primary
+        SecurityScanner.RiskLevel.INSECURE -> Icons.Rounded.LockOpen to MaterialTheme.colorScheme.tertiary
+        SecurityScanner.RiskLevel.SUSPICIOUS -> Icons.Rounded.GppMaybe to MaterialTheme.colorScheme.tertiary
+        SecurityScanner.RiskLevel.DANGEROUS -> Icons.Rounded.GppBad to MaterialTheme.colorScheme.error
+    }
+    val label = when (assessment.level) {
+        SecurityScanner.RiskLevel.SAFE -> "连接安全"
+        SecurityScanner.RiskLevel.INSECURE -> assessment.reason.ifBlank { "连接不安全" }
+        SecurityScanner.RiskLevel.SUSPICIOUS -> assessment.reason.ifBlank { "可疑网站" }
+        SecurityScanner.RiskLevel.DANGEROUS -> assessment.reason.ifBlank { "危险网站" }
+    }
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+    }
+}
+
+/**
+ * 护盾说明弹窗：把判定依据展开讲清楚，避免只给一个颜色让用户猜。
+ */
+@Composable
+private fun SecurityDetailDialog(
+    host: String,
+    assessment: SecurityScanner.RiskAssessment,
+    onDismiss: () -> Unit
+) {
+    val title = when (assessment.level) {
+        SecurityScanner.RiskLevel.SAFE -> "连接安全"
+        SecurityScanner.RiskLevel.INSECURE -> "连接不安全"
+        SecurityScanner.RiskLevel.SUSPICIOUS -> "可疑网站"
+        SecurityScanner.RiskLevel.DANGEROUS -> "危险网站"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (host.isNotBlank()) {
+                    Text(host, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                    assessment.detail.ifBlank {
+                        if (assessment.level == SecurityScanner.RiskLevel.SAFE) {
+                            "未发现明显风险。连接已加密，网站身份已校验。"
+                        } else ""
+                    }
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } }
+    )
+}
+
+/**
+ * 风险站点拦截弹窗：必须由用户明确选择是否继续。
+ *
+ * 默认动作是「返回」，避免误触后直接进入风险页面。
+ */
+@Composable
+private fun RiskySiteDialog(
+    host: String,
+    assessment: SecurityScanner.RiskAssessment,
+    onProceed: () -> Unit,
+    onBack: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onBack,
+        icon = { Icon(Icons.Rounded.Phishing, null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text(assessment.reason.ifBlank { "此网站存在风险" }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (host.isNotBlank()) {
+                    Text(host, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(assessment.detail.ifBlank { "该地址被判定为风险网站，继续访问可能造成信息泄露或财产损失。" })
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onBack) { Text("返回") }
+        },
+        dismissButton = {
+            TextButton(onClick = onProceed) { Text("仍然访问") }
+        }
+    )
+}
+
 @Composable
 private fun AddressInput(
     value: String,
@@ -1489,7 +1602,10 @@ private fun AddressInput(
     searchHistory: List<String> = emptyList(),
     onRemoveHistory: (String) -> Unit = {},
     // 是否启用联想与历史下拉：首页需要，浏览器地址栏不需要（会遮挡网页）
-    showSuggestionsPanel: Boolean = true
+    showSuggestionsPanel: Boolean = true,
+    // 当前页面的安全结论；为 null 时不显示护盾（首页/空标签）
+    security: SecurityScanner.RiskAssessment? = null,
+    onSecurityClick: () -> Unit = {}
 ) {
     var focused by remember { mutableStateOf(false) }
     // 远程联想结果；每次输入变化后由防抖效应刷新
@@ -1523,6 +1639,11 @@ private fun AddressInput(
             placeholder = { Text("搜索或输入网址") },
             singleLine = true,
             shape = MaterialTheme.shapes.extraLarge,
+            leadingIcon = if (security != null) {
+                {
+                    ShieldBadge(assessment = security, onClick = onSecurityClick)
+                }
+            } else null,
             trailingIcon = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (value.isNotBlank()) {
@@ -1788,6 +1909,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     var selectedFileName by remember { mutableStateOf("") }
     var showNewTabDialog by remember { mutableStateOf(false) }
     var showBrowserMenu by remember { mutableStateOf(false) }
+    // 风险站点拦截：目标地址、扫描结论、用户选择继续后的回调
+    var riskySiteTarget by remember { mutableStateOf<String?>(null) }
+    var riskySiteAssessment by remember { mutableStateOf<SecurityScanner.RiskAssessment?>(null) }
+    var riskySiteProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -1842,6 +1967,16 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     }
 
     viewModel.onExternalDownload = { url -> scope.launch { downloadUrl = url } }
+
+    // 安全防护：把模式同步给 ViewModel，并接管风险站点的拦截弹窗
+    LaunchedEffect(settings.securityMode) { viewModel.securityMode = settings.securityMode }
+    viewModel.riskySiteHandler = { url, assessment, proceed ->
+        riskySiteTarget = url
+        riskySiteAssessment = assessment
+        riskySiteProceed = proceed
+    }
+    // 正在展示的护盾说明
+    var securityDetail by remember { mutableStateOf<Pair<String, SecurityScanner.RiskAssessment>?>(null) }
     // 网页请求选择文件 → 拉起系统文件选择器（原生文件应用），选完回传网页
     viewModel.filePickerHandler = { mimeTypes, multiple, onResult ->
         val mimes = (mimeTypes?.toList()?.takeIf { it.isNotEmpty() } ?: listOf("*/*")).toTypedArray()
@@ -1883,7 +2018,24 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 2.dp)) {
-                AddressInput(value = input, onValueChange = { input = it }, onSubmit = { viewModel.load(input) }, onFocusChange = { inputFocused = it }, showSuggestionsPanel = false)
+                AddressInput(
+                    value = input,
+                    onValueChange = { input = it },
+                    onSubmit = { viewModel.load(input) },
+                    onFocusChange = { inputFocused = it },
+                    showSuggestionsPanel = false,
+                    // 仅在已加载的 http(s) 页面上显示护盾，空白页/内部页不显示
+                    security = selectedTab?.risk?.takeIf {
+                        val u = selectedTab.url
+                        u.startsWith("http", ignoreCase = true)
+                    },
+                    onSecurityClick = {
+                        val tab = selectedTab
+                        if (tab != null) {
+                            securityDetail = Uri.parse(tab.url).host.orEmpty() to tab.risk
+                        }
+                    }
+                )
             }
         },
         bottomBar = {
@@ -1990,6 +2142,35 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             text = { Text("无痕标签不会保存浏览历史、Cookie 或缓存。") },
             confirmButton = { TextButton(onClick = { viewModel.newTab(); showNewTabDialog = false; onTabs(false) }) { Text("普通标签") } },
             dismissButton = { TextButton(onClick = { viewModel.newTab(incognito = true); showNewTabDialog = false; onTabs(true) }) { Text("无痕标签") } }
+        )
+    }
+    // 护盾说明弹窗
+    securityDetail?.let { (host, assessment) ->
+        SecurityDetailDialog(
+            host = host,
+            assessment = assessment,
+            onDismiss = { securityDetail = null }
+        )
+    }
+    // 风险站点拦截弹窗：默认「返回」，避免误触进入风险页
+    val riskyTarget = riskySiteTarget
+    val riskyAssessment = riskySiteAssessment
+    if (riskyTarget != null && riskyAssessment != null) {
+        RiskySiteDialog(
+            host = Uri.parse(riskyTarget).host.orEmpty(),
+            assessment = riskyAssessment,
+            onProceed = {
+                val proceed = riskySiteProceed
+                riskySiteTarget = null
+                riskySiteAssessment = null
+                riskySiteProceed = null
+                proceed?.invoke()
+            },
+            onBack = {
+                riskySiteTarget = null
+                riskySiteAssessment = null
+                riskySiteProceed = null
+            }
         )
     }
     if (downloadUrl != null) {
@@ -2228,6 +2409,7 @@ private fun SettingsScreen(
     onSiteSettings: () -> Unit,
     onCookieSettings: () -> Unit,
     onWebPermissions: () -> Unit,
+    onSecurity: () -> Unit,
     onAbout: () -> Unit,
     onContactUs: () -> Unit,
     onBack: () -> Unit
@@ -2250,6 +2432,7 @@ private fun SettingsScreen(
             SettingSearchItem("Cookie 追踪", "隐私", listOf("Cookie", "追踪", "隐私", "数据", "Cookies"), onCookieSettings),
             SettingSearchItem("清除缓存与 Cookie", "隐私", listOf("缓存", "清除", "Cookie", "数据", "清理", "站点数据"), onCookieSettings),
             SettingSearchItem("退出时清除浏览器数据", "隐私", listOf("退出", "清除", "数据", "无痕", "清理", "退出时清除"), onCookieSettings),
+            SettingSearchItem("安全防护", "安全防护", listOf("安全", "防护", "拦截", "诈骗", "木马", "护盾", "钓鱼", "风险", "银狐"), onSecurity),
             SettingSearchItem("剪贴板读取权限", "网页权限管理", listOf("剪贴板", "复制", "粘贴", "权限", "读取"), onWebPermissions),
             SettingSearchItem("跳转至外部 APP 权限", "网页权限管理", listOf("外部", "跳转", "APP", "应用", "Intent", "权限"), onWebPermissions),
             SettingSearchItem("麦克风权限", "网页权限管理", listOf("麦克风", "录音", "权限", "语音", "音频"), onWebPermissions),
@@ -2268,6 +2451,7 @@ private fun SettingsScreen(
             SettingsEntryItem("网站设置", "强制适配深色模式、搜索引擎、浏览器标识", Icons.Rounded.Language, onSiteSettings),
             SettingsEntryItem("隐私", cookieSettingsSubtitle(settings), Icons.Rounded.PrivacyTip, onCookieSettings),
             SettingsEntryItem("网页权限管理", "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
+            SettingsEntryItem("安全防护", securityModeSubtitle(settings), Icons.Rounded.GppGood, onSecurity),
             SettingsEntryItem("浏览历史", "查看最近访问的网页", Icons.Default.History, onHistory),
             SettingsEntryItem("书签管理", "管理首页书签，长按可删除", Icons.Rounded.Bookmarks, onBookmarks),
             SettingsEntryItem("设为默认浏览器", "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验", Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
@@ -2363,12 +2547,20 @@ private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
     return "$cookieState · $exitState"
 }
 
+/** 安全防护入口副标题：显示当前模式 */
+private fun securityModeSubtitle(settings: BrowserSettings): String = when (settings.securityMode) {
+    "enhanced" -> "增强模式 · 可疑与危险网站均拦截"
+    "basic" -> "基础模式 · 仅提示不拦截"
+    else -> "标准模式 · 拦截危险网站"
+}
+
 /** 设置入口卡片的图标（按所属页面回填，保持与原有视觉一致） */
 private fun settingsEntryIcon(title: String): androidx.compose.ui.graphics.vector.ImageVector = when (title) {
     "通用设置" -> Icons.Rounded.Tune
     "网站设置" -> Icons.Rounded.Language
     "隐私" -> Icons.Rounded.PrivacyTip
     "网页权限管理" -> Icons.Rounded.Security
+    "安全防护" -> Icons.Rounded.GppGood
     "浏览历史" -> Icons.Default.History
     "书签管理" -> Icons.Rounded.Bookmarks
     "设为默认浏览器" -> Icons.Rounded.Public
@@ -2766,6 +2958,92 @@ private fun CookieSettingsScreen(
             dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text("取消") } }
         )
     }
+}
+
+/**
+ * 安全防护设置页：选择防护模式，并说明各模式差异。
+ */
+@Composable
+private fun SecuritySettingsScreen(
+    settings: BrowserSettings,
+    onSelectMode: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("安全防护") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
+        )
+    }) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            item {
+                ListItem(
+                    headlineContent = { Text("网址安全扫描") },
+                    supportingContent = { Text("本地判定，不联网、不上传浏览记录。地址栏护盾会实时显示当前网站的风险状态。") },
+                    leadingContent = { Icon(Icons.Rounded.GppGood, null, tint = MaterialTheme.colorScheme.primary) }
+                )
+            }
+            item { HorizontalDivider() }
+            item { SecurityModeOption("增强模式", "拦截可疑与危险网站", "除明确风险外，域名异常、可疑后缀等也会弹窗提醒，拦截最严。", settings.securityMode == "enhanced") { onSelectMode("enhanced") } }
+            item { SecurityModeOption("标准模式（推荐）", "只拦截危险网站", "确认存在诈骗、仿冒、木马等明确风险时才拦截，兼顾安全与流畅。", settings.securityMode == "standard") { onSelectMode("standard") } }
+            item { SecurityModeOption("基础模式", "仅提示，不拦截", "护盾照常显示风险状态，但不会阻断页面，交由你自己判断。", settings.securityMode == "basic") { onSelectMode("basic") } }
+            item { HorizontalDivider() }
+            item { ShieldLegend(Icons.Rounded.GppGood, MaterialTheme.colorScheme.primary, "连接安全", "HTTPS 且证书校验通过") }
+            item { ShieldLegend(Icons.Rounded.LockOpen, MaterialTheme.colorScheme.tertiary, "连接未加密", "使用 HTTP，或证书异常、存在混合内容") }
+            item { ShieldLegend(Icons.Rounded.GppMaybe, MaterialTheme.colorScheme.tertiary, "可疑网站", "域名结构异常或后缀滥用，但未确认有害") }
+            item { ShieldLegend(Icons.Rounded.GppBad, MaterialTheme.colorScheme.error, "危险网站", "命中仿冒、钓鱼、木马或已知风险名单") }
+            item {
+                ListItem(
+                    headlineContent = { Text("扫描范围") },
+                    supportingContent = { Text("网址欺骗、域名仿冒、punycode、可疑后缀、IP 直连、异常域名结构，以及证书失效与混合内容。全部在本地完成，不发送任何请求。") },
+                    leadingContent = { Icon(Icons.Rounded.Policy, null) }
+                )
+            }
+        }
+    }
+}
+
+/** 一个防护模式选项：整行可点，选中态用勾选图标与主色标出 */
+@Composable
+private fun SecurityModeOption(
+    title: String,
+    summary: String,
+    detail: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = {
+            Column {
+                Text(summary)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        leadingContent = {
+            Icon(
+                if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                contentDescription = if (selected) "已选择" else null,
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        modifier = Modifier.clickable(onClick = onClick)
+    )
+}
+
+/** 护盾颜色图例的一行 */
+@Composable
+private fun ShieldLegend(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: androidx.compose.ui.graphics.Color,
+    title: String,
+    detail: String
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(detail) },
+        leadingContent = { Icon(icon, null, tint = tint) }
+    )
 }
 
 /** 网页权限管理：剪贴板 / 跳转至外部 APP / 麦克风 */
