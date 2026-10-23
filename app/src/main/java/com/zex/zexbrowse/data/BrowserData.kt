@@ -159,7 +159,11 @@ data class BrowserSettings(
     /** 首页搜索框的搜索历史（新→旧，最多保留 10 条） */
     val searchHistory: List<String> = emptyList(),
     /** 安全防护模式：enhanced（增强）/ standard（标准）/ basic（基础） */
-    val securityMode: String = "standard"
+    val securityMode: String = "standard",
+    /** HTTPS-Only 开关：开启后自动尝试以 HTTPS 加密协议连接网站，增强安全性 */
+    val httpsOnlyEnabled: Boolean = true,
+    /** HTTPS-Only 生效范围：all（所有标签页）/ private（仅隐私标签页） */
+    val httpsOnlyMode: String = "all"
 )
 
 class SettingsStore(private val context: Context) {
@@ -195,6 +199,8 @@ class SettingsStore(private val context: Context) {
     private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
     private val searchHistoryKey = stringPreferencesKey("search_history")
     private val securityModeKey = stringPreferencesKey("security_mode")
+    private val httpsOnlyEnabledKey = booleanPreferencesKey("https_only_enabled")
+    private val httpsOnlyModeKey = stringPreferencesKey("https_only_mode")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
@@ -237,7 +243,9 @@ class SettingsStore(private val context: Context) {
             searchHistory = (preferences[searchHistoryKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() },
-            securityMode = preferences[securityModeKey] ?: "standard"
+            securityMode = preferences[securityModeKey] ?: "standard",
+            httpsOnlyEnabled = preferences[httpsOnlyEnabledKey] ?: true,
+            httpsOnlyMode = preferences[httpsOnlyModeKey] ?: "all"
         )
     }
 
@@ -275,6 +283,8 @@ class SettingsStore(private val context: Context) {
     suspend fun micPolicy(value: String) = update { it[micPolicyKey] = value }
     suspend fun externalAppPolicy(value: String) = update { it[externalAppPolicyKey] = value }
     suspend fun securityMode(value: String) = update { it[securityModeKey] = value }
+    suspend fun httpsOnlyEnabled(value: Boolean) = update { it[httpsOnlyEnabledKey] = value }
+    suspend fun httpsOnlyMode(value: String) = update { it[httpsOnlyModeKey] = value }
 
     /** 记录一次搜索：去重后置顶，仅保留最近 10 条 */
     suspend fun addSearchHistory(keyword: String) = update { preferences ->

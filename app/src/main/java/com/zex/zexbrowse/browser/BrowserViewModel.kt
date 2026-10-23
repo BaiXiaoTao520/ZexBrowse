@@ -517,6 +517,23 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * 应用 HTTPS-Only 设置到 Gecko 运行时。
+     *
+     * 用 GeckoView 原生能力（setAllowInsecureConnections）：
+     * - 关闭 → ALLOW_ALL（允许所有非 HTTPS 连接）
+     * - 仅隐私标签页 → HTTPS_ONLY_PRIVATE
+     * - 所有标签页 → HTTPS_ONLY
+     */
+    fun applyHttpsOnly(enabled: Boolean, mode: String) {
+        val level = when {
+            !enabled -> GeckoRuntimeSettings.ALLOW_ALL
+            mode == "private" -> GeckoRuntimeSettings.HTTPS_ONLY_PRIVATE
+            else -> GeckoRuntimeSettings.HTTPS_ONLY
+        }
+        runCatching { runtime.settings.setAllowInsecureConnections(level) }
+    }
+
     fun applyCurrentUserAgentToSelected() {
         val ua = userAgentOverride(browserSettings)
         // 仅当 UA 真正变化时才重新加载，避免无谓刷新打断正在播放的音频
