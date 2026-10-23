@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -212,6 +213,29 @@ val aEmulatorRecommendation = RecommendedApp(
     description = "AEmulator boots a real Android 2.3–17 system image straight from a firmware file you already have: a recovery ZIP, an Odin archive, a Google factory image or a GSI. Old 32-bit firmware (2.3–4.4) runs through a patched QEMU, Android 5.0–17 runs natively on the phone’s arm64 cores. The kernel’s binder is emulated, graphics use your phone’s GPU and sound goes through Android’s audio stack — everything runs inside a normal app."
 )
 
+val astralGameRecommendation = RecommendedApp(
+    name = "Astral Game",
+    version = "1.6.5",
+    summary = "Flutter 游戏联机客户端",
+    downloadUrl = "https://v4.gh-proxy.org/https://github.com/AstralNext/AstralGame/releases/download/v1.6.5/astral-game-1.6.5-android-arm64.apk",
+    icon = Icons.Rounded.SportsEsports,
+    description = """
+        Astral Game 一款基于 Flutter 构建的游戏联机客户端。
+
+        跨平台一致体验
+        • 基于 Flutter 体系打造，界面流畅统一，操作手感细腻。
+
+        联机开黑
+        • 为多人联机游戏提供一站式的房间创建、对战与串联体验，邀上好友随时开局。
+
+        轻量高效
+        • 安装包精简，启动迅速，运行占用低，中低端机型也能稳定流畅。
+
+        简洁无干扰
+        • 去除冗余权限与广告干扰，专注于让你快速进入游戏、专注对战本身。
+    """.trimIndent()
+)
+
 /** 与 ZexNote 一致的推荐顺序 */
 val recommendedApps = listOf(
     appShareRecommendation,
@@ -221,5 +245,6 @@ val recommendedApps = listOf(
     komiStoreRecommendation,
     coolMonitorRecommendation,
     twilightToolboxRecommendation,
-    aEmulatorRecommendation
+    aEmulatorRecommendation,
+    astralGameRecommendation
 )

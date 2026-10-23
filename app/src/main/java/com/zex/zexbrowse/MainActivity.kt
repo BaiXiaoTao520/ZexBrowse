@@ -7,8 +7,10 @@
 package com.zex.zexbrowse
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -41,6 +43,8 @@ class MainActivity : ComponentActivity() {
             return
         }
         consumeViewIntent(intent)
+        // 帧率优化：向系统请求设备支持的最高刷新率，让滚动/动画/页面合成以更高帧率运行。
+        requestMaxRefreshRate()
         setContent {
             val request by incomingUrl.collectAsState()
             ZexBrowseApp(
@@ -50,6 +54,39 @@ class MainActivity : ComponentActivity() {
             )
         }
         (application as ZexBrowseApplication).ensureDarkExtension()
+    }
+
+    /**
+     * 帧率优化：向系统请求设备支持的最高刷新率。
+     *
+     * GeckoView 使用 SurfaceView 后端，渲染跟随窗口刷新率；Compose 动画同理。
+     * 不同厂商机型支持的最高刷新率不同（60/90/120/144/165Hz 等），
+     * 这里遍历 Display 支持的所有模式，选刷新率最高的那个并应用给窗口，
+     * 避免系统为了省电把应用锁在 60Hz。失败时静默回退，不影响启动。
+     */
+    private fun requestMaxRefreshRate() {
+        runCatching {
+            val wm = getSystemService(WindowManager::class.java) ?: return@runCatching
+            @Suppress("DEPRECATION")
+            val display = wm.defaultDisplay ?: return@runCatching
+            val modes = display.supportedModes
+            val best = modes.maxByOrNull { it.refreshRate } ?: return@runCatching
+            val lp = window.attributes
+            // 优先按 Display 模式设置，精确到具体分辨率/刷新率组合；不支持时再改刷新率字段
+            lp.preferredDisplayModeId = best.modeId
+            @Suppress("DEPRECATION")
+            lp.preferredRefreshRate = best.refreshRate
+            window.attributes = lp
+            // Android 11+ 可显式声明期望帧率，进一步避免被系统降至低频
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runCatching {
+                    window.setFrameRate(
+                        best.refreshRate,
+                        android.view.WindowManager.LayoutParams.FRAME_RATE_COMPATIBILITY_DEFAULT
+                    )
+                }
+            }
+        }
     }
 
     private fun showUnsupportedDialog(system: String) {

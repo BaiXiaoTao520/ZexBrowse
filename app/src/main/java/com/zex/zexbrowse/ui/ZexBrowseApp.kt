@@ -15,6 +15,7 @@ import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
@@ -193,11 +194,13 @@ import com.zex.zexbrowse.ExternalLinkDiagnostics
 import com.zex.zexbrowse.BuildConfig
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
@@ -2007,15 +2010,34 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             Toast.makeText(context, "未授予通知权限，下载进度将只在应用内的下载记录中显示", Toast.LENGTH_LONG).show()
         }
     }
-    // 网页文件选择：单/多选两个启动器，选中后回传给网页
+    // 网页文件选择：单/多选两个启动器，选中后回传给网页。
+    // 关键：必须先把 content:// 复制成本地 file:// 再回传（原因见 copyUriToCacheForUpload）。
     var filePickerCallback by remember { mutableStateOf<((Array<Uri>?) -> Unit)?>(null) }
     val filePickerSingle = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val callback = filePickerCallback; filePickerCallback = null
-        callback?.invoke(if (uri != null) arrayOf(uri) else null)
+        if (callback != null) {
+            if (uri == null) {
+                callback(null)
+            } else {
+                scope.launch {
+                    val local = withContext(Dispatchers.IO) { copyUriToCacheForUpload(context, uri) }
+                    callback(if (local != null) arrayOf(local) else null)
+                }
+            }
+        }
     }
     val filePickerMultiple = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val callback = filePickerCallback; filePickerCallback = null
-        callback?.invoke(uris.toTypedArray())
+        if (callback != null) {
+            if (uris.isNullOrEmpty()) {
+                callback(null)
+            } else {
+                scope.launch {
+                    val locals = withContext(Dispatchers.IO) { uris.mapNotNull { copyUriToCacheForUpload(context, it) } }
+                    callback(if (locals.isNotEmpty()) locals.toTypedArray() else null)
+                }
+            }
+        }
     }
     // 网页打开外部应用：待确认的链接及其跳转动作
     var pendingExternalAppUri by remember { mutableStateOf<String?>(null) }
@@ -3220,6 +3242,43 @@ private fun clipboardPolicyLabel(policy: String) = when (policy) {
 }
 
 private fun siteHost(uri: String): String = runCatching { java.net.URI(uri).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri
+
+/**
+ * 把用户选中的 content:// URI 复制到应用缓存下的真实文件，返回 file:// URI。
+ *
+ * 为什么必须这么做：GeckoView 的 `FilePrompt.confirm` 内部 `getFile()` 只接受两种 URI：
+ * 1. `file://` 路径；
+ * 2. 带 "_data" 列（绝对路径）的 content://。
+ * 而 `ActivityResultContracts.OpenDocument()` 返回的是 SAF 文档 URI
+ * （如 content://com.android.externalstorage.documents/...），这类 URI 没有 _data 列，
+ * `getFile()` 直接返回 null → 网页收到空文件路径，表现为“选了文件但上传不上去、也没有 MIME”。
+ *
+ * 复制到本地后转 file:// 回传，绕开这个限制；同时保留原名与扩展名，
+ * 便于 Gecko 根据扩展名推断 MIME 类型。
+ */
+private fun copyUriToCacheForUpload(context: Context, uri: Uri): Uri? = runCatching {
+    // 1) 读取真实文件名（含扩展名），用于 Gecko 推断 MIME
+    var fileName = "upload_${System.currentTimeMillis()}"
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0) cursor.getString(idx)?.takeIf { it.isNotBlank() }?.let { fileName = it }
+        }
+    }
+    // 去掉非法路径字符，避免创建文件失败
+    val safeName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "upload" }
+    val dir = File(context.cacheDir, "web-uploads").apply { if (!exists()) mkdirs() }
+    // 顺手清理一天前的旧上传文件，避免缓存无限增长（网页可能在提交时才读，所以不能立即删）
+    val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+    dir.listFiles()?.forEach { if (it.lastModified() < cutoff) runCatching { it.delete() } }
+    val target = File(dir, "${System.currentTimeMillis()}_$safeName")
+    // 3) 打开输入流写入真实文件
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        target.outputStream().use { output -> input.copyTo(output) }
+    } ?: return null
+    if (!target.exists() || target.length() <= 0L) { target.delete(); return null }
+    Uri.fromFile(target)
+}.getOrNull()
 
 /** 在 URL 上追加查询参数：已带查询串时用 & 拼接，解析失败时原样返回 */
 private fun String.suffixQuery(pair: Pair<String, String>): String = runCatching {
