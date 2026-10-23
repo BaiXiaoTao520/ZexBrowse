@@ -92,6 +92,7 @@ import androidx.compose.material.icons.rounded.ContactSupport
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
@@ -204,7 +205,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -693,6 +694,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         browserViewModel.applyForceDark(useDarkTheme, settings.forceDarkWeb)
         browserViewModel.applyCurrentUserAgentToSelected()
     }
+    // HTTPS-Only：开关或生效范围变化时同步到 Gecko 运行时
+    LaunchedEffect(settings.httpsOnlyEnabled, settings.httpsOnlyMode) {
+        browserViewModel.applyHttpsOnly(settings.httpsOnlyEnabled, settings.httpsOnlyMode)
+    }
     val colorScheme = if (settings.dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (useDarkTheme) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
     } else if (useDarkTheme) {
@@ -929,6 +934,7 @@ private fun PageContent(
             onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
             onSiteSettings = { navigate(Page.SITE_SETTINGS) },
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
+            onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
             onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
             onSecurity = { navigate(Page.SECURITY) },
             onAbout = { navigate(Page.ABOUT) },
@@ -960,6 +966,13 @@ private fun PageContent(
                 browserViewModel.clearBrowserData()
                 Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show()
             },
+            onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
+            onBack = goBack
+        )
+        Page.HTTPS_ONLY -> HttpsOnlyScreen(
+            settings = settings,
+            onToggle = { scope.launch { settingsStore.httpsOnlyEnabled(it) } },
+            onSelectMode = { scope.launch { settingsStore.httpsOnlyMode(it) } },
             onBack = goBack
         )
         Page.WEB_PERMISSIONS -> WebPermissionsScreen(
@@ -2482,6 +2495,7 @@ private fun SettingsScreen(
     onGeneralSettings: () -> Unit,
     onSiteSettings: () -> Unit,
     onCookieSettings: () -> Unit,
+    onHttpsOnly: () -> Unit,
     onWebPermissions: () -> Unit,
     onSecurity: () -> Unit,
     onAbout: () -> Unit,
@@ -2506,6 +2520,7 @@ private fun SettingsScreen(
             SettingSearchItem("Cookie 追踪", "隐私", listOf("Cookie", "追踪", "隐私", "数据", "Cookies"), onCookieSettings),
             SettingSearchItem("清除缓存与 Cookie", "隐私", listOf("缓存", "清除", "Cookie", "数据", "清理", "站点数据"), onCookieSettings),
             SettingSearchItem("退出时清除浏览器数据", "隐私", listOf("退出", "清除", "数据", "无痕", "清理", "退出时清除"), onCookieSettings),
+            SettingSearchItem("HTTPS-Only", "隐私", listOf("HTTPS", "加密", "安全", "协议", "Only", "强制加密", "隐私标签页"), onHttpsOnly),
             SettingSearchItem("安全防护", "安全防护", listOf("安全", "防护", "拦截", "诈骗", "木马", "护盾", "钓鱼", "风险", "银狐"), onSecurity),
             SettingSearchItem("剪贴板读取权限", "网页权限管理", listOf("剪贴板", "复制", "粘贴", "权限", "读取"), onWebPermissions),
             SettingSearchItem("跳转至外部 APP 权限", "网页权限管理", listOf("外部", "跳转", "APP", "应用", "Intent", "权限"), onWebPermissions),
@@ -2997,6 +3012,7 @@ private fun CookieSettingsScreen(
     setCookie: (Boolean) -> Unit,
     setClearOnExit: (Boolean, Boolean, Boolean, Boolean) -> Unit,
     clearBrowserData: () -> Unit,
+    onHttpsOnly: () -> Unit,
     onBack: () -> Unit
 ) {
     var showClearConfirmation by remember { mutableStateOf(false) }
@@ -3006,6 +3022,15 @@ private fun CookieSettingsScreen(
     var exitHistory by remember(settings.clearHistoryOnExit) { mutableStateOf(settings.clearHistoryOnExit) }
     SelectionScreen("隐私", onBack) {
         item { SwitchRow("Cookie 追踪", "关闭后新会话不保存 Cookie", settings.cookiesEnabled, setCookie, leading = Icons.Rounded.Cookie) }
+        item {
+            ListItem(
+                headlineContent = { Text("HTTPS-Only") },
+                supportingContent = { Text(httpsOnlySubtitle(settings)) },
+                leadingContent = { Icon(Icons.Rounded.Lock, null) },
+                trailingContent = { Icon(Icons.Default.ArrowForward, null) },
+                modifier = Modifier.clickable(onClick = onHttpsOnly)
+            )
+        }
         item { ListItem(headlineContent = { Text("清除缓存与 Cookie") }, supportingContent = { Text("立即清除缓存、Cookie 和浏览历史") }, leadingContent = { Icon(Icons.Default.Delete, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
         item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit, { showExitOptions = true }, leading = Icons.Default.Delete) }
     }
@@ -3032,6 +3057,65 @@ private fun CookieSettingsScreen(
             dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text("取消") } }
         )
     }
+}
+
+/**
+ * HTTPS-Only 设置页：开关 + 生效范围两个单选。
+ * 开启后自动尝试以 HTTPS 加密协议连接网站，降低明文传输与降级攻击风险。
+ */
+@Composable
+private fun HttpsOnlyScreen(
+    settings: BrowserSettings,
+    onToggle: (Boolean) -> Unit,
+    onSelectMode: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen("HTTPS-Only", onBack) {
+        item {
+            SwitchRow(
+                title = "HTTPS-Only 模式",
+                subtitle = httpsOnlySubtitle(settings),
+                checked = settings.httpsOnlyEnabled,
+                onCheckedChange = onToggle,
+                leading = Icons.Rounded.Lock
+            )
+        }
+        item { HorizontalDivider() }
+        item {
+            SecurityModeOption(
+                title = "对所有标签页启用",
+                summary = "普通与隐私标签页均优先使用 HTTPS",
+                detail = "访问仅支持 HTTP 的网站时会先尝试升级为 HTTPS，无法升级时提醒或阻断。",
+                selected = settings.httpsOnlyMode == "all",
+                enabled = settings.httpsOnlyEnabled,
+                onClick = { onSelectMode("all") }
+            )
+        }
+        item {
+            SecurityModeOption(
+                title = "仅在隐私标签页启用",
+                summary = "普通标签页不限制，隐私标签页强制 HTTPS",
+                detail = "仅在无痕浏览时启用 HTTPS 升级，普通浏览保持原样。",
+                selected = settings.httpsOnlyMode == "private",
+                enabled = settings.httpsOnlyEnabled,
+                onClick = { onSelectMode("private") }
+            )
+        }
+        item {
+            ListItem(
+                headlineContent = { Text("工作原理") },
+                supportingContent = { Text("开启后，浏览器会优先以加密的 HTTPS 协议连接网站；若站点不支持，会根据上面的范围决定是否提醒或拦截，避免在不安全连接上泄露数据。") },
+                leadingContent = { Icon(Icons.Rounded.Policy, null) }
+            )
+        }
+    }
+}
+
+/** HTTPS-Only 入口副标题：关闭时显示「已关闭」，开启时提示生效范围 */
+private fun httpsOnlySubtitle(settings: BrowserSettings): String = when {
+    !settings.httpsOnlyEnabled -> "已关闭"
+    settings.httpsOnlyMode == "private" -> "已开启，仅隐私标签页"
+    else -> "已开启，所有标签页"
 }
 
 /**
@@ -3062,10 +3146,6 @@ private fun SecuritySettingsScreen(
             item { SecurityModeOption("标准模式（推荐）", "只拦截危险网站", "确认存在诈骗、仿冒、木马等明确风险时才拦截，兼顾安全与流畅。", settings.securityMode == "standard") { onSelectMode("standard") } }
             item { SecurityModeOption("基础模式", "仅提示，不拦截", "护盾照常显示风险状态，但不会阻断页面，交由你自己判断。", settings.securityMode == "basic") { onSelectMode("basic") } }
             item { HorizontalDivider() }
-            item { ShieldLegend(Icons.Rounded.GppGood, MaterialTheme.colorScheme.primary, "连接安全", "HTTPS 且证书校验通过") }
-            item { ShieldLegend(Icons.Rounded.LockOpen, MaterialTheme.colorScheme.tertiary, "连接未加密", "使用 HTTP，或证书异常、存在混合内容") }
-            item { ShieldLegend(Icons.Rounded.GppMaybe, MaterialTheme.colorScheme.tertiary, "可疑网站", "域名结构异常或后缀滥用，但未确认有害") }
-            item { ShieldLegend(Icons.Rounded.GppBad, MaterialTheme.colorScheme.error, "危险网站", "命中仿冒、钓鱼、木马或已知风险名单") }
             item {
                 ListItem(
                     headlineContent = { Text("扫描范围") },
@@ -3084,10 +3164,11 @@ private fun SecurityModeOption(
     summary: String,
     detail: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     ListItem(
-        headlineContent = { Text(title) },
+        headlineContent = { Text(title, color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)) },
         supportingContent = {
             Column {
                 Text(summary)
@@ -3098,25 +3179,14 @@ private fun SecurityModeOption(
             Icon(
                 if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
                 contentDescription = if (selected) "已选择" else null,
-                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    selected -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
             )
         },
-        modifier = Modifier.clickable(onClick = onClick)
-    )
-}
-
-/** 护盾颜色图例的一行 */
-@Composable
-private fun ShieldLegend(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: androidx.compose.ui.graphics.Color,
-    title: String,
-    detail: String
-) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(detail) },
-        leadingContent = { Icon(icon, null, tint = tint) }
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
     )
 }
 
@@ -3402,7 +3472,7 @@ private fun AboutScreen(
                     }
                 }
             }) { Text("贡献者") }
-            SwitchRow("启动时自动检查更新", "默认开启", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
+            SwitchRow("启动时自动检查更新", "每次打开应用时在后台检测新版本", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
             // 赞助与支持：与其它入口保持相同的卡片样式
             SettingsEntry(
                 title = "赞助与支持",
