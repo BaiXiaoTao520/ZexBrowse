@@ -36,8 +36,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // 不受支持的系统：直接拦截，弹出不可取消的提示，仅能点「退出应用」后退出
-        if (UnsupportedSystem.detect() != null) {
-            showUnsupportedDialog()
+        UnsupportedSystem.detect()?.let {
+            showUnsupportedDialog(it)
             return
         }
         consumeViewIntent(intent)
@@ -52,10 +52,10 @@ class MainActivity : ComponentActivity() {
         (application as ZexBrowseApplication).ensureDarkExtension()
     }
 
-    private fun showUnsupportedDialog() {
+    private fun showUnsupportedDialog(system: String) {
         android.app.AlertDialog.Builder(this)
             .setTitle("抱歉")
-            .setMessage("很遗憾，ZexBrowse 已停止对 vivo 与 iQOO 设备的支持，无法继续为你提供服务。感谢你的理解。")
+            .setMessage("很遗憾，ZexBrowse 已停止对 $system 设备的支持，无法继续为你提供服务。感谢你的理解。")
             .setCancelable(false)
             .setPositiveButton("退出应用") { _, _ -> finish() }
             .show()

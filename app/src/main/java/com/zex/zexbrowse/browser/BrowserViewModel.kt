@@ -17,6 +17,7 @@ import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.HistoryEntity
 import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
+import com.zex.zexbrowse.data.SecurityScanner
 import com.zex.zexbrowse.media.MediaPlaybackController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +34,7 @@ import org.mozilla.geckoview.StorageController
 import java.net.URLEncoder
 import java.util.UUID
 
-data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false)
+data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val runtime = (application as ZexBrowseApplication).runtime
     private fun forceDarkApplication() = getApplication<Application>() as ZexBrowseApplication
@@ -55,6 +56,34 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             externalDownloadHandler = value
             while (bufferedExternalDownloads.isNotEmpty()) value(bufferedExternalDownloads.removeFirst())
         }
+    // 界面层注入：命中风险站点时的拦截回调。参数：目标地址、扫描结论、继续访问回调。
+    // 为 null 表示尚未接入界面，不做拦截（仅显示图标）。
+    var riskySiteHandler: ((url: String, assessment: SecurityScanner.RiskAssessment, proceed: () -> Unit) -> Unit)? = null
+    // 用户选「仍然访问」后的放行名单：避免同一个地址被反复拦回
+    private val allowedOnce = HashSet<String>()
+
+    fun clearSecurityAllowance() { allowedOnce.clear() }
+
+    /** 当前安全防护模式（由界面层同步） */
+    var securityMode: String = "standard"
+
+    /**
+     * 根据防护模式判断是否拦截。
+     *
+     * - enhanced：可疑及以上均拦，并提示未加密连接
+     * - standard：只拦危险级（默认，避免干扰正常浏览）
+     * - basic：不拦，只显示护盾图标
+     */
+    private fun shouldBlockRisky(uri: String): Boolean {
+        if (uri in allowedOnce) return false
+        if (securityMode == "basic") return false
+        val level = SecurityScanner.assessUrl(uri).level
+        return when (securityMode) {
+            "enhanced" -> level == SecurityScanner.RiskLevel.SUSPICIOUS || level == SecurityScanner.RiskLevel.DANGEROUS
+            else -> level == SecurityScanner.RiskLevel.DANGEROUS
+        }
+    }
+
     private fun notifyExternalDownload(url: String) {
         val handler = externalDownloadHandler
         if (handler != null) handler(url) else bufferedExternalDownloads.addLast(url)
@@ -304,7 +333,36 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
         })
         session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {
-            override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) { if (url != null) { android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url"); update(id) { tab -> if (url.startsWith("about:") && tab.failed) tab else tab.copy(url = url) } } }
+            override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
+                if (url != null) {
+                    android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url")
+                    val risk = SecurityScanner.assessUrl(url)
+                    update(id) { tab ->
+                        if (url.startsWith("about:") && tab.failed) tab
+                        else tab.copy(url = url, risk = risk)
+                    }
+                }
+            }
+            override fun onSecurityChange(session: GeckoSession, securityInfo: GeckoSession.ProgressDelegate.SecurityInformation) {
+                // 证书与混合内容状态由 Gecko 判定，比自己去解析 URL 可靠
+                val mixedActive = securityInfo.mixedModeActive
+                val mixedPassive = securityInfo.mixedModePassive
+                val hasCert = securityInfo.certificate != null
+                val secure = securityInfo.isSecure && !securityInfo.isException
+                update(id) { tab ->
+                    tab.copy(
+                        risk = SecurityScanner.assess(
+                            url = tab.url,
+                            isSecure = secure,
+                            mixedActive = mixedActive,
+                            mixedPassive = mixedPassive,
+                            hasCertificate = hasCert,
+                            // 传入 GeckoView 自己的常量，不靠硬编码数值
+                            contentLoaded = GeckoSession.ProgressDelegate.SecurityInformation.CONTENT_LOADED
+                        )
+                    )
+                }
+            }
             // 记录失败的具体错误码与分类，供错误页展示原因；返回 null 表示不自定义错误页，交回 Gecko 默认处理。
             override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
                 // 已收到下载信号时，Gecko 会因导航被下载接管而回调 onLoadError，
@@ -318,6 +376,23 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 下载交给 Gecko 自己判断（onExternalResponse）：
                 // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
+
+                // 风险站点拦截：只拦用户主动发起的导航与顶层页面，不拦资源加载。
+                // 不用 isDirectNavigation：它表示「由应用调 load 发起」，语义不同。
+                val userInitiated = request.hasUserGesture || request.isDirectNavigation
+                if (userInitiated && shouldBlockRisky(uri)) {
+                    val assessment = SecurityScanner.assessUrl(uri)
+                    val handler = riskySiteHandler
+                    if (handler != null) {
+                        handler(uri, assessment) {
+                            // 用户选择继续：记入放行名单后重新加载
+                            allowedOnce.add(uri)
+                            session.loadUri(uri)
+                        }
+                        return GeckoResult.fromValue(AllowOrDeny.DENY)
+                    }
+                }
+
                 if (uri.isExternalAppUri()) { requestExternalApp(uri); return GeckoResult.fromValue(AllowOrDeny.DENY) }
                 return null
             }
