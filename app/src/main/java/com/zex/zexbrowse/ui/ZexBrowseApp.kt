@@ -123,6 +123,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
@@ -133,9 +134,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.WavyProgressIndicatorDefaults
@@ -3752,7 +3751,9 @@ private fun AboutScreen(
                 val list = contributors
                 if (list == null) {
                     Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                        LoadingIndicator(modifier = Modifier.size(48.dp), polygons = listOf(MaterialShapes.Clover4Leaf, MaterialShapes.Flower, MaterialShapes.Burst, MaterialShapes.Diamond))
+                        // ContainedLoadingIndicator：形状形变在官方容器背景（圆形色块）内进行，
+                        // 不传 polygons 即使用官方默认的 7 种形状序列。
+                        ContainedLoadingIndicator(modifier = Modifier.size(48.dp))
                     }
                 } else if (list.isEmpty()) {
                     Text("暂无贡献者信息")
