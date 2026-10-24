@@ -161,7 +161,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 // 存下 ETag，下次续传时用 If-Range 校验，避免服务器换了文件还硬拼
                 val etag = response.header("ETag").orEmpty()
                 if (etag.isNotBlank() && etag != record?.etag) {
-                    database.downloadDao().resume(id, startOffset, total, etag)
+                    database.downloadDao().updateEtag(id, etag)
                 }
             }
 

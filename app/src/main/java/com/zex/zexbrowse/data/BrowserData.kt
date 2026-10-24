@@ -97,6 +97,10 @@ interface DownloadDao {
     @Query("UPDATE downloads SET fileName = :fileName WHERE id = :id")
     suspend fun rename(id: String, fileName: String)
 
+    /** 只记录 ETag，不动状态：下载进行中不动 state，避免界面闪回「等待下载」 */
+    @Query("UPDATE downloads SET etag = :etag WHERE id = :id")
+    suspend fun updateEtag(id: String, etag: String)
+
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun delete(id: String)
 }
