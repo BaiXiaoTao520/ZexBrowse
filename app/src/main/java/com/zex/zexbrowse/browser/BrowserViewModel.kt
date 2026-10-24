@@ -14,12 +14,14 @@ import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.BuildConfig
 import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.data.BrowserDatabase
+import com.zex.zexbrowse.data.CUSTOM_SEARCH_PREFIX
 import com.zex.zexbrowse.data.HistoryEntity
 import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.LemwoodMirror
 import com.zex.zexbrowse.data.SecurityScanner
+import com.zex.zexbrowse.data.resolveCustomSearchTemplate
 import com.zex.zexbrowse.media.MediaPlaybackController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -685,11 +687,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (text.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))) return text
         if (text.startsWith("www.") || text.matches(Regex("^[^\\s/]+\\.[^\\s/]+.*"))) return "https://$text"
         val encoded = URLEncoder.encode(text, "UTF-8")
-        val template = when (browserSettings.searchEngine) {
-            "baidu" -> "https://www.baidu.com/s?wd={query}"
-            "bing" -> "https://www.bing.com/search?q={query}"
-            "duckduckgo" -> "https://duckduckgo.com/?q={query}"
-            "custom" -> browserSettings.customSearchUrl
+        // 自定义搜索引擎统一以「custom:<标题>」形式保存，可添加多个、各自独立生效；
+        // 旧版只有单个自定义搜索（custom），此时回退到 customSearchUrl 以兼容已有配置。
+        val template = when {
+            browserSettings.searchEngine == "baidu" -> "https://www.baidu.com/s?wd={query}"
+            browserSettings.searchEngine == "bing" -> "https://www.bing.com/search?q={query}"
+            browserSettings.searchEngine == "duckduckgo" -> "https://duckduckgo.com/?q={query}"
+            browserSettings.searchEngine.startsWith(CUSTOM_SEARCH_PREFIX) -> resolveCustomSearchTemplate(browserSettings)
+            browserSettings.searchEngine == "custom" -> browserSettings.customSearchUrl
             else -> "https://www.google.com/search?q={query}"
         }
         return (template.takeIf { it.contains("{query}") } ?: "https://www.google.com/search?q={query}").replace("{query}", encoded)
