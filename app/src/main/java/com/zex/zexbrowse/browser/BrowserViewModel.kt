@@ -628,9 +628,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun resumeDownload(id: String) {
         viewModelScope.launch {
             if (!downloadScheduler.resume(id)) {
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(getApplication(), "下载记录已丢失，请重新下载", android.widget.Toast.LENGTH_SHORT).show()
-                }
+                android.widget.Toast.makeText(getApplication(), "下载记录已丢失，请重新下载", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }

@@ -1,0 +1,156 @@
+name: 清理 Release 与工作流记录
+
+# 仅仓库创建者可用，且只能手动触发：
+# 删除远端 Release / tag 与 Actions 运行记录都不可恢复，不能交给自动流程。
+#
+# 输入的是「保留数量」：最近的 N 个保持不动，只删除更早的部分。
+# 删除前必须在 confirm 里输入大写 YES，否则只做预演、不删任何东西。
+on:
+  workflow_dispatch:
+    inputs:
+      keep_releases:
+        description: "保留最新的 Release 数量（含 tag），更早的会被删除"
+        required: true
+        default: "1"
+        type: string
+      keep_runs:
+        description: "保留最新的 Actions 运行记录数量，更早的会被删除"
+        required: true
+        default: "10"
+        type: string
+      confirm:
+        description: "大写 YES = 真正删除，大写 NO = 仅预演，其它值直接报错"
+        required: true
+        default: "NO"
+        type: string
+
+permissions:
+  # 删除 Release 与 tag 需要写内容权限
+  contents: write
+  # 删除运行记录需要写 Actions 权限
+  actions: write
+
+jobs:
+  cleanup:
+    name: 清理 Release 与运行记录
+    # 只允许仓库创建者触发；其他人（含协作者）触发时直接跳过。
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # 不检出源码，直接让 gh 指向当前仓库
+      GH_REPO: ${{ github.repository }}
+      CURRENT_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: 校验触发者与输入
+        env:
+          KEEP_RELEASES: ${{ inputs.keep_releases }}
+          KEEP_RUNS: ${{ inputs.keep_runs }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          # job 级 if 已拦截非创建者，这里再确认一次，
+          # 避免以后有人误删那行 if 导致越权。
+          if [ "${{ github.actor }}" != "${{ github.repository_owner }}" ]; then
+            echo "仅仓库创建者可以执行清理"
+            exit 1
+          fi
+          # 保留数量必须是非负整数，避免空值或手滑输入被当成异常值
+          for value in "$KEEP_RELEASES" "$KEEP_RUNS"; do
+            case "$value" in
+              ''|*[!0-9]*)
+                echo "保留数量必须是非负整数，当前输入：$value"
+                exit 1
+                ;;
+            esac
+          done
+          echo "将保留最新 $KEEP_RELEASES 个 Release（含 tag）"
+          echo "将保留最新 $KEEP_RUNS 条 Actions 运行记录"
+          # 只接受大写 YES / NO 两种取值：删除不可恢复，
+          # 大小写混写或其它任何输入都直接报错，不做宽容处理。
+          case "$CONFIRM" in
+            YES)
+              echo "已确认（YES）：本次会真正执行删除"
+              ;;
+            NO)
+              echo "已选择 NO：本次只预演，不会删除任何内容"
+              ;;
+            *)
+              echo "confirm 只能是大写 YES 或 NO，当前输入：$CONFIRM"
+              exit 1
+              ;;
+          esac
+
+      - name: 清理超出的 Release 及对应 tag
+        env:
+          KEEP_RELEASES: ${{ inputs.keep_releases }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          # 先取全部 tag（跳过前 KEEP_RELEASES 个即待删项）。
+          # 保留 0 表示全删，此时不需要跳过任何一项。
+          ALL="$(gh release list --limit 1000 --json tagName --jq '.[].tagName' 2>/dev/null || true)"
+          if [ -z "$ALL" ]; then
+            echo "没有可处理的 Release"
+            exit 0
+          fi
+          TOTAL="$(echo "$ALL" | wc -l)"
+          echo "共 $TOTAL 个 Release"
+          if [ "$TOTAL" -le "$KEEP_RELEASES" ]; then
+            echo "数量未超过保留上限 $KEEP_RELEASES，无需删除"
+            exit 0
+          fi
+          # gh release list 按发布时间倒序，跳过前 N 个就是「要删的更早部分」
+          DOOMED="$(echo "$ALL" | tail -n +$((KEEP_RELEASES + 1)))"
+          echo "将删除以下 Release 及其 tag："
+          echo "$DOOMED" | sed 's/^/ - /'
+          if [ "$CONFIRM" != "YES" ]; then
+            echo "未确认（NO）：跳过实际删除"
+            exit 0
+          fi
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            # --cleanup-tag 会连同远端标签一起删掉，避免留下没有 Release 的孤儿 tag
+            gh release delete "$tag" --yes --cleanup-tag
+            echo "已删除：$tag"
+          done <<< "$DOOMED"
+
+      - name: 清理超出的 Actions 运行记录
+        env:
+          KEEP_RUNS: ${{ inputs.keep_runs }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          ALL="$(gh run list --limit 1000 --json databaseId --jq '.[].databaseId' 2>/dev/null || true)"
+          if [ -z "$ALL" ]; then
+            echo "没有可处理的运行记录"
+            exit 0
+          fi
+          echo "共 $(echo "$ALL" | wc -l) 条运行记录（含本次运行）"
+          # 本次运行无法删除、也不占用保留名额，先把它排除再按保留数切分：
+          # 保留 KEEP_RUNS 条（含本次），因此剩余的里只留 KEEP_RUNS-1 条。
+          # KEEP_RUNS=0 时从第 1 行开删（全删），至少本次运行会因无法删除而留下。
+          OTHERS="$(echo "$ALL" | grep -vx "$CURRENT_RUN_ID" || true)"
+          if [ -z "$OTHERS" ]; then
+            echo "除本次运行外没有其它记录，无需删除"
+            exit 0
+          fi
+          SKIP="$KEEP_RUNS"
+          if [ "$SKIP" -lt 1 ]; then
+            SKIP=1
+          fi
+          DOOMED="$(echo "$OTHERS" | tail -n +"$SKIP")"
+          if [ -z "$DOOMED" ]; then
+            echo "数量未超过保留上限 $KEEP_RUNS，无需删除"
+            exit 0
+          fi
+          echo "将删除以下运行记录："
+          echo "$DOOMED" | sed 's/^/ - /'
+          if [ "$CONFIRM" != "YES" ]; then
+            echo "未确认（NO）：跳过实际删除"
+            exit 0
+          fi
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            gh run delete "$id"
+            echo "已删除运行记录：$id"
+          done <<< "$DOOMED"
