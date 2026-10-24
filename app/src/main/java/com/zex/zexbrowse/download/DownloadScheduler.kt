@@ -16,6 +16,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.DownloadEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -23,7 +25,14 @@ class DownloadScheduler(private val context: Context) {
     private val database = BrowserDatabase.create(context)
     private val workManager = WorkManager.getInstance(context)
 
-    suspend fun enqueue(url: String, fileName: String, expectedHash: String, useExternalDirectory: Boolean, externalTreeUri: String, localSourceBin: String? = null): String {
+    /**
+     * 入队一次下载。
+     *
+     * 整个流程必须跑在 IO 线程：其中包含文件名网络探测、目标文件创建、
+     * Room 写入与 WorkManager 入队，放在调用方（如界面层的 Main 协程）执行
+     * 会卡住主线程，表现为“点下载后界面顿一下”。
+     */
+    suspend fun enqueue(url: String, fileName: String, expectedHash: String, useExternalDirectory: Boolean, externalTreeUri: String, localSourceBin: String? = null): String = withContext(Dispatchers.IO) {
         // 创建目标文件之前必须先确定真实文件名：
         // OpenList/Alist、SharePoint 等站点的下载入口常为 download.aspx，
         // 末段并非真实文件名。若先用它建文件，之后再改就晚了（文件已落盘）。
@@ -57,7 +66,7 @@ class DownloadScheduler(private val context: Context) {
             .putString(BrowserDownloadWorker.KEY_LOCAL_SOURCE, localSourceBin)
             .build()
         workManager.enqueue(OneTimeWorkRequestBuilder<BrowserDownloadWorker>().setInputData(input).addTag(id).build())
-        return id
+        return@withContext id
     }
 
     suspend fun cancel(id: String) {

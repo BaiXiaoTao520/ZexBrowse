@@ -1,5 +1,12 @@
 # ZexBrowse
 
+> [!CAUTION]
+> **本项目所有软件均开源免费，没有任何付费解锁项**
+>
+> ZexBrowse 及本项目发布的其它开源软件，一律免费提供，不存在内购、会员、卡密或任何形式的「付费解锁」功能。
+>
+> 源码公开意味着任何人都可以编译、篡改后重新打包分发。若你使用的版本提示付费解锁（例如要求输入卡密、购买激活码、付费才能开启功能），**一律属于未经授权的盗版篡改版**，并非本项目发布。请立即停止使用并卸载，改为从本仓库的 Releases 获取。
+
 ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack Compose Material 3 的开源 Android 浏览器
 
 - 许可证：[Mozilla Public License 2.0](LICENSE)

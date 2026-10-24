@@ -149,27 +149,29 @@ object DownloadFileName {
         if (!isCloudStorageUrl(url)) {
             fromOpenList(url)?.let { if (!isGeneric(it)) return it }
         }
-        return runCatching {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .header("User-Agent", DOWNLOAD_USER_AGENT)
-                .header("Range", "bytes=0-0")
-                .build()
-            client.newCall(request).execute().use { response ->
-                // 206/200 都可能有 Content-Disposition；只读头部，不消费整个 body
-                val disposition = response.header("Content-Disposition")
-                val parsed = if (disposition != null) parseContentDisposition(disposition) else null
-                // 解析结果仍是通用入口时视为无效，交由调用方保留原名
-                parsed?.takeIf { !isGeneric(it) }
-            }
-        }.getOrNull()
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .build()
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .header("User-Agent", DOWNLOAD_USER_AGENT)
+                    .header("Range", "bytes=0-0")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    // 206/200 都可能有 Content-Disposition；只读头部，不消费整个 body
+                    val disposition = response.header("Content-Disposition")
+                    val parsed = if (disposition != null) parseContentDisposition(disposition) else null
+                    // 解析结果仍是通用入口时视为无效，交由调用方保留原名
+                    parsed?.takeIf { !isGeneric(it) }
+                }
+            }.getOrNull()
+        }
     }
 
     /**

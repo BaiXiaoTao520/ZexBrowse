@@ -136,6 +136,8 @@ data class BrowserSettings(
     val searchEngine: String = "google",
     val customSearchTitle: String = "自定义搜索",
     val customSearchUrl: String = "",
+    /** 自定义搜索引擎列表，每行「标题|搜索 URL」，与自定义 UA、书签同格式 */
+    val customSearchEngines: String = "",
     val clearOnExit: Boolean = false,
     val clearCookiesOnExit: Boolean = true,
     val clearCacheOnExit: Boolean = true,
@@ -166,6 +168,39 @@ data class BrowserSettings(
     val httpsOnlyMode: String = "all"
 )
 
+/** 自定义搜索引擎：标题 + 搜索 URL 模板（模板中用 {query} 表示关键词） */
+data class CustomSearchEngine(val title: String, val url: String) {
+    /** 选中项标识：以标题区分，存入 searchEngine 字段 */
+    val value: String get() = "$CUSTOM_SEARCH_PREFIX$title"
+}
+
+/** 自定义搜索引擎选中值的前缀，避免与内置的 google / baidu 等取值冲突 */
+const val CUSTOM_SEARCH_PREFIX = "custom:"
+
+/** 自定义搜索引擎列表编解码，每行「标题|搜索 URL」，与自定义 UA、书签同格式 */
+fun decodeCustomSearchEngines(raw: String): List<CustomSearchEngine> =
+    raw.split("\n").mapNotNull { line ->
+        val title = line.substringBefore('|').trim()
+        val url = line.substringAfter('|', "").trim()
+        if (title.isEmpty() || url.isEmpty() || !url.contains("{query}")) null
+        else CustomSearchEngine(title, url)
+    }
+
+fun encodeCustomSearchEngines(list: List<CustomSearchEngine>): String =
+    list.joinToString("\n") { "${it.title}|${it.url}" }
+
+/**
+ * 取出当前选中的自定义搜索引擎的 URL 模板。
+ *
+ * 选中值形如 `custom:<标题>`；找不到对应条目时回退到旧版的单个自定义搜索配置，
+ * 保证升级前已配置好的自定义搜索引擎仍然生效。
+ */
+fun resolveCustomSearchTemplate(settings: BrowserSettings): String {
+    val title = settings.searchEngine.removePrefix(CUSTOM_SEARCH_PREFIX)
+    val matched = decodeCustomSearchEngines(settings.customSearchEngines).firstOrNull { it.title == title }
+    return matched?.url ?: settings.customSearchUrl
+}
+
 class SettingsStore(private val context: Context) {
     private val modeKey = stringPreferencesKey("theme_mode")
     private val forceDarkWebKey = booleanPreferencesKey("force_dark_web")
@@ -180,6 +215,7 @@ class SettingsStore(private val context: Context) {
     private val searchEngineKey = stringPreferencesKey("search_engine")
     private val customSearchTitleKey = stringPreferencesKey("custom_search_title")
     private val customSearchUrlKey = stringPreferencesKey("custom_search_url")
+    private val customSearchEnginesKey = stringPreferencesKey("custom_search_engines")
     private val clearOnExitKey = booleanPreferencesKey("clear_on_exit")
     private val clearCookiesOnExitKey = booleanPreferencesKey("clear_cookies_on_exit")
     private val clearCacheOnExitKey = booleanPreferencesKey("clear_cache_on_exit")
@@ -217,6 +253,7 @@ class SettingsStore(private val context: Context) {
             searchEngine = preferences[searchEngineKey] ?: "google",
             customSearchTitle = preferences[customSearchTitleKey] ?: "自定义搜索",
             customSearchUrl = preferences[customSearchUrlKey] ?: "",
+            customSearchEngines = preferences[customSearchEnginesKey] ?: "",
             clearOnExit = preferences[clearOnExitKey] ?: false,
             clearCookiesOnExit = preferences[clearCookiesOnExitKey] ?: true,
             clearCacheOnExit = preferences[clearCacheOnExitKey] ?: true,
@@ -270,6 +307,7 @@ class SettingsStore(private val context: Context) {
         preferences[customSearchTitleKey] = title
         preferences[customSearchUrlKey] = url
     }
+    suspend fun customSearchEngines(value: String) = update { it[customSearchEnginesKey] = value }
     suspend fun downloadDirectory(mode: String, treeUri: String = "", displayPath: String = "") = update { preferences ->
         preferences[downloadDirectoryModeKey] = mode
         preferences[externalDownloadTreeUriKey] = treeUri

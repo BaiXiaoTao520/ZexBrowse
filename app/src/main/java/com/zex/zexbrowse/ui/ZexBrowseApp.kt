@@ -178,7 +178,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
+import com.zex.zexbrowse.data.CUSTOM_SEARCH_PREFIX
+import com.zex.zexbrowse.data.CustomSearchEngine
+import com.zex.zexbrowse.data.decodeCustomSearchEngines
 import com.zex.zexbrowse.data.DownloadEntity
+import com.zex.zexbrowse.data.encodeCustomSearchEngines
 import com.zex.zexbrowse.data.LemwoodMirror
 import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
@@ -208,7 +212,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, CUSTOM_SEARCH, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -532,6 +536,20 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         if (stored.downloadDirectoryMode != "internal" || stored.storageHintShown) return@LaunchedEffect
         kotlinx.coroutines.delay(1200)
         if (startupUpdate == null) showFirstRunStorageHint = true
+    }
+
+    // 旧版只有一个自定义搜索引擎，升级后列表为空会让已有配置从界面上消失。
+    // 这里把那一份一次性搬进列表（仅当列表为空且旧配置完整时），移完再清空旧字段。
+    LaunchedEffect(Unit) {
+        val stored = settingsStore.settings.first()
+        if (stored.customSearchEngines.isNotBlank()) return@LaunchedEffect
+        val url = stored.customSearchUrl.trim()
+        if (url.isEmpty() || !url.contains("{query}")) return@LaunchedEffect
+        val engine = CustomSearchEngine(stored.customSearchTitle.ifBlank { "自定义搜索" }, url)
+        settingsStore.customSearchEngines(encodeCustomSearchEngines(listOf(engine)))
+        // 迁移前正选着这个自定义搜索时，选中值也要跟着换成新标识，否则它会变成选不中的孤儿
+        if (stored.searchEngine == "custom") settingsStore.searchEngine(engine.value)
+        settingsStore.customSearch("", "")
     }
 
     browserViewModel.browserSettings = settings
@@ -1009,16 +1027,7 @@ private fun PageContent(
         Page.SEARCH_ENGINE -> SearchEngineScreen(
             settings = settings,
             onSelect = { scope.launch { settingsStore.searchEngine(it) } },
-            onCustom = { navigate(Page.CUSTOM_SEARCH) },
-            onBack = goBack
-        )
-        Page.CUSTOM_SEARCH -> CustomSearchScreen(
-            settings = settings,
-            onSave = { title, url ->
-                scope.launch { settingsStore.customSearch(title, url); settingsStore.searchEngine("custom") }
-                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                goBack()
-            },
+            setEngines = { scope.launch { settingsStore.customSearchEngines(it) } },
             onBack = goBack
         )
         Page.USER_AGENT -> UserAgentScreen(
@@ -1178,10 +1187,8 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     // 已触发下载的条目 → 其在下载记录中的 id，用于完成后直接安装
     var downloadingApp by remember { mutableStateOf<RecommendedApp?>(null) }
     var downloadId by remember { mutableStateOf<String?>(null) }
-    var downloadDone by remember { mutableStateOf(false) }
     // 网页/网盘类条目：确认二次说明弹窗后再跳转浏览器
     var browserNoticeApp by remember { mutableStateOf<RecommendedApp?>(null) }
-    val downloads by browserViewModel.downloads.collectAsState(initial = emptyList())
 
     Scaffold(
         topBar = {
@@ -1216,7 +1223,6 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                 when {
                     app.isApk -> {
                         downloadingApp = app
-                        downloadDone = false
                         browserViewModel.enqueueDownload(app.downloadUrl, app.fileName, "") { id -> downloadId = id }
                     }
                     // 网页/网盘类链接：先弹二次说明（下载步骤、网盘提取码等），确认后再交给系统打开
@@ -1229,15 +1235,14 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     }
 
     downloadingApp?.let { app ->
-        val record = downloads.firstOrNull { it.id == downloadId }
-        // 后台下载完成后自动切换到「安装」状态
-        if ((record?.status == "completed" || record?.status == "hash_mismatch") && !downloadDone) downloadDone = true
-        RecommendationDownloadDialog(
+        // 下载列表的订阅只发生在弹窗内部：下载过程中进度每秒会更新多次，
+        // 若在页面层订阅，每次更新都会让上面整个推荐卡片列表重组，产生卡顿。
+        RecommendationDownloadDialogHost(
             app = app,
-            record = record,
-            finished = downloadDone,
-            onInstall = { record?.let { openDownload(context, it) } },
-            onDismiss = { downloadingApp = null; downloadId = null; downloadDone = false }
+            downloads = browserViewModel.downloads,
+            downloadId = downloadId,
+            onInstall = { record -> openDownload(context, record) },
+            onDismiss = { downloadingApp = null; downloadId = null }
         )
     }
 
@@ -1497,6 +1502,29 @@ private fun BrowserNoticeDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+/**
+ * 下载进度弹窗的宿主：把下载记录的订阅限定在弹窗作用域内，
+ * 避免进度高频更新波及上层的推荐卡片列表。
+ */
+@Composable
+private fun RecommendationDownloadDialogHost(
+    app: RecommendedApp,
+    downloads: kotlinx.coroutines.flow.Flow<List<DownloadEntity>>,
+    downloadId: String?,
+    onInstall: (DownloadEntity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val records by downloads.collectAsState(initial = emptyList())
+    val record = remember(records, downloadId) { records.firstOrNull { it.id == downloadId } }
+    RecommendationDownloadDialog(
+        app = app,
+        record = record,
+        finished = record?.status == "completed" || record?.status == "hash_mismatch",
+        onInstall = { record?.let(onInstall) },
+        onDismiss = onDismiss
     )
 }
 
@@ -2734,11 +2762,14 @@ private fun ConfirmDialog(title: String, message: String, confirm: () -> Unit, d
     AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { TextButton(onClick = confirm) { Text("确定") } }, dismissButton = { TextButton(onClick = dismiss) { Text("取消") } })
 }
 
-private fun searchEngineLabel(settings: BrowserSettings) = when (settings.searchEngine) {
-    "baidu" -> "百度"
-    "bing" -> "必应"
-    "duckduckgo" -> "DuckDuckGo"
-    "custom" -> settings.customSearchTitle
+private fun searchEngineLabel(settings: BrowserSettings) = when {
+    settings.searchEngine == "baidu" -> "百度"
+    settings.searchEngine == "bing" -> "必应"
+    settings.searchEngine == "duckduckgo" -> "DuckDuckGo"
+    // 自定义搜索引擎的选中值是「custom:<标题>」，显示时去掉前缀只留标题
+    settings.searchEngine.startsWith(CUSTOM_SEARCH_PREFIX) -> settings.searchEngine.removePrefix(CUSTOM_SEARCH_PREFIX)
+    // 升级前配置的单个自定义搜索
+    settings.searchEngine == "custom" -> settings.customSearchTitle
     else -> "Google"
 }
 
@@ -2783,17 +2814,150 @@ private fun DownloadDirectoryScreen(settings: BrowserSettings, onSave: (String, 
 }
 
 @Composable
-private fun SearchEngineScreen(settings: BrowserSettings, onSelect: (String) -> Unit, onCustom: () -> Unit, onBack: () -> Unit) {
+private fun SearchEngineScreen(
+    settings: BrowserSettings,
+    onSelect: (String) -> Unit,
+    setEngines: (String) -> Unit,
+    onBack: () -> Unit
+) {
     val engines = listOf("google" to "Google", "baidu" to "百度", "bing" to "必应", "duckduckgo" to "DuckDuckGo")
-    SelectionScreen("搜索引擎", onBack) {
+    val customEngines = remember(settings.customSearchEngines) { decodeCustomSearchEngines(settings.customSearchEngines) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<CustomSearchEngine?>(null) }
+
+    SelectionScreen("搜索引擎", onBack, actions = {
+        IconButton(onClick = { showAddDialog = true }) { Icon(Icons.Default.Add, "添加搜索引擎") }
+    }) {
         engines.forEach { (value, title) -> item { ChoiceItem(title, settings.searchEngine == value) { onSelect(value) } } }
-        item { ListItem(headlineContent = { Text(settings.customSearchTitle) }, supportingContent = { Text("自定义搜索 URL") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
+        item { SectionHeader("自定义搜索") }
+        if (customEngines.isEmpty()) {
+            item {
+                Text(
+                    "暂无自定义搜索引擎，点击右上角「+」添加。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        } else {
+            // 不用标题做 key：编辑时可能改成与其它条目同名，重复 key 会直接崩溃
+            items(customEngines) { engine ->
+                CustomSearchEngineRow(
+                    engine = engine,
+                    selected = settings.searchEngine == engine.value,
+                    onSelect = { onSelect(engine.value) },
+                    onEdit = { editing = engine },
+                    onDelete = {
+                        setEngines(encodeCustomSearchEngines(customEngines.filter { it.title != engine.title }))
+                        // 删除的是当前选中项时退回 Google，避免选中值指向已不存在的条目
+                        if (settings.searchEngine == engine.value) onSelect("google")
+                    }
+                )
+            }
+        }
+    }
+
+    // 添加与编辑共用一个对话框：editing 为 null 表示新增
+    if (showAddDialog) {
+        CustomSearchEngineDialog(
+            onSubmit = { engine ->
+                if (customEngines.none { it.title == engine.title }) {
+                    setEngines(encodeCustomSearchEngines(customEngines + engine))
+                    onSelect(engine.value)
+                }
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+
+    val editingEngine = editing
+    if (editingEngine != null) {
+        CustomSearchEngineDialog(
+            initial = editingEngine,
+            onSubmit = { engine ->
+                setEngines(encodeCustomSearchEngines(customEngines.map { if (it.title == editingEngine.title) engine else it }))
+                // 改名后同步选中值，否则当前选中的条目会因标题变化而失效
+                if (settings.searchEngine == editingEngine.value) onSelect(engine.value)
+                editing = null
+            },
+            onDismiss = { editing = null }
+        )
     }
 }
 
+/** 自定义搜索引擎行：点击选中，长按弹编辑/删除 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CustomSearchScreen(settings: BrowserSettings, onSave: (String, String) -> Unit, onBack: () -> Unit) {
-    EditorScreen("自定义搜索引擎", settings.customSearchTitle, settings.customSearchUrl, "搜索 URL（使用 {query} 作为关键词）", onSave, onBack)
+private fun CustomSearchEngineRow(
+    engine: CustomSearchEngine,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    // 状态绑定到当前条目：列表按位置复用槽位时不会把上一行的展开状态带给另一行
+    var menuExpanded by remember(engine) { mutableStateOf(false) }
+    Box {
+        ListItem(
+            headlineContent = { Text(engine.title, maxLines = 1) },
+            supportingContent = { Text(engine.url, style = MaterialTheme.typography.bodySmall, maxLines = 2) },
+            leadingContent = { if (selected) Icon(Icons.Default.Check, null) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onSelect, onLongClick = { menuExpanded = true })
+        )
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("编辑") },
+                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                onClick = { menuExpanded = false; onEdit() }
+            )
+            DropdownMenuItem(
+                text = { Text("删除") },
+                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                onClick = { menuExpanded = false; onDelete() }
+            )
+        }
+    }
+}
+
+/** 自定义搜索引擎对话框：initial 为 null 时是「添加」，否则是「编辑」 */
+@Composable
+private fun CustomSearchEngineDialog(
+    initial: CustomSearchEngine? = null,
+    onSubmit: (CustomSearchEngine) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title by remember(initial) { mutableStateOf(initial?.title ?: "") }
+    var url by remember(initial) { mutableStateOf(initial?.url ?: "") }
+    val isEdit = initial != null
+    // URL 必须含 {query} 占位符，否则搜索词无处可去
+    val valid = title.isNotBlank() && url.contains("{query}")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isEdit) "编辑搜索引擎" else "添加搜索引擎") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    url,
+                    { url = it },
+                    label = { Text("搜索 URL") },
+                    supportingText = { Text("使用 {query} 表示关键词") },
+                    isError = url.isNotBlank() && !url.contains("{query}"),
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onSubmit(CustomSearchEngine(title.trim(), url.trim())) }) {
+                Text(if (isEdit) "保存" else "添加")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable
@@ -3347,29 +3511,18 @@ private fun MicPermissionScreen(
 }
 
 @Composable
-private fun SelectionScreen(title: String, onBack: () -> Unit, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding -> LazyColumn(Modifier.fillMaxSize().padding(padding), content = content) }
+private fun SelectionScreen(
+    title: String,
+    onBack: () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {},
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit
+) {
+    Scaffold(topBar = { TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = actions) }) { padding -> LazyColumn(Modifier.fillMaxSize().padding(padding), content = content) }
 }
 
 @Composable
 private fun ChoiceItem(title: String, selected: Boolean, onClick: () -> Unit) {
     ListItem(headlineContent = { Text(title) }, leadingContent = { if (selected) Icon(Icons.Default.Check, null) }, modifier = Modifier.clickable(onClick = onClick))
-}
-
-@Composable
-private fun EditorScreen(title: String, initialTitle: String, initialValue: String, valueLabel: String, onSave: (String, String) -> Unit, onBack: () -> Unit) {
-    var name by rememberSaveable(initialTitle) { mutableStateOf(initialTitle) }
-    var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
-    Scaffold(topBar = { TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { TextButton(enabled = name.isNotBlank() && value.isNotBlank(), onClick = { onSave(name.trim(), value.trim()) }) { Text("保存") } }) }) { padding ->
-        // 多行输入框在小屏下会顶到底部，给整页滚动能力
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("标题") }, singleLine = true)
-            OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth(), label = { Text(valueLabel) }, minLines = 4)
-        }
-    }
 }
 
 @Composable
