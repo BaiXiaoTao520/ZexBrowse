@@ -48,6 +48,31 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     private val database = BrowserDatabase.create(appContext)
     private val client = OkHttpClient()
 
+    /** 任务被主动停下：是暂停还是取消，由数据库里的状态标记决定 */
+    private class PauseOrCancel : Exception()
+
+    /** 界面层点「暂停」时会先把记录置为 paused， Worker 据此区分暂停与取消 */
+    private suspend fun recordIsPauseRequested(id: String): Boolean =
+        database.downloadDao().find(id)?.status == "paused"
+
+    /** 暂停时把真实进度写回记录，否则续传会从 0 重新开始 */
+    private suspend fun savePausedProgress(id: String, downloaded: Long, total: Long) {
+        val progress = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
+        database.downloadDao().updateProgress(id, "paused", progress, downloaded, total)
+        database.downloadDao().pause(id)
+    }
+
+    /** 取消时删掉已写入的半成品文件，避免留下残包 */
+    private suspend fun deletePartialFile(uri: Uri) {
+        runCatching {
+            if (uri.scheme == "file") {
+                File(uri.path.orEmpty()).delete()
+            } else {
+                android.provider.DocumentsContract.deleteDocument(applicationContext.contentResolver, uri)
+            }
+        }
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val id = inputData.getString(KEY_ID) ?: return@withContext Result.failure()
         val url = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
@@ -70,8 +95,17 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         var httpResponse: okhttp3.Response? = null
         var call: okhttp3.Call? = null
         var cancellationHandle: kotlinx.coroutines.DisposableHandle? = null
+        // 声明在 try 之外：暂停时要把它写回记录，否则续传会从 0 重新开始
+        var downloadedBytes = 0L
+        var totalBytes = -1L
         try {
             var total = -1L
+            // 续传起点：上次暂停/中断时已经落盘的字节数。
+            // 只有服务端明确支持 Range 并返回 206 时才会从这里开始，
+            // 否则（返回 200）必须从头写，否则会拼出损坏文件。
+            val record = database.downloadDao().find(id)
+            var startOffset = record?.downloadedBytes?.coerceAtLeast(0L) ?: 0L
+            val ifRange = record?.etag.orEmpty()
             if (localBin != null) {
                 // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完
                 val base = localBin.name.removeSuffix(".bin")
@@ -79,20 +113,30 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 val failFile = File(localBin.parentFile, "$base.fail")
                 val deadline = System.currentTimeMillis() + LOCAL_WAIT_TIMEOUT_MS
                 while (System.currentTimeMillis() < deadline && !doneFile.exists() && !failFile.exists()) {
-                    if (isStopped) throw CancellationException("下载已取消")
+                    if (isStopped) throw PauseOrCancel()
                     Thread.sleep(150)
                 }
                 if (doneFile.exists()) {
                     input = localBin.inputStream()
                     total = localBin.length()
+                    totalBytes = total
+                    // 本地捕获文件是完整文件，不能与历史偏移叠加
+                    startOffset = 0L
                 }
             }
 
             // 无本地捕获文件（普通下载页面直接给 URL、或 capture 失败/超时）：回退到网络下载
             if (input == null) {
-                val c = client.newCall(Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build())
+                val requestBuilder = Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT)
+                if (startOffset > 0L) {
+                    requestBuilder.header("Range", "bytes=$startOffset-")
+                    if (ifRange.isNotBlank()) requestBuilder.header("If-Range", ifRange)
+                }
+                val c = client.newCall(requestBuilder.build())
                 call = c
-                cancellationHandle = kotlin.coroutines.coroutineContext.job.invokeOnCompletion { if (it is CancellationException) c.cancel() }
+                cancellationHandle = kotlin.coroutines.coroutineContext.job.invokeOnCompletion {
+                    if (it is CancellationException) c.cancel()
+                }
                 val response = c.execute()
                 if (!response.isSuccessful) { response.close(); error("下载失败：${response.code}") }
                 // 兜底：若入队时仍未拿到真实文件名，用本次下载的响应头纠正，
@@ -108,16 +152,51 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 val body = response.body ?: run { response.close(); error("下载响应内容为空") }
                 httpResponse = response
                 input = body.byteStream()
-                total = body.contentLength()
+                // 206 = 服务端同意从 startOffset 继续；200 = 只能从头给，必须舍弃历史偏移
+                val partial = response.code == 206
+                if (!partial) startOffset = 0L
+                val length = body.contentLength()
+                total = if (length > 0) length + startOffset else -1L
+                totalBytes = total
+                // 存下 ETag，下次续传时用 If-Range 校验，避免服务器换了文件还硬拼
+                val etag = response.header("ETag").orEmpty()
+                if (etag.isNotBlank() && etag != record?.etag) {
+                    database.downloadDao().resume(id, startOffset, total, etag)
+                }
             }
 
-            var downloaded = 0L
+            var downloaded = startOffset
+            downloadedBytes = startOffset
             var lastProgress = -1
             var lastNotifyAt = 0L
             val digest = MessageDigest.getInstance("SHA-256")
+            val targetFile = File(uri.path.orEmpty())
+            val append = uri.scheme == "file" && startOffset > 0L && targetFile.length() >= startOffset
+            // 续传时已落盘的那部分是文件的前半段，必须先喂给摘要，
+            // 否则最终 SHA-256 只算了后半段，校验必定报不匹配。
+            if (append) {
+                targetFile.inputStream().use { existing ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var remaining = startOffset
+                    while (remaining > 0) {
+                        val read = existing.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                        if (read < 0) break
+                        digest.update(buffer, 0, read)
+                        remaining -= read
+                    }
+                }
+            } else if (uri.scheme == "file" && startOffset > 0L) {
+                // 已有文件比记录短，无法可信追加。此时服务端已按 Range 只发了剩余部分，
+                // 直接从头写会缺掉前半段，只能报错让用户重新下载。
+                error("本地文件不完整，无法继续下载，请重新下载")
+            }
             val output: OutputStream = if (uri.scheme == "file") {
-                FileOutputStream(File(uri.path.orEmpty()))
+                // 续传时追加写入；从头开始时截断旧数据
+                FileOutputStream(targetFile, append)
             } else {
+                // SAF 无法可靠随机写入：若服务端已按 Range 只返回了剩余部分，
+                // 从头写会得到一个缺了前半段的坏文件，所以这种情况下直接报错让用户重新下载。
+                if (startOffset > 0L) error("该保存位置不支持断点续传，请重新下载")
                 applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选位置")
             }
             input!!.use { streamIn ->
@@ -126,13 +205,14 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                     while (true) {
                         if (isStopped) {
                             call?.cancel()
-                            throw CancellationException("下载已取消")
+                            throw PauseOrCancel()
                         }
                         val count = streamIn.read(buffer)
                         if (count < 0) break
                         stream.write(buffer, 0, count)
                         digest.update(buffer, 0, count)
                         downloaded += count
+                        downloadedBytes = downloaded
                         val progress = if (total > 0) ((downloaded * 100) / total).toInt() else 0
                         // 百分比变化或距上次刷新超过 500ms 时刷新：
                         // 只按百分比会让小文件从 0% 直接跳到 100%、通知永远看不到中间进度
@@ -140,24 +220,47 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                         if (progress != lastProgress || now - lastNotifyAt >= 500L) {
                             lastProgress = progress
                             lastNotifyAt = now
-                            database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
-                            setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
-                            setForeground(createForegroundInfo(id, displayName, progress, total <= 0))
+                            // 已经请求暂停时不再把状态写回 downloading，否则界面会闪回「正在下载」
+                            if (!isStopped) {
+                                database.downloadDao().updateProgress(id, "downloading", progress, downloaded, total)
+                                setProgress(Data.Builder().putInt(KEY_PROGRESS, progress).build())
+                                setForeground(createForegroundInfo(id, displayName, progress, total <= 0))
+                            }
                         }
                     }
                 }
             }
             if (isStopped) {
                 call?.cancel()
-                throw CancellationException("下载已取消")
+                throw PauseOrCancel()
             }
             val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
             val status = if (expectedHash.isNotBlank() && !hash.equals(expectedHash, true)) "hash_mismatch" else "completed"
             database.downloadDao().complete(id, status, hash)
             notifyFinished(id, displayName, status == "completed")
             Result.success()
+        } catch (stopped: PauseOrCancel) {
+            // 暂停与取消都表现为任务被停下，区别在于记录状态：
+            // 暂停保留已下载字节数以便续传，取消则连同文件一起清掉。
+            withContext(NonCancellable) {
+                if (recordIsPauseRequested(id)) {
+                    // 先把真实进度写回，否则续传会从 0 开始
+                    savePausedProgress(id, downloadedBytes, totalBytes)
+                } else {
+                    database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+                    deletePartialFile(uri)
+                }
+            }
+            return@withContext Result.success()
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) { database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消") }
+            withContext(NonCancellable) {
+                if (recordIsPauseRequested(id)) {
+                    savePausedProgress(id, downloadedBytes, totalBytes)
+                } else {
+                    database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+                    deletePartialFile(uri)
+                }
+            }
             throw cancelled
         } catch (error: Throwable) {
             val cancelled = isStopped

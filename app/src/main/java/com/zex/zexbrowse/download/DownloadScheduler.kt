@@ -69,25 +69,63 @@ class DownloadScheduler(private val context: Context) {
         return@withContext id
     }
 
-    suspend fun cancel(id: String) {
-        database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+    /**
+     * 暂停：先把状态置为 paused（Worker 据此与「取消」区分），
+     * 再取消任务。Worker 收到停止信号后会保留已下载字节数与文件，供后续续传。
+     */
+    suspend fun pause(id: String) {
+        database.downloadDao().pause(id)
         workManager.cancelAllWorkByTag(id)
     }
 
+    /**
+     * 继续：带已有字节数与 ETag 重新入队，Worker 以 Range 请求从断点接着下。
+     * 无法读取记录时（已被删除）直接返回 false，由界面提示用户重新下载。
+     */
+    suspend fun resume(id: String): Boolean = withContext(Dispatchers.IO) {
+        val record = database.downloadDao().find(id) ?: return@withContext false
+        val target = Uri.parse(record.targetUri)
+        // SAF 无法可靠随机写入，只能从头重下；此时不能把旧字节数当作续传起点
+        val offset = if (target.scheme == "file") record.downloadedBytes.coerceAtLeast(0L) else 0L
+        database.downloadDao().resume(id, offset, record.totalBytes, record.etag)
+        val input = Data.Builder()
+            .putString(BrowserDownloadWorker.KEY_ID, id)
+            .putString(BrowserDownloadWorker.KEY_URL, record.sourceUrl)
+            .putString(BrowserDownloadWorker.KEY_URI, record.targetUri)
+            .putString(BrowserDownloadWorker.KEY_FILE_NAME, record.fileName)
+            .putString(BrowserDownloadWorker.KEY_EXPECTED_HASH, record.expectedSha256)
+            .build()
+        workManager.enqueue(OneTimeWorkRequestBuilder<BrowserDownloadWorker>().setInputData(input).addTag(id).build())
+        true
+    }
+
+    /**
+     * 取消：先标记取消，再取消任务并删除已写入的数据。
+     * Worker 收到停止信号时若看到状态不是 paused，会按取消处理。
+     */
+    suspend fun cancel(id: String) {
+        val target = runCatching { database.downloadDao().find(id)?.targetUri?.let(Uri::parse) }.getOrNull()
+        database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+        workManager.cancelAllWorkByTag(id)
+        if (target != null) withContext(Dispatchers.IO) { deleteTarget(target) }
+    }
+
     suspend fun delete(id: String, uri: String, deleteFile: Boolean) {
-        if (deleteFile) runCatching {
-            val target = Uri.parse(uri)
-            if (target.scheme == "file") {
-                File(target.path.orEmpty()).delete()
-            } else {
-                try {
-                    DocumentsContract.deleteDocument(context.contentResolver, target)
-                } catch (_: Throwable) {
-                    context.contentResolver.delete(target, null, null)
-                }
+        if (deleteFile) withContext(Dispatchers.IO) { deleteTarget(Uri.parse(uri)) }
+        database.downloadDao().delete(id)
+    }
+
+    /** 删除已写入的目标文件（内部 file:// 与外部 SAF 均支持） */
+    private fun deleteTarget(target: Uri) = runCatching {
+        if (target.scheme == "file") {
+            File(target.path.orEmpty()).delete()
+        } else {
+            try {
+                DocumentsContract.deleteDocument(context.contentResolver, target)
+            } catch (_: Throwable) {
+                context.contentResolver.delete(target, null, null)
             }
         }
-        database.downloadDao().delete(id)
     }
 
     private fun createTargetUri(fileName: String, useExternalDirectory: Boolean, externalTreeUri: String): Uri {
