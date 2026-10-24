@@ -78,6 +78,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -1242,6 +1244,10 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
             downloads = browserViewModel.downloads,
             downloadId = downloadId,
             onInstall = { record -> openDownload(context, record) },
+            onCancelDownload = {
+                // 按地址定位任务：记录 Id 可能还没回填，但地址一定是对的
+                browserViewModel.cancelAndRemoveDownloadByUrl(app.downloadUrl)
+            },
             onDismiss = { downloadingApp = null; downloadId = null }
         )
     }
@@ -1515,6 +1521,7 @@ private fun RecommendationDownloadDialogHost(
     downloads: kotlinx.coroutines.flow.Flow<List<DownloadEntity>>,
     downloadId: String?,
     onInstall: (DownloadEntity) -> Unit,
+    onCancelDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val records by downloads.collectAsState(initial = emptyList())
@@ -1524,7 +1531,10 @@ private fun RecommendationDownloadDialogHost(
         record = record,
         finished = record?.status == "completed" || record?.status == "hash_mismatch",
         onInstall = { record?.let(onInstall) },
-        onDismiss = onDismiss
+        onDismiss = onDismiss,
+        // 取消：停任务并删掉记录与已写入文件，避免半成品残留。
+        // 不依赖 record 是否已回填——记录尚未就绪时按 URL 定位任务。
+        onCancel = { onCancelDownload(); onDismiss() }
     )
 }
 
@@ -1539,7 +1549,8 @@ private fun RecommendationDownloadDialog(
     record: DownloadEntity?,
     finished: Boolean,
     onInstall: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onCancel: () -> Unit
 ) {
     val failed = record?.status == "failed" || record?.status == "cancelled"
     AlertDialog(
@@ -1573,7 +1584,14 @@ private fun RecommendationDownloadDialog(
                 TextButton(onClick = onInstall) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("立即安装") }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(if (finished) "关闭" else "后台下载") } }
+        dismissButton = {
+            Row {
+                if (!finished) {
+                    TextButton(onClick = onCancel) { Text("取消下载") }
+                }
+                TextButton(onClick = onDismiss) { Text(if (finished) "关闭" else "后台下载") }
+            }
+        }
     )
 }
 
@@ -2408,7 +2426,7 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { TextButton(onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() }) { Text(if (selectedIds.size == downloads.size) "取消全选" else "全选") } }
-                items(downloads, key = { it.id }) { item -> DownloadRecordCard(item, item.id in selectedIds, { selectedIds = selectedIds.toggle(item.id) }, { viewModel.cancelDownload(item.id) }, { openDownload(context, item) }, { showDeleteConfirmation = true; selectedIds = setOf(item.id) }) }
+                items(downloads, key = { it.id }) { item -> DownloadRecordCard(item, item.id in selectedIds, { selectedIds = selectedIds.toggle(item.id) }, { viewModel.cancelDownload(item.id) }, { viewModel.pauseDownload(item.id) }, { viewModel.resumeDownload(item.id) }, { openDownload(context, item) }, { showDeleteConfirmation = true; selectedIds = setOf(item.id) }) }
             }
         }
     }
@@ -2492,8 +2510,9 @@ private fun copyDownloadLink(context: android.content.Context, url: String) {
 }
 
 @Composable
-private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit) {
     val running = item.status == "queued" || item.status == "downloading"
+    val paused = item.status == "paused"
     var menuExpanded by remember { mutableStateOf(false) }
     ElevatedCard(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
@@ -2501,10 +2520,17 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
             Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(item.fileName, style = MaterialTheme.typography.titleMedium)
                 Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
-                if (running) {
+                if (running || paused) {
                     WavyProgressBar(progress = item.progress / 100f, modifier = Modifier.fillMaxWidth())
                     Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
-                    TextButton(onClick = onCancel) { Text("取消下载") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (running) {
+                            TextButton(onClick = onPause) { Icon(Icons.Default.Pause, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("暂停") }
+                        } else {
+                            TextButton(onClick = onResume) { Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("继续") }
+                        }
+                        TextButton(onClick = onCancel) { Text("取消下载") }
+                    }
                 } else if (item.status == "completed" || item.status == "hash_mismatch") {
                     IconButton(onClick = onOpen) { Icon(Icons.Default.OpenInNew, "打开文件") }
                 }
@@ -2522,6 +2548,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
 private fun downloadStatus(item: DownloadEntity): String = when (item.status) {
     "queued" -> "等待下载"
     "downloading" -> "正在下载"
+    "paused" -> "已暂停"
     "completed" -> "下载完成"
     "hash_mismatch" -> "哈希不匹配（文件可能损坏或被篡改）"
     "cancelled" -> "已取消"
@@ -3846,7 +3873,7 @@ private fun LemwoodChannelCard(onClick: () -> Unit) {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("镜像站高速通道", style = MaterialTheme.typography.titleSmall)
+                Text("柠泽镜像站通道", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "需在网页完成验证后下载",
                     style = MaterialTheme.typography.bodySmall,

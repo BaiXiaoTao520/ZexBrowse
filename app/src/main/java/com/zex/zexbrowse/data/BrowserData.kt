@@ -56,6 +56,8 @@ data class DownloadEntity(
     val sha256: String = "",
     val expectedSha256: String = "",
     val errorMessage: String = "",
+    /** 服务器返回的 ETag：续传时用 If-Range 校验文件是否还是同一份 */
+    val etag: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -76,6 +78,22 @@ interface DownloadDao {
     @Query("UPDATE downloads SET status = :status, errorMessage = :message WHERE id = :id")
     suspend fun finishWithMessage(id: String, status: String, message: String)
 
+    @Query("SELECT * FROM downloads WHERE id = :id")
+    suspend fun find(id: String): DownloadEntity?
+
+    /** 按源地址取最新一条记录：推荐页刚入队、Id 尚未回填时靠它定位任务 */
+    @Query("SELECT * FROM downloads WHERE sourceUrl = :url ORDER BY createdAt DESC LIMIT 1")
+    suspend fun findBySourceUrl(url: String): DownloadEntity?
+
+    /** 暂停：保留已下载字节数，状态标为 paused，界面据此显示「继续」 */
+    @Query("UPDATE downloads SET status = 'paused', errorMessage = '' WHERE id = :id")
+    suspend fun pause(id: String)
+
+    /** 续传前把已落盘的偏移与 ETag 写回，状态恢复为等待下载 */
+    @Query("UPDATE downloads SET status = 'queued', downloadedBytes = :downloaded, totalBytes = :total, etag = :etag, errorMessage = '' WHERE id = :id")
+    suspend fun resume(id: String, downloaded: Long, total: Long, etag: String)
+
+    /** 续传/改名后同步服务器真实文件名 */
     @Query("UPDATE downloads SET fileName = :fileName WHERE id = :id")
     suspend fun rename(id: String, fileName: String)
 
@@ -98,7 +116,7 @@ interface BrowserDao {
     suspend fun clearHistory()
 }
 
-@Database(entities = [HistoryEntity::class, BookmarkEntity::class, DownloadEntity::class], version = 2, exportSchema = false)
+@Database(entities = [HistoryEntity::class, BookmarkEntity::class, DownloadEntity::class], version = 3, exportSchema = false)
 abstract class BrowserDatabase : RoomDatabase() {
     abstract fun dao(): BrowserDao
     abstract fun downloadDao(): DownloadDao
@@ -110,11 +128,19 @@ abstract class BrowserDatabase : RoomDatabase() {
             }
         }
 
+        // 断点续传需要记录 ETag：续传时用 If-Range 校验，
+        // 服务器换过文件就必须从头下，否则会拼出损坏文件。
+        private val migration2To3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE downloads ADD COLUMN etag TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile private var instance: BrowserDatabase? = null
 
         fun create(context: Context): BrowserDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, BrowserDatabase::class.java, "zexbrowse.db")
-                .addMigrations(migration1To2)
+                .addMigrations(migration1To2, migration2To3)
                 .build()
                 .also { instance = it }
         }

@@ -157,6 +157,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 回调时序不确定，下载可能先触发失败回调。这里先延迟一小段时间再确认失败，
     // 若期间收到下载信号则取消，避免把「下载」误判成「页面加载失败」而弹出错误页。
     private val pendingFailures = HashMap<String, Runnable>()
+    // 已主动拒绝的外部应用导航：对应地址不再当成「加载失败」弹错误页。
+    // 拒绝一个 sogou:// 之类的 scheme 时 Gecko 会回 onLoadError（UNKNOWN_PROTOCOL），
+    // 若照常处理，用户会从正常的结果页被踢到完整错误页。
+    private val blockedExternalUris = HashMap<String, MutableSet<String>>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     // 下载响应体捕获：Gecko 在 onExternalResponse 时已把响应体拉了下来，body 流只在回调期间有效，
     // 必须当场读走存成临时文件。之后下载直接从本地文件落盘，不再用 URL 第二次请求，
@@ -309,7 +313,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     val tab = _tabs.value.firstOrNull { it.id == id }
                     // 已收到下载信号（onExternalResponse）时忽略此次 abort，不弹错误页
                     val isDownloadAbort = pendingDownloads[id] != null
-                    if (!isDownloadAbort) scheduleFailure(id, tab?.url, 0, 0)
+                    // 当前标签停留在被拒绝的外部应用链接上时同样不算失败：
+                    // 搜狗等搜索页会自动尝试跳 App，此时当前页仍是正常的结果页，不能换成错误页
+                    val currentUrl = tab?.url.orEmpty()
+                    val isBlockedExternal = currentUrl.isNotBlank() && blockedExternalUris[id]?.contains(currentUrl) == true
+                    if (!isDownloadAbort && !isBlockedExternal) scheduleFailure(id, tab?.url, 0, 0)
                 }
             }
             override fun onProgressChange(session: GeckoSession, progress: Int) = update(id) { it.copy(progress = progress) }
@@ -415,7 +423,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 这并非真正的加载失败，不能弹错误页。
                 val pendingDownload = pendingDownloads[id]
                 val isDownloadAbort = pendingDownload != null && (uri == null || isSameDownloadTarget(uri, pendingDownload))
-                if (!isDownloadAbort) scheduleFailure(id, uri, error.code, error.category)
+                // 被我们主动拒绕的外部应用导航同样不是失败，否则当前页面会被错误页覆盖
+                val isBlockedExternal = uri != null && blockedExternalUris[id]?.contains(uri) == true
+                if (!isDownloadAbort && !isBlockedExternal) scheduleFailure(id, uri, error.code, error.category)
                 return null
             }
             override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
@@ -426,7 +436,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 风险站点拦截：只拦用户主动发起的导航与顶层页面，不拦资源加载。
                 // 不用 isDirectNavigation：它表示「由应用调 load 发起」，语义不同。
                 val userInitiated = request.hasUserGesture || request.isDirectNavigation
-                if (userInitiated && shouldBlockRisky(uri)) {
+                if (shouldBlockRisky(uri) && userInitiated) {
                     val assessment = SecurityScanner.assessUrl(uri)
                     val handler = riskySiteHandler
                     if (handler != null) {
@@ -439,7 +449,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
-                if (uri.isExternalAppUri()) { requestExternalApp(uri); return GeckoResult.fromValue(AllowOrDeny.DENY) }
+                // 外部应用 scheme：只有用户真的点了链接才值得询问。
+                // 搜索站的结果页常带自动跳转的推广链接（如 sogou://），
+                // 若连它们也弹窗，用户搜索一会儿就会被莫名其妙地问「是否打开外部应用」。
+                if (uri.isExternalAppUri()) {
+                    // 无论是否询问，都要登记：拒绝后 Gecko 会回 onLoadError，
+                    // 没登记就会被当成加载失败，把用户从当前页面踢到错误页。
+                    markBlockedExternal(id, uri)
+                    if (userInitiated) requestExternalApp(uri)
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
@@ -448,7 +467,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) = update(id) { it.copy(canGoBack = canGoBack) }
             override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) = update(id) { it.copy(canGoForward = canGoForward) }
             override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
-                if (uri.isExternalAppUri()) { requestExternalApp(uri); return null }
+                if (uri.isExternalAppUri()) { markBlockedExternal(id, uri); return null }
                 return GeckoResult.fromValue(createNewSessionForUri(uri, incognito))
             }
         })
@@ -460,6 +479,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         clearPending(id)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
+        blockedExternalUris.remove(id)
         runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
@@ -592,6 +612,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     fun cancelDownload(id: String) { viewModelScope.launch { downloadScheduler.cancel(id) } }
+    /**
+     * 取消推荐页的下载：按下载地址定位任务并清掉半成品与记录。
+     * 不用记录 Id——入队是异步的，弹窗刚打开时 Id 可能还没回填。
+     */
+    fun cancelAndRemoveDownloadByUrl(url: String) {
+        viewModelScope.launch {
+            val record = database.downloadDao().findBySourceUrl(url) ?: return@launch
+            downloadScheduler.cancel(record.id)
+            downloadScheduler.delete(record.id, record.targetUri, deleteFile = true)
+        }
+    }
+    fun pauseDownload(id: String) { viewModelScope.launch { downloadScheduler.pause(id) } }
+    /** 继续用暂停的下载；记录已不存在时提示重新下载 */
+    fun resumeDownload(id: String) {
+        viewModelScope.launch {
+            if (!downloadScheduler.resume(id)) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), "下载记录已丢失，请重新下载", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
     /** 该地址是否已有本地捕获的响应体（用于下载弹框跳过可能二次消费令牌的网络名字探测） */
     fun hasCapturedBody(url: String): Boolean = capturedBodies.containsKey(url)
     /** 判断 URL 是否属于柠枺镜像站（仅它的下载需要就地捕获响应体） */
@@ -649,6 +691,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 跳转外部应用仍先由界面层弹窗询问；策略为「始终拒绝」时界面层直接忽略，不再询问。
         // 策略为「始终允许」时界面层不弹窗直接跳转（实现见界面层 externalAppHandler）。
         externalAppHandler?.invoke(uri)
+    }
+
+    /** 记录一个被拒绝的外部应用导航，供 onLoadError 识别「这不是真的加载失败」 */
+    private fun markBlockedExternal(id: String, uri: String) {
+        val set = blockedExternalUris.getOrPut(id) { mutableSetOf() }
+        // 搜索页会不断冒新的推广链接，限制条数避免无上限增长
+        if (set.size > 64) set.clear()
+        set.add(uri)
     }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
     /**
