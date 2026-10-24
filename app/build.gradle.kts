@@ -153,7 +153,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3:1.5.0-beta01")
+    // material3 固定 1.5.0-beta02：1.4.x 稳定版没有 ContainedLoadingIndicator（带容器背景的形变加载指示器），
+    // 它在 1.5.0-beta02 才加入。该版本属于 beta，但 API 已定稿，且项目原本就已在用 1.5.0-beta01。
+    implementation("androidx.compose.material3:material3:1.5.0-beta02")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.datastore:datastore-preferences:1.1.2")
     implementation("androidx.room:room-runtime:2.7.0")
