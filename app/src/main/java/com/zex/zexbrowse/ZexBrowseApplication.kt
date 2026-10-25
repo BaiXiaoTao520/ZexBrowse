@@ -13,6 +13,12 @@ import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtensionController
 
 class ZexBrowseApplication : Application() {
+    // 崩溃日志捕获必须尽早安装：可覆盖后续 Activity/组合期抛出的未捕获异常
+    override fun onCreate() {
+        super.onCreate()
+        CrashReporter.install(this)
+    }
+
     val runtime: GeckoRuntime by lazy { GeckoRuntime.create(this, GeckoRuntimeSettings.Builder().build()) }
 
     /**
