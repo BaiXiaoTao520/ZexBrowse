@@ -665,23 +665,34 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     /**
      * 判断这次外部响应是不是真的文件下载。
      *
-     * Gecko 把「服务器要求存盘」的响应（带 Attachment、未知二进制类型等）交给 onExternalResponse，
-     * 但柠泽的 PoW 验证页也会走到这里。直接用文本类型判断不够：
-     * 1. 响应头带 Content-Disposition 且里面有 filename → 真实文件；
-     * 2. Content-Type 为 text/html / application/xhtml+xml → 是网页，不弹下载框；
-     * 3. 地址落在柠泽下载直链上（/download/...apk）→ 真实文件。
+     * Gecko 把「服务器要求存盘」的响应交给 onExternalResponse，但柠泽的 PoW 验证页
+     * 也会走到这里，而且验证页的响应往往**也带 Content-Disposition**，
+     * 之前只看「有没有文件名」就放行，于是出现一个名为 verify、大小对不上的假下载。
      *
-     * 其余情况保持原有行为（当作下载），避免影响普通站点的下载。
+     * 因此改为按下面顺序判定：
+     * 1. MIME 是网页 → 不是文件（即使带了 filename 也不弹下载框）；
+     * 2. 文件名是 verify / 无扩展名等无意义名字 → 不是真文件；
+     * 3. 有合法扩展名或落在柠泽 /download/ 直链上 → 真文件；
+     * 4. 其余保持原有行为（当作下载）。
      */
     private fun isRealFileDownload(response: WebResponse): Boolean {
         val contentType = response.headers["Content-Type"].orEmpty().lowercase()
-        val isHtml = contentType.startsWith("text/html") || contentType.startsWith("application/xhtml")
+        // 验证页是 HTML：优先判掉，不能因为带了 filename 就当成下载
+        if (contentType.startsWith("text/html") || contentType.startsWith("application/xhtml")) {
+            return false
+        }
         val disposition = response.headers["Content-Disposition"].orEmpty()
-        val hasFileName = DownloadFileName.fromContentDisposition(disposition) != null
-        // 明确带了文件名附件头：以它为准，即使 MIME 被写成 text/*
-        if (hasFileName) return true
-        // 验证页等 HTML 响应：留在网页内，不弹下载框
-        if (isHtml) return false
+        val fileName = DownloadFileName.fromContentDisposition(disposition)
+        if (fileName != null) {
+            // 文件名本身必须像个真实文件（带扩展名、不是 verify 之类）
+            val lower = fileName.lowercase()
+            val looksReal = lower.contains('.') &&
+                !lower.startsWith("verify") &&
+                lower.substringAfterLast('.') !in setOf("html", "htm", "php", "aspx", "jsp")
+            if (looksReal) return true
+            // 带的是 verify.html 这类：明显是验证页，不能下载
+            return false
+        }
         // 柠泽下载直链：即使没带 Content-Disposition 也应当是真文件
         if (isLemwoodUrl(response.uri) && response.uri.contains("/download/")) return true
         // 其余保持原有行为（当作下载），不影响普通站点
@@ -769,12 +780,26 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 避免硬编码导致「内核已升级但 UA 仍声称旧版本」的不一致——
      * 那会让网站按旧内核能力降级、也让版本检测工具显示错误信息。
      */
+    /**
+     * 内核版本号（如 "158.0"），用于生成 UA。
+     *
+     * 优先用构建配置的版本：GeckoSession.getDefaultUserAgent() 在部分渠道/首次初始化时
+     * 会返回一个与真实内核不同的旧版本号（实测会停在 150），
+     * 导致版本检测网站报「不是最新版」。
+     * 构建配置与依赖坐标同源（app/build.gradle.kts 的 geckoViewVersion），
+     * 所以它一定等于实际打包进 APK 的内核版本，比运行时自报更可靠。
+     */
     private val engineVersion: String by lazy {
-        val ua = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
-        // 默认 UA 形如：Mozilla/5.0 (Android 14; Mobile; rv:158.0) Gecko/158.0 Firefox/158.0
-        Regex("Firefox/([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
-            ?: Regex("rv:([0-9.]+)").find(ua)?.groupValues?.getOrNull(1)
-            ?: FALLBACK_ENGINE_VERSION
+        val configured = FALLBACK_ENGINE_VERSION.substringBefore('.').takeIf { it.toIntOrNull() != null }
+        val runtime = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
+        val runtimeMajor = Regex("Firefox/([0-9]+)").find(runtime)?.groupValues?.getOrNull(1)
+            ?: Regex("rv:([0-9]+)").find(runtime)?.groupValues?.getOrNull(1)
+        // 取两者中较大的主版本号：避免内核已升级但 UA 仍报旧版
+        val major = listOfNotNull(configured, runtimeMajor)
+            .mapNotNull { it.toIntOrNull() }
+            .maxOrNull()
+            ?: return@lazy FALLBACK_ENGINE_VERSION
+        "$major.0"
     }
 
     private fun userAgentOverride(settings: BrowserSettings): String? {
@@ -790,7 +815,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             "desktop_chrome" -> "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
             "desktop_firefox" -> "Mozilla/5.0 (X11; Linux x86_64; rv:$engineVersion) Gecko/20100101 Firefox/$engineVersion"
             "custom" -> settings.customUserAgent.trim().takeIf(String::isNotEmpty)
-            else -> null
+            // 默认模式也显式声明 Firefox 版本号：内核自报的 UA 可能停在旧版本（实测 150），
+            // 会让版本检测网站误判「不是最新版」。这里直接用构建配置的内核版本。
+            else -> "Mozilla/5.0 (Android 14; Mobile; rv:$engineVersion) Gecko/20100101 Firefox/$engineVersion"
         }
         return userAgent
     }

@@ -270,7 +270,8 @@ private fun PageErrorView(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val reasons = remember(errorCode, errorCategory) { describeLoadFailure(errorCode, errorCategory) }
+    val context = LocalContext.current
+    val reasons = remember(errorCode, errorCategory) { describeLoadFailure(context, errorCode, errorCategory) }
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 40.dp),
@@ -316,53 +317,53 @@ private fun PageErrorView(
  * 不用 when 分支直接比对错误码：这些常量来自 Java 类的静态字段，
  * 用 if/else 链更直白，也避开了“分支必须为编译期常量”的限制。
  */
-private fun describeLoadFailure(errorCode: Int, errorCategory: Int): List<String> {
+private fun describeLoadFailure(context: Context, errorCode: Int, errorCategory: Int): List<String> {
     val specific = when {
-        errorCode == WebRequestError.ERROR_UNKNOWN_HOST -> "域名解析失败，可能是网址拼写有误或该网站已停止服务"
-        errorCode == WebRequestError.ERROR_OFFLINE -> "设备当前未连接到网络"
-        errorCode == WebRequestError.ERROR_NET_TIMEOUT -> "连接超时，服务器长时间没有响应"
-        errorCode == WebRequestError.ERROR_CONNECTION_REFUSED -> "服务器拒绝了连接请求"
-        errorCode == WebRequestError.ERROR_NET_INTERRUPT -> "网络连接中断，传输被意外切断"
-        errorCode == WebRequestError.ERROR_NET_RESET -> "连接被服务器重置"
-        errorCode == WebRequestError.ERROR_REDIRECT_LOOP -> "页面发生了过多的重定向，可能陷入了循环"
-        errorCode == WebRequestError.ERROR_PORT_BLOCKED -> "目标端口被拦截"
+        errorCode == WebRequestError.ERROR_UNKNOWN_HOST -> context.getString(R.string.err_unknown_host)
+        errorCode == WebRequestError.ERROR_OFFLINE -> context.getString(R.string.err_offline)
+        errorCode == WebRequestError.ERROR_NET_TIMEOUT -> context.getString(R.string.err_timeout)
+        errorCode == WebRequestError.ERROR_CONNECTION_REFUSED -> context.getString(R.string.err_refused)
+        errorCode == WebRequestError.ERROR_NET_INTERRUPT -> context.getString(R.string.err_interrupted)
+        errorCode == WebRequestError.ERROR_NET_RESET -> context.getString(R.string.err_reset)
+        errorCode == WebRequestError.ERROR_REDIRECT_LOOP -> context.getString(R.string.err_redirect_loop)
+        errorCode == WebRequestError.ERROR_PORT_BLOCKED -> context.getString(R.string.err_port_blocked)
         errorCode == WebRequestError.ERROR_SECURITY_SSL ||
             errorCode == WebRequestError.ERROR_SECURITY_BAD_CERT ||
-            errorCode == WebRequestError.ERROR_BAD_HSTS_CERT -> "该网站的安全证书存在问题，连接不被信任"
-        errorCode == WebRequestError.ERROR_HTTPS_ONLY -> "该网站要求使用 HTTPS 访问"
-        errorCode == WebRequestError.ERROR_UNKNOWN_PROTOCOL -> "无法识别的链接协议"
-        errorCode == WebRequestError.ERROR_MALFORMED_URI -> "网址格式不正确"
-        errorCode == WebRequestError.ERROR_FILE_NOT_FOUND -> "要访问的文件不存在"
-        errorCode == WebRequestError.ERROR_FILE_ACCESS_DENIED -> "没有权限访问该文件"
-        errorCode == WebRequestError.ERROR_CORRUPTED_CONTENT -> "服务器返回的内容已损坏"
-        errorCode == WebRequestError.ERROR_CONTENT_CRASHED -> "页面渲染进程异常退出"
-        errorCode == WebRequestError.ERROR_UNSAFE_CONTENT_TYPE -> "返回的内容类型不被允许"
-        errorCode == WebRequestError.ERROR_INVALID_CONTENT_ENCODING -> "返回的内容编码无法解析"
-        errorCode == WebRequestError.ERROR_PROXY_CONNECTION_REFUSED -> "代理服务器拒绝了连接"
-        errorCode == WebRequestError.ERROR_UNKNOWN_PROXY_HOST -> "无法解析代理服务器地址"
-        errorCode == WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED -> "本地网络访问权限被拒绝"
-        errorCode == WebRequestError.ERROR_SAFEBROWSING_MALWARE_URI -> "该网址被标记为恶意网站，已阻止访问"
-        errorCode == WebRequestError.ERROR_SAFEBROWSING_UNWANTED_URI -> "该网址被标记为不受欢迎的网站，已阻止访问"
-        errorCode == WebRequestError.ERROR_SAFEBROWSING_HARMFUL_URI -> "该网址被标记为有害网站，已阻止访问"
-        errorCode == WebRequestError.ERROR_SAFEBROWSING_PHISHING_URI -> "该网址被判定为钓鱼网站，已阻止访问"
+            errorCode == WebRequestError.ERROR_BAD_HSTS_CERT -> context.getString(R.string.err_cert)
+        errorCode == WebRequestError.ERROR_HTTPS_ONLY -> context.getString(R.string.err_https_required)
+        errorCode == WebRequestError.ERROR_UNKNOWN_PROTOCOL -> context.getString(R.string.err_bad_protocol)
+        errorCode == WebRequestError.ERROR_MALFORMED_URI -> context.getString(R.string.err_bad_url)
+        errorCode == WebRequestError.ERROR_FILE_NOT_FOUND -> context.getString(R.string.err_file_missing)
+        errorCode == WebRequestError.ERROR_FILE_ACCESS_DENIED -> context.getString(R.string.err_file_denied)
+        errorCode == WebRequestError.ERROR_CORRUPTED_CONTENT -> context.getString(R.string.err_corrupt)
+        errorCode == WebRequestError.ERROR_CONTENT_CRASHED -> context.getString(R.string.err_crashed)
+        errorCode == WebRequestError.ERROR_UNSAFE_CONTENT_TYPE -> context.getString(R.string.err_bad_type)
+        errorCode == WebRequestError.ERROR_INVALID_CONTENT_ENCODING -> context.getString(R.string.err_bad_encoding)
+        errorCode == WebRequestError.ERROR_PROXY_CONNECTION_REFUSED -> context.getString(R.string.err_proxy_refused)
+        errorCode == WebRequestError.ERROR_UNKNOWN_PROXY_HOST -> context.getString(R.string.err_proxy_host)
+        errorCode == WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED -> context.getString(R.string.err_local_denied)
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_MALWARE_URI -> context.getString(R.string.err_malware)
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_UNWANTED_URI -> context.getString(R.string.err_unwanted)
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_HARMFUL_URI -> context.getString(R.string.err_harmful)
+        errorCode == WebRequestError.ERROR_SAFEBROWSING_PHISHING_URI -> context.getString(R.string.err_phishing)
         else -> null
     }
 
     val byCategory = when {
-        errorCategory == WebRequestError.ERROR_CATEGORY_NETWORK -> "网络连接异常"
-        errorCategory == WebRequestError.ERROR_CATEGORY_SECURITY -> "安全策略阻止了本次连接"
-        errorCategory == WebRequestError.ERROR_CATEGORY_CONTENT -> "页面内容无法正常加载"
-        errorCategory == WebRequestError.ERROR_CATEGORY_URI -> "网址无法被识别"
-        errorCategory == WebRequestError.ERROR_CATEGORY_PROXY -> "代理设置导致连接失败"
-        errorCategory == WebRequestError.ERROR_CATEGORY_SAFEBROWSING -> "网站安全检测阻止了本次访问"
+        errorCategory == WebRequestError.ERROR_CATEGORY_NETWORK -> context.getString(R.string.cat_network)
+        errorCategory == WebRequestError.ERROR_CATEGORY_SECURITY -> context.getString(R.string.cat_security)
+        errorCategory == WebRequestError.ERROR_CATEGORY_CONTENT -> context.getString(R.string.cat_content)
+        errorCategory == WebRequestError.ERROR_CATEGORY_URI -> context.getString(R.string.cat_uri)
+        errorCategory == WebRequestError.ERROR_CATEGORY_PROXY -> context.getString(R.string.cat_proxy)
+        errorCategory == WebRequestError.ERROR_CATEGORY_SAFEBROWSING -> context.getString(R.string.cat_safebrowsing)
         else -> null
     }
 
     return buildList {
         specific?.let { add(it) }
         byCategory?.takeIf { it != specific }?.let { add(it) }
-        add("请检查网络连接后重试")
-        add("如果其它网站可以正常打开，请确认该网站本身是否正常运行")
+        add(context.getString(R.string.err_tip_retry))
+        add(context.getString(R.string.err_tip_site))
     }
 }
 
@@ -424,7 +425,7 @@ private fun openDefaultAppSettings(context: Context) {
     val launched = runCatching {
         context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }.isSuccess
-    if (!launched) Toast.makeText(context, "请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器", Toast.LENGTH_LONG).show()
+    if (!launched) Toast.makeText(context, context.getString(R.string.toast_default_browser_hint), Toast.LENGTH_LONG).show()
 }
 
 @Composable
@@ -1380,14 +1381,14 @@ private fun showBrowserChooser(context: Context, view: Intent) {
 
     val handlers = installedBrowsers(context, view)
     if (handlers.isEmpty()) {
-        Toast.makeText(context, "未找到浏览器，请先安装 Chrome、Edge 等浏览器", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.toast_no_browser), Toast.LENGTH_LONG).show()
         return
     }
 
-    val chooser = Intent.createChooser(view, "选择浏览器").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    val chooser = Intent.createChooser(view, context.getString(R.string.chooser_browser)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     if (excluded.isNotEmpty()) chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, excluded)
     runCatching { context.startActivity(chooser) }
-        .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+        .onFailure { Toast.makeText(context, context.getString(R.string.toast_no_app), Toast.LENGTH_SHORT).show() }
 }
 
 /**
@@ -1494,7 +1495,7 @@ private fun RecommendationInfoDialog(
             TextButton(onClick = onDownload) {
                 Icon(if (app.isApk) Icons.Default.Download else Icons.Default.Language, null)
                 Spacer(Modifier.width(6.dp))
-                Text(if (app.isApk) "下载" else "浏览器打开")
+                Text(if (app.isApk) stringResource(R.string.dl_title) else stringResource(R.string.dl_open_browser))
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
@@ -1585,7 +1586,7 @@ private fun RecommendationDownloadDialog(
                         Text("SHA-256：$hash", style = MaterialTheme.typography.bodySmall)
                     }
                 } else if (failed) {
-                    Text(record?.errorMessage?.ifBlank { "下载失败" } ?: "下载失败")
+                    Text(record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed))
                 } else {
                     val progress = record?.progress ?: 0
                     if (progress > 0) {
@@ -1610,7 +1611,7 @@ private fun RecommendationDownloadDialog(
                 if (!finished) {
                     TextButton(onClick = onCancel) { Text(stringResource(R.string.s078)) }
                 }
-                TextButton(onClick = onDismiss) { Text(if (finished) "关闭" else "后台下载") }
+                TextButton(onClick = onDismiss) { Text(if (finished) stringResource(R.string.btn_close) else stringResource(R.string.btn_bg_download)) }
             }
         }
     )
@@ -1670,7 +1671,7 @@ private fun ShieldBadge(
         SecurityScanner.RiskLevel.DANGEROUS -> Icons.Rounded.GppBad to MaterialTheme.colorScheme.error
     }
     val label = when (assessment.level) {
-        SecurityScanner.RiskLevel.SAFE -> "连接安全"
+        SecurityScanner.RiskLevel.SAFE -> context.getString(R.string.risk_safe)
         SecurityScanner.RiskLevel.INSECURE -> assessment.reason.ifBlank { "连接不安全" }
         SecurityScanner.RiskLevel.SUSPICIOUS -> assessment.reason.ifBlank { "可疑网站" }
         SecurityScanner.RiskLevel.DANGEROUS -> assessment.reason.ifBlank { "危险网站" }
@@ -1690,10 +1691,10 @@ private fun SecurityDetailDialog(
     onDismiss: () -> Unit
 ) {
     val title = when (assessment.level) {
-        SecurityScanner.RiskLevel.SAFE -> "连接安全"
+        SecurityScanner.RiskLevel.SAFE -> context.getString(R.string.risk_safe)
         SecurityScanner.RiskLevel.INSECURE -> "连接不安全"
-        SecurityScanner.RiskLevel.SUSPICIOUS -> "可疑网站"
-        SecurityScanner.RiskLevel.DANGEROUS -> "危险网站"
+        SecurityScanner.RiskLevel.SUSPICIOUS -> context.getString(R.string.risk_suspicious)
+        SecurityScanner.RiskLevel.DANGEROUS -> context.getString(R.string.risk_dangerous)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1706,7 +1707,7 @@ private fun SecurityDetailDialog(
                 Text(
                     assessment.detail.ifBlank {
                         if (assessment.level == SecurityScanner.RiskLevel.SAFE) {
-                            "未发现明显风险。连接已加密，网站身份已校验。"
+                            context.getString(R.string.risk_no_risk)
                         } else ""
                     }
                 )
@@ -2074,7 +2075,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         // 用户拒绝了通知权限：前台服务仍会运行，但通知栏里看不到任何下载进度
         if (!granted) {
-            Toast.makeText(context, "未授予通知权限，下载进度将只在应用内的下载记录中显示", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.toast_notif_denied), Toast.LENGTH_LONG).show()
         }
     }
     // 网页文件选择：单/多选两个启动器，选中后回传给网页。
@@ -2126,7 +2127,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
             if (bookmarked) {
                 scope.launch { settingsStore.quickSites(encodeBookmarks(currentBookmarks.filter { it.url != currentUrl })) }
-                Toast.makeText(context, "书签已删除", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_bookmark_deleted), Toast.LENGTH_SHORT).show()
             } else {
                 // 标题为空或为默认值时回退到域名，避免出现一批「新标签页」书签
                 val title = selectedTab?.title?.takeIf { it.isNotBlank() && it != "新标签页" }
@@ -2135,7 +2136,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 scope.launch {
                     settingsStore.quickSites(encodeBookmarks(currentBookmarks + QuickSite(title, currentUrl, title.take(1))))
                 }
-                Toast.makeText(context, "书签已添加", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_bookmark_added), Toast.LENGTH_SHORT).show()
             }
         }
         showBrowserMenu = false
@@ -2163,11 +2164,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         when (settings.externalAppPolicy) {
             "deny" -> Unit
             "allow" -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(context, context.getString(R.string.toast_no_app), Toast.LENGTH_SHORT).show() }
             else -> {
                 pendingExternalApp = {
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .onFailure { Toast.makeText(context, "没有可以打开该链接的应用", Toast.LENGTH_SHORT).show() }
+                        .onFailure { Toast.makeText(context, context.getString(R.string.toast_no_app), Toast.LENGTH_SHORT).show() }
                 }
                 pendingExternalAppUri = uri
             }
@@ -2498,7 +2499,7 @@ private fun openUpdateApk(context: android.content.Context, file: java.io.File) 
     try {
         context.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, "未找到系统安装器", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_no_installer), Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2518,12 +2519,12 @@ private fun openDownload(context: android.content.Context, item: DownloadEntity)
             action.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(action)
         } else {
-            context.startActivity(Intent.createChooser(action, "打开文件"))
+            context.startActivity(Intent.createChooser(action, context.getString(R.string.chooser_open_file)))
         }
     } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, "未找到可打开此文件的应用", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_no_file_app), Toast.LENGTH_SHORT).show()
     } catch (_: SecurityException) {
-        Toast.makeText(context, "请在系统设置中允许安装未知应用", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_allow_unknown), Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2535,6 +2536,7 @@ private fun copyDownloadLink(context: android.content.Context, url: String) {
 
 @Composable
 private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit) {
+    val context = LocalContext.current
     val running = item.status == "queued" || item.status == "downloading"
     val paused = item.status == "paused"
     var menuExpanded by remember { mutableStateOf(false) }
@@ -2543,10 +2545,10 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
             Checkbox(checked = selected, onCheckedChange = { onSelect() })
             Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(item.fileName, style = MaterialTheme.typography.titleMedium)
-                Text(downloadStatus(item), style = MaterialTheme.typography.bodySmall)
+                Text(downloadStatus(context, item), style = MaterialTheme.typography.bodySmall)
                 if (running || paused) {
                     WavyProgressBar(progress = item.progress / 100f, modifier = Modifier.fillMaxWidth())
-                    Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
+                    Text("${item.progress}% · ${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}")
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (running) {
                             TextButton(onClick = onPause) { Icon(Icons.Default.Pause, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.s156)) }
@@ -2569,18 +2571,18 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
     }
 }
 
-private fun downloadStatus(item: DownloadEntity): String = when (item.status) {
-    "queued" -> "等待下载"
-    "downloading" -> "正在下载"
-    "paused" -> "已暂停"
-    "completed" -> "下载完成"
-    "hash_mismatch" -> "哈希不匹配（文件可能损坏或被篡改）"
-    "cancelled" -> "已取消"
-    else -> "下载失败"
+private fun downloadStatus(context: Context, item: DownloadEntity): String = when (item.status) {
+    "queued" -> context.getString(R.string.dl_status_queued)
+    "downloading" -> context.getString(R.string.dl_status_downloading)
+    "paused" -> context.getString(R.string.dl_status_paused)
+    "completed" -> context.getString(R.string.dl_status_completed)
+    "hash_mismatch" -> context.getString(R.string.dl_status_hash_mismatch)
+    "cancelled" -> context.getString(R.string.dl_status_cancelled)
+    else -> context.getString(R.string.dl_status_failed)
 }
 
-private fun formatBytes(value: Long): String = when {
-    value < 0 -> "未知"
+private fun formatBytes(context: Context, value: Long): String = when {
+    value < 0 -> context.getString(R.string.common_unknown)
     value >= 1024 * 1024 -> "%.1f MB".format(value / 1024.0 / 1024.0)
     value >= 1024 -> "%.1f KB".format(value / 1024.0)
     else -> "$value B"
@@ -2639,18 +2641,18 @@ private fun SettingsScreen(
     // 默认入口卡片（搜索框为空时展示，保持原有视觉）
     val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit) {
         listOf(
-            SettingsEntryItem("通用设置", "主题、动态取色、硬件加速、下载与保存路径", Icons.Rounded.Tune, onGeneralSettings),
-            SettingsEntryItem("语言", "跟随系统、简体中文、繁体中文、English", Icons.Rounded.Language, onLanguage),
-            SettingsEntryItem("网站设置", "强制适配深色模式、搜索引擎、浏览器标识", Icons.Rounded.Language, onSiteSettings),
-            SettingsEntryItem("隐私", cookieSettingsSubtitle(settings), Icons.Rounded.PrivacyTip, onCookieSettings),
-            SettingsEntryItem("网页权限管理", "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
-            SettingsEntryItem("安全防护", securityModeSubtitle(settings), Icons.Rounded.GppGood, onSecurity),
-            SettingsEntryItem("浏览历史", "查看最近访问的网页", Icons.Default.History, onHistory),
-            SettingsEntryItem("书签管理", "管理首页书签，长按可删除", Icons.Rounded.Bookmarks, onBookmarks),
-            SettingsEntryItem("设为默认浏览器", "选择 ZexBrowse 为系统默认浏览器，带来更好使用体验", Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
-            SettingsEntryItem("外链诊断", "查看最近一次外部跳转传入的原始信息", Icons.Default.Language, { showLinkDiagnostics = true }),
-            SettingsEntryItem("关于 ZexBrowse", "版本、许可、贡献者与赞助支持", Icons.Default.Info, onAbout),
-            SettingsEntryItem("联系我们", "反馈问题与交流建议", Icons.Rounded.ContactSupport, onContactUs)
+            SettingsEntryItem(stringResource(R.string.s166), "主题、动态取色、硬件加速、下载与保存路径", Icons.Rounded.Tune, onGeneralSettings),
+            SettingsEntryItem(stringResource(R.string.s173), "跟随系统、简体中文、繁体中文、English", Icons.Rounded.Language, onLanguage),
+            SettingsEntryItem(stringResource(R.string.s207), "强制适配深色模式、搜索引擎、浏览器标识", Icons.Rounded.Language, onSiteSettings),
+            SettingsEntryItem(context.getString(R.string.s225), cookieSettingsSubtitle(context, settings), Icons.Rounded.PrivacyTip, onCookieSettings),
+            SettingsEntryItem(stringResource(R.string.s250), "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
+            SettingsEntryItem(stringResource(R.string.s240), securityModeSubtitle(context, settings), Icons.Rounded.GppGood, onSecurity),
+            SettingsEntryItem(stringResource(R.string.s058), "查看最近访问的网页", Icons.Default.History, onHistory),
+            SettingsEntryItem(stringResource(R.string.s098), "管理首页书签，长按可删除", Icons.Rounded.Bookmarks, onBookmarks),
+            SettingsEntryItem(context.getString(R.string.s042), context.getString(R.string.s276), Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
+            SettingsEntryItem(context.getString(R.string.s277), "查看最近一次外部跳转传入的原始信息", Icons.Default.Language, { showLinkDiagnostics = true }),
+            SettingsEntryItem(context.getString(R.string.s281), "版本、许可、贡献者与赞助支持", Icons.Default.Info, onAbout),
+            SettingsEntryItem(context.getString(R.string.s288), "反馈问题与交流建议", Icons.Rounded.ContactSupport, onContactUs)
         ).filter { !it.accent || !isDefaultBrowser }
     }
     // 搜索命中结果（仅在搜索框有输入时使用）
@@ -2734,17 +2736,17 @@ private fun SettingsScreen(
 }
 
 /** 隐私入口副标题：概括当前各项开关状态 */
-private fun cookieSettingsSubtitle(settings: BrowserSettings): String {
-    val cookieState = if (settings.cookiesEnabled) "Cookie 追踪已开启" else "Cookie 追踪已关闭"
-    val exitState = if (settings.clearOnExit) "退出时自动清除" else "退出时保留数据"
+private fun cookieSettingsSubtitle(context: Context, settings: BrowserSettings): String {
+    val cookieState = context.getString(if (settings.cookiesEnabled) R.string.sub_cookie_on else R.string.sub_cookie_off)
+    val exitState = context.getString(if (settings.clearOnExit) R.string.sub_exit_clear else R.string.sub_exit_keep)
     return "$cookieState · $exitState"
 }
 
 /** 安全防护入口副标题：显示当前模式 */
-private fun securityModeSubtitle(settings: BrowserSettings): String = when (settings.securityMode) {
-    "enhanced" -> "增强模式 · 可疑与危险网站均拦截"
-    "basic" -> "基础模式 · 仅提示不拦截"
-    else -> "标准模式 · 拦截危险网站"
+private fun securityModeSubtitle(context: Context, settings: BrowserSettings): String = when (settings.securityMode) {
+    "enhanced" -> context.getString(R.string.sub_sec_enhanced)
+    "basic" -> context.getString(R.string.sub_sec_basic)
+    else -> context.getString(R.string.sub_sec_standard)
 }
 
 /** 设置入口卡片的图标（按所属页面回填，保持与原有视觉一致） */
@@ -2846,9 +2848,9 @@ private fun ConfirmDialog(title: String, message: String, confirm: () -> Unit, d
     AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { TextButton(onClick = confirm) { Text(stringResource(R.string.s127)) } }, dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.s071)) } })
 }
 
-private fun searchEngineLabel(settings: BrowserSettings) = when {
-    settings.searchEngine == "baidu" -> "百度"
-    settings.searchEngine == "bing" -> "必应"
+private fun searchEngineLabel(context: Context, settings: BrowserSettings) = when {
+    settings.searchEngine == "baidu" -> context.getString(R.string.label_baidu)
+    settings.searchEngine == "bing" -> context.getString(R.string.label_bing)
     settings.searchEngine == "duckduckgo" -> "DuckDuckGo"
     // 自定义搜索引擎的选中值是「custom:<标题>」，显示时去掉前缀只留标题
     settings.searchEngine.startsWith(CUSTOM_SEARCH_PREFIX) -> settings.searchEngine.removePrefix(CUSTOM_SEARCH_PREFIX)
@@ -2857,12 +2859,12 @@ private fun searchEngineLabel(settings: BrowserSettings) = when {
     else -> "Google"
 }
 
-private fun userAgentLabel(settings: BrowserSettings) = when (settings.userAgentMode) {
+private fun userAgentLabel(context: Context, settings: BrowserSettings) = when (settings.userAgentMode) {
     "android_chrome" -> "Android Chrome"
-    "desktop_chrome" -> "桌面 Chrome"
-    "desktop_firefox" -> "桌面 Firefox"
+    "desktop_chrome" -> context.getString(R.string.label_desktop_chrome)
+    "desktop_firefox" -> context.getString(R.string.label_desktop_firefox)
     "custom" -> settings.customUserAgentTitle
-    else -> "默认 GeckoView"
+    else -> context.getString(R.string.label_default_geckoview)
 }
 
 @Composable
@@ -3225,6 +3227,7 @@ private fun GeneralSettingsScreen(
     onDownloadDirectory: () -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     var showCustomColor by remember { mutableStateOf(false) }
     SelectionScreen("通用设置", onBack) {
         item { SectionHeader("主题设置") }
@@ -3250,7 +3253,7 @@ private fun GeneralSettingsScreen(
         item { SwitchRow("硬件加速", "使用 GPU 合成图层（SurfaceView）提升滚动与动画流畅度；部分机型开启后耗电或发热较高，可关闭改用兼容渲染", settings.hardwareAcceleration, setHardwareAcceleration, leading = Icons.Rounded.Speed) }
         item { SectionHeader("下载设置") }
         item { ListItem(headlineContent = { Text(stringResource(R.string.s117)) }, supportingContent = { Text(stringResource(R.string.s345)) }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s194)) }, supportingContent = { Text(downloadDirectoryLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s194)) }, supportingContent = { Text(downloadDirectoryLabel(context, settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
         item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash, leading = Icons.Rounded.VerifiedUser) }
     }
 
@@ -3278,10 +3281,10 @@ private fun SectionHeader(title: String) {
     )
 }
 
-private fun downloadDirectoryLabel(settings: BrowserSettings): String = when {
-    settings.downloadDirectoryMode == "external" && settings.externalDownloadDisplayPath.isBlank() -> "外部目录（未设置）"
+private fun downloadDirectoryLabel(context: Context, settings: BrowserSettings): String = when {
+    settings.downloadDirectoryMode == "external" && settings.externalDownloadDisplayPath.isBlank() -> context.getString(R.string.label_ext_dir_unset)
     settings.downloadDirectoryMode == "external" -> settings.externalDownloadDisplayPath
-    else -> "内部应用目录"
+    else -> context.getString(R.string.label_internal_dir)
 }
 
 /**
@@ -3296,12 +3299,13 @@ private fun WebSiteSettingsScreen(
     onUserAgent: () -> Unit,
     onBack: () -> Unit
 ) {
-    SelectionScreen("网站设置", onBack) {
+    val context = LocalContext.current
+    SelectionScreen(stringResource(R.string.s207), onBack) {
         item { SectionHeader("网页渲染") }
         item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后网页按自身与系统偏好渲染", settings.forceDarkWeb, setForceDarkWeb, leading = Icons.Rounded.DarkMode) }
         item { SectionHeader("搜索与浏览") }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s213)) }, supportingContent = { Text(searchEngineLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s219)) }, supportingContent = { Text(userAgentLabel(settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s213)) }, supportingContent = { Text(searchEngineLabel(context, settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s219)) }, supportingContent = { Text(userAgentLabel(context, settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
     }
 }
 
@@ -3315,6 +3319,7 @@ private fun CookieSettingsScreen(
     onHttpsOnly: () -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     var showClearConfirmation by remember { mutableStateOf(false) }
     var showExitOptions by remember { mutableStateOf(false) }
     var exitCookies by remember(settings.clearCookiesOnExit) { mutableStateOf(settings.clearCookiesOnExit) }
@@ -3325,7 +3330,7 @@ private fun CookieSettingsScreen(
         item {
             ListItem(
                 headlineContent = { Text("HTTPS-Only") },
-                supportingContent = { Text(httpsOnlySubtitle(settings)) },
+                supportingContent = { Text(httpsOnlySubtitle(context, settings)) },
                 leadingContent = { Icon(Icons.Rounded.Lock, null) },
                 trailingContent = { Icon(Icons.Default.ArrowForward, null) },
                 modifier = Modifier.clickable(onClick = onHttpsOnly)
@@ -3370,11 +3375,12 @@ private fun HttpsOnlyScreen(
     onSelectMode: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     SelectionScreen("HTTPS-Only", onBack) {
         item {
             SwitchRow(
                 title = "HTTPS-Only 模式",
-                subtitle = httpsOnlySubtitle(settings),
+                subtitle = httpsOnlySubtitle(context, settings),
                 checked = settings.httpsOnlyEnabled,
                 onCheckedChange = onToggle,
                 leading = Icons.Rounded.Lock
@@ -3412,10 +3418,10 @@ private fun HttpsOnlyScreen(
 }
 
 /** HTTPS-Only 入口副标题：关闭时显示「已关闭」，开启时提示生效范围 */
-private fun httpsOnlySubtitle(settings: BrowserSettings): String = when {
-    !settings.httpsOnlyEnabled -> "已关闭"
-    settings.httpsOnlyMode == "private" -> "已开启，仅隐私标签页"
-    else -> "已开启，所有标签页"
+private fun httpsOnlySubtitle(context: Context, settings: BrowserSettings): String = when {
+    !settings.httpsOnlyEnabled -> context.getString(R.string.https_off)
+    settings.httpsOnlyMode == "private" -> context.getString(R.string.https_private)
+    else -> context.getString(R.string.https_all)
 }
 
 /**
@@ -3500,23 +3506,23 @@ private fun WebPermissionsScreen(
     onBack: () -> Unit
 ) {
     SelectionScreen("网页权限管理", onBack) {
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s249)) }, supportingContent = { Text(clipboardPolicyLabel(settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s053)) }, supportingContent = { Text(policyLabel(settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s259)) }, supportingContent = { Text(policyLabel(settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s249)) }, supportingContent = { Text(clipboardPolicyLabel(context, settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s053)) }, supportingContent = { Text(policyLabel(context, settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s259)) }, supportingContent = { Text(policyLabel(context, settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
         item { Text(stringResource(R.string.s383), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
     }
 }
 
-private fun policyLabel(policy: String) = when (policy) {
+private fun policyLabel(context: Context, policy: String) = when (policy) {
     "allow" -> "始终允许"
     "deny" -> "始终拒绝"
-    else -> "每次询问"
+    else -> context.getString(R.string.policy_ask)
 }
 
-private fun clipboardPolicyLabel(policy: String) = when (policy) {
+private fun clipboardPolicyLabel(context: Context, policy: String) = when (policy) {
     "allow" -> "始终允许"
     "deny" -> "始终拒绝"
-    else -> "每次询问"
+    else -> context.getString(R.string.policy_ask)
 }
 
 private fun siteHost(uri: String): String = runCatching { java.net.URI(uri).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri
