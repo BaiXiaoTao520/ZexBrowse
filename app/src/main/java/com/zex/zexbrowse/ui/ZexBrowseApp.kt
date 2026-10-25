@@ -2848,25 +2848,32 @@ private fun CheckRow(title: String, checked: Boolean, changed: (Boolean) -> Unit
  */
 @Composable
 private fun resolveColorScheme(settings: BrowserSettings, dark: Boolean, context: android.content.Context): androidx.compose.material3.ColorScheme {
-    val theme = ColorTheme.entries.firstOrNull { it.name.equals(settings.colorTheme, ignoreCase = true) }
-        ?: ColorTheme.DYNAMIC
-    if (theme == ColorTheme.DYNAMIC) {
-        return if (android.os.Build.VERSION.SDK_INT >= 31) {
-            if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+    // 全程 runCatching 兜底：颜色推导一旦抛异常会直接闪退，
+    // 宁可回退到默认配色也不能崩。
+    return runCatching {
+        val theme = ColorTheme.entries.firstOrNull { it.name.equals(settings.colorTheme, ignoreCase = true) }
+            ?: ColorTheme.DYNAMIC
+        if (theme == ColorTheme.DYNAMIC) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+            } else {
+                if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+            }
         } else {
-            if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+            val seed: Color
+            val neutral: Color?
+            if (theme == ColorTheme.CUSTOM) {
+                seed = parseColorOrNull(settings.customColor) ?: defaultCustomSeed
+                neutral = null
+            } else {
+                seed = presetSeeds[theme] ?: defaultCustomSeed
+                neutral = presetNeutrals[theme]
+            }
+            if (dark) buildDarkScheme(seed, neutral) else buildLightScheme(seed, neutral)
         }
+    }.getOrElse {
+        if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
     }
-    val seed: Color
-    val neutral: Color?
-    if (theme == ColorTheme.CUSTOM) {
-        seed = parseColorOrNull(settings.customColor) ?: defaultCustomSeed
-        neutral = null
-    } else {
-        seed = presetSeeds[theme] ?: defaultCustomSeed
-        neutral = presetNeutrals[theme]
-    }
-    return if (dark) buildDarkScheme(seed, neutral) else buildLightScheme(seed, neutral)
 }
 
 @Composable

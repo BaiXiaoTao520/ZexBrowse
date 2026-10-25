@@ -59,21 +59,23 @@ object AppLocale {
      * 跟随系统时清空默认 Locale 的自定义，交回系统；
      * 其余情况强制使用对应 Locale，使应用语言与系统语言解耦。
      *
-     * 必须同时更新 resources.configuration 与 LocaleList，
-     * 否则 Compose 里的 stringResource 仍会读系统语言。
+     * 全程 runCatching 包裹：attachBaseContext 阶段抛任何异常都会直接闪退，
+     * 宁可退回未包裹的 Context（显示系统语言）也不能崩。
      */
-    fun wrap(base: Context): Context {
+    fun wrap(base: Context): Context = runCatching {
         val tag = current(base)
         val locale = localeOf(tag)
         val config = Configuration(base.resources.configuration)
         if (locale == null) {
-            // 跟随系统：恢复系统语言（进程内此前可能被改成过其它语言）
-            val systemLocale = LocaleList.getDefault().get(0) ?: Locale.getDefault()
+            // 跟随系统：用系统首个 Locale。
+            // 不能写 getDefault().get(0)：列表可能为空，会抛 IndexOutOfBoundsException。
+            val defaults = LocaleList.getDefault()
+            val systemLocale = if (defaults.isEmpty) Locale.getDefault() else defaults[0]
             config.setLocales(LocaleList(systemLocale))
         } else {
             Locale.setDefault(locale)
             config.setLocales(LocaleList(locale))
         }
-        return base.createConfigurationContext(config)
-    }
+        base.createConfigurationContext(config)
+    }.getOrDefault(base)
 }
