@@ -218,15 +218,18 @@ val presetNeutrals: Map<ColorTheme, Color> = mapOf(
 val defaultCustomSeed = Color(0xFF4A5BC4)
 
 /** 解析用户保存的自定义颜色（#RRGGBB 或 #AARRGGBB）；非法时回退 null */
-fun parseColorOrNull(value: String): Color? = runCatching {
+/** 解析用户保存的自定义颜色（#RRGGBB 或 #AARRGGBB）；非法时回退 null */
+fun parseColorOrNull(value: String): Color? {
+    // 不用 runCatching { ... return null }：lambda 内的 return 是非局部返回，
+    // 行为容易写错，这里改成显式判断。
     val hex = value.trim().removePrefix("#")
     val argb = when (hex.length) {
-        6 -> 0xFF000000.toInt() or hex.toLong(16).toInt()
-        8 -> hex.toLong(16).toInt()
-        else -> return null
-    }
-    Color(argb)
-}.getOrNull()
+        6 -> hex.toLongOrNull(16)?.let { 0xFF000000L or it }?.toInt()
+        8 -> hex.toLongOrNull(16)?.toInt()
+        else -> null
+    } ?: return null
+    return Color(argb)
+}
 
 /** 格式化为 #AARRGGBB，与参考图展示的写法一致 */
 fun Color.toHexString(): String = "#%08X".format(
