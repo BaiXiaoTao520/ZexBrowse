@@ -2365,11 +2365,13 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             confirmButton = { TextButton(onClick = { hashResult = null }) { Text(stringResource(R.string.s127)) } }
         )
     }
-    if (pendingExternalAppUri != null) {
+    // 先取出局部变量：pendingExternalAppUri 是委托属性，不能直接做智能转换
+    val pendingUri = pendingExternalAppUri
+    if (pendingUri != null) {
         AlertDialog(
             onDismissRequest = { pendingExternalAppUri = null; pendingExternalApp = null },
             title = { Text(stringResource(R.string.s128)) },
-            text = { Text(stringResource(R.string.s129, pendingExternalAppUri)) },
+            text = { Text(stringResource(R.string.s129, pendingUri)) },
             confirmButton = { TextButton(onClick = { pendingExternalApp?.invoke(); pendingExternalAppUri = null; pendingExternalApp = null }) { Text(stringResource(R.string.s093)) } },
             dismissButton = { TextButton(onClick = { pendingExternalAppUri = null; pendingExternalApp = null }) { Text(stringResource(R.string.s071)) } }
         )
@@ -2521,7 +2523,8 @@ private fun openDownload(context: android.content.Context, item: DownloadEntity)
 
 private fun copyDownloadLink(context: android.content.Context, url: String) {
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(stringResource(R.string.s155), url))
+    // 非 @Composable 函数不能调用 stringResource，改用 Context.getString
+    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.s155), url))
 }
 
 @Composable
@@ -4134,13 +4137,15 @@ private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.s434, channel), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // 先解包：error 是委托属性，不能直接在 when 分支条件里传参
+                val errText = error
                 when {
                     result != null -> {
                         Text(stringResource(R.string.s435, result!!.file.name))
                         Text("SHA-256：${result!!.sha256}", style = MaterialTheme.typography.bodySmall)
                         Text(result!!.file.absolutePath, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    error != null -> Text(stringResource(R.string.s436, error), color = MaterialTheme.colorScheme.error)
+                    errText != null -> Text(stringResource(R.string.s436, errText), color = MaterialTheme.colorScheme.error)
                     connecting -> {
                         LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
                         Text(stringResource(R.string.s076))
