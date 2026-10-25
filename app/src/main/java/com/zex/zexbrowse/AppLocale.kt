@@ -14,9 +14,12 @@ import java.util.Locale
 /**
  * 应用语言的选择与生效。
  *
- * 语言是全局设置，但在 Activity 创建时就要决定用哪套资源，
- * 而设置本身存在 DataStore（异步）。因此在写入时同步镜像一份到
- * SharedPreferences，供 [attachBaseContext] 同步读取，避免首帧显示旧语言再跳变。
+ * 语言是全局设置，但 Activity 创建时就要决定用哪套资源，而设置存在 DataStore（异步）。
+ * 因此在写入时同步镜像一份到 SharedPreferences，供 [attachBaseContext] 同步读取，
+ * 避免首帧显示旧语言再跳变。
+ *
+ * 切换语言后必须重建 Activity 才会真正生效：已经组合好的界面不会因为配置改变而
+ * 自动重读资源。调用方在写完后应调用 recreate（见界面层的语言设置）。
  */
 object AppLocale {
 
@@ -44,7 +47,7 @@ object AppLocale {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY, SYSTEM) ?: SYSTEM
 
-    /** 同步镜像当前语言（设置变更时调用，保证下次启动能立即读到） */
+    /** 同步镜像当前语言（设置变更时调用，保证重建后能立即读到） */
     fun remember(context: Context, tag: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, tag).apply()
@@ -53,16 +56,24 @@ object AppLocale {
     /**
      * 按当前语言返回包裹后的 Context。
      *
-     * 跟随系统时原样返回，交由系统按设备语言挑选资源；
+     * 跟随系统时清空默认 Locale 的自定义，交回系统；
      * 其余情况强制使用对应 Locale，使应用语言与系统语言解耦。
+     *
+     * 必须同时更新 resources.configuration 与 LocaleList，
+     * 否则 Compose 里的 stringResource 仍会读系统语言。
      */
     fun wrap(base: Context): Context {
         val tag = current(base)
-        if (tag == SYSTEM) return base
-        val locale = localeOf(tag) ?: return base
-        Locale.setDefault(locale)
+        val locale = localeOf(tag)
         val config = Configuration(base.resources.configuration)
-        config.setLocales(LocaleList(locale))
+        if (locale == null) {
+            // 跟随系统：恢复系统语言（进程内此前可能被改成过其它语言）
+            val systemLocale = LocaleList.getDefault().get(0) ?: Locale.getDefault()
+            config.setLocales(LocaleList(systemLocale))
+        } else {
+            Locale.setDefault(locale)
+            config.setLocales(LocaleList(locale))
+        }
         return base.createConfigurationContext(config)
     }
 }

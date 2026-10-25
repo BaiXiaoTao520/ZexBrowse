@@ -486,4 +486,6 @@
     <string name="color_custom_preview">The preview updates live</string>
     <string name="color_custom_quick">Quick pick</string>
     <string name="common_confirm">Confirm</string>
+    <string name="color_custom_pick">Pick a color</string>
+    <string name="color_custom_brightness">Brightness</string>
 </resources>

@@ -982,10 +982,16 @@ private fun PageContent(
         Page.LANGUAGE -> LanguageScreen(
             language = settings.language,
             setLanguage = { tag ->
-                // 先同步镜像一份，再写 DataStore：这样无论何时重启，attachBaseContext 都能读到新语言
+                // 先同步镜像一份，再写 DataStore：这样无论何时重建/重启，attachBaseContext 都能读到新语言
                 AppLocale.remember(context, tag)
-                scope.launch { settingsStore.language(tag) }
-                Toast.makeText(context, "语言已切换，重启应用后完全生效", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    settingsStore.language(tag)
+                    // 语言只在 Activity 创建时通过 attachBaseContext 生效，
+                    // 已经组合好的界面不会自动重读资源，必须重建才能全局刷新。
+                    withContext(Dispatchers.Main) {
+                        context.findActivity()?.recreate()
+                    }
+                }
             },
             onBack = goBack
         )

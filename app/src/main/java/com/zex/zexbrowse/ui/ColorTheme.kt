@@ -17,14 +17,11 @@ import com.zex.zexbrowse.R
 /**
  * 颜色主题预设。
  *
- * 每个预设只定义一组「种子色」，由 buildLightScheme / buildDarkScheme 按 Material 3 的
- * 明暗两套规则推导出完整的 ColorScheme，避免为每个预设手写几十个色值。
+ * 每个预设只定义一组「种子色」，由 buildLightScheme / buildDarkScheme 推导出完整的
+ * ColorScheme。所有字段都会按种子色的色相重新生成，不留给 Material3 默认值，
+ * 否则默认的紫色系会混进来，浅色下卡片显得发灰发暗。
  *
- * [DYNAMIC] 与 [CUSTOM] 不在此表内：前者走系统动态取色，
- * 后者由用户选定的主色实时推导。
- *
- * 名称不在枚举里硬编码，而是走字符串资源（见 colorThemeLabel），
- * 否则切换语言后选项名会停在中文本。
+ * 名称走字符串资源（见 colorThemeLabel），否则切换语言后选项名会停在中文本。
  */
 enum class ColorTheme {
     DYNAMIC,
@@ -55,84 +52,145 @@ fun colorThemeLabel(theme: ColorTheme): String = stringResource(
 )
 
 /**
- * 按种子色生成明亮的 Material 3 配色。
+ * 浅色配色。
  *
- * 用种子色分别派生主色、次色、三级色与容器色：
- * 主色保持种子色本身的色相与饱和度，容器色取高明度低饱和，保证前景可读。
+ * 表面色阶（surface / surfaceContainer*）统一由种子色相 + 极低饱和度生成：
+ * 卡片用 surfaceContainerLow，保证比背景略深一点点而不显脏；
+ * 文字色 onSurface 压到 0.10，保证白底上对比充足。
  */
-fun buildLightScheme(seed: Color, neutralSeed: Color? = null) = lightColorScheme(
-    primary = seed.adjust(lightness = 0.42f),
-    onPrimary = Color.White,
-    primaryContainer = seed.adjust(lightness = 0.90f),
-    onPrimaryContainer = seed.adjust(lightness = 0.22f),
-    secondary = (neutralSeed ?: seed).adjust(lightness = 0.48f),
-    onSecondary = Color.White,
-    secondaryContainer = (neutralSeed ?: seed).adjust(lightness = 0.92f),
-    onSecondaryContainer = (neutralSeed ?: seed).adjust(lightness = 0.24f),
-    tertiary = seed.rotate(28f).adjust(lightness = 0.46f),
-    onTertiary = Color.White,
-    tertiaryContainer = seed.rotate(28f).adjust(lightness = 0.90f),
-    onTertiaryContainer = seed.rotate(28f).adjust(lightness = 0.24f),
-    surface = seed.mixWithNeutral(0.97f),
-    surfaceVariant = seed.mixWithNeutral(0.92f),
-    outline = seed.mixWithNeutral(0.55f)
-)
-
-/** 同一套种子色的深色变体：降低明度、提高背景对比，保持色相一致 */
-fun buildDarkScheme(seed: Color, neutralSeed: Color? = null) = darkColorScheme(
-    primary = seed.adjust(lightness = 0.78f),
-    onPrimary = seed.adjust(lightness = 0.18f),
-    primaryContainer = seed.adjust(lightness = 0.34f),
-    onPrimaryContainer = seed.adjust(lightness = 0.90f),
-    secondary = (neutralSeed ?: seed).adjust(lightness = 0.74f),
-    onSecondary = (neutralSeed ?: seed).adjust(lightness = 0.16f),
-    secondaryContainer = (neutralSeed ?: seed).adjust(lightness = 0.30f),
-    onSecondaryContainer = (neutralSeed ?: seed).adjust(lightness = 0.90f),
-    tertiary = seed.rotate(28f).adjust(lightness = 0.76f),
-    onTertiary = seed.rotate(28f).adjust(lightness = 0.18f),
-    tertiaryContainer = seed.rotate(28f).adjust(lightness = 0.32f),
-    onTertiaryContainer = seed.rotate(28f).adjust(lightness = 0.90f),
-    surface = seed.mixWithNeutral(0.08f),
-    surfaceVariant = seed.mixWithNeutral(0.14f),
-    outline = seed.mixWithNeutral(0.42f)
-)
-
-/** 把颜色按目标明度重算 HSV 的 V 分量，保留色相与饱和度 */
-private fun Color.adjust(lightness: Float): Color {
-    val hsv = FloatArray(3)
-    android.graphics.Color.RGBToHSV(
-        (red * 255).toInt(),
-        (green * 255).toInt(),
-        (blue * 255).toInt(),
-        hsv
+fun buildLightScheme(seed: Color, neutralSeed: Color? = null): androidx.compose.material3.ColorScheme {
+    val neutral = neutralSeed ?: seed
+    val primary = seed.tone(0.42f)
+    val primaryContainer = seed.tone(0.90f)
+    val secondary = neutral.tone(0.46f)
+    val secondaryContainer = neutral.tone(0.92f)
+    val tertiary = seed.rotate(32f).tone(0.45f)
+    val tertiaryContainer = seed.rotate(32f).tone(0.90f)
+    return lightColorScheme(
+        primary = primary,
+        onPrimary = Color.White,
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = seed.tone(0.20f),
+        inversePrimary = seed.tone(0.80f),
+        secondary = secondary,
+        onSecondary = Color.White,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = neutral.tone(0.20f),
+        tertiary = tertiary,
+        onTertiary = Color.White,
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = seed.rotate(32f).tone(0.20f),
+        // 背景与表面：几乎纯白，只带一丝种子色调
+        background = neutral.tint(0.99f, 0.04f),
+        onBackground = neutral.tone(0.10f),
+        surface = neutral.tint(0.99f, 0.04f),
+        onSurface = neutral.tone(0.10f),
+        surfaceVariant = neutral.tint(0.93f, 0.08f),
+        onSurfaceVariant = neutral.tone(0.32f),
+        // 容器色阶：卡片/菜单/对话框分别取不同层级，避免整体发暗
+        surfaceDim = neutral.tint(0.87f, 0.08f),
+        surfaceBright = neutral.tint(1.0f, 0.02f),
+        surfaceContainerLowest = Color.White,
+        surfaceContainerLow = neutral.tint(0.968f, 0.06f),
+        surfaceContainer = neutral.tint(0.948f, 0.08f),
+        surfaceContainerHigh = neutral.tint(0.925f, 0.09f),
+        surfaceContainerHighest = neutral.tint(0.90f, 0.10f),
+        inverseSurface = neutral.tone(0.20f),
+        inverseOnSurface = neutral.tone(0.95f),
+        error = Color(0xFFB3261E),
+        onError = Color.White,
+        errorContainer = Color(0xFFF9DEDC),
+        onErrorContainer = Color(0xFF410E0B),
+        outline = neutral.tint(0.52f, 0.14f),
+        outlineVariant = neutral.tint(0.80f, 0.10f),
+        scrim = Color.Black,
+        surfaceTint = primary
     )
-    val rgb = android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1].coerceIn(0f, 1f), lightness.coerceIn(0f, 1f)))
-    return Color(rgb)
+}
+
+/** 深色配色：同一色相下压低明度，容器色阶逐级抬升以区分层次 */
+fun buildDarkScheme(seed: Color, neutralSeed: Color? = null): androidx.compose.material3.ColorScheme {
+    val neutral = neutralSeed ?: seed
+    val primary = seed.tone(0.80f)
+    val primaryContainer = seed.tone(0.32f)
+    val secondary = neutral.tone(0.76f)
+    val secondaryContainer = neutral.tone(0.28f)
+    val tertiary = seed.rotate(32f).tone(0.78f)
+    val tertiaryContainer = seed.rotate(32f).tone(0.30f)
+    return darkColorScheme(
+        primary = primary,
+        onPrimary = seed.tone(0.18f),
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = seed.tone(0.90f),
+        inversePrimary = seed.tone(0.40f),
+        secondary = secondary,
+        onSecondary = neutral.tone(0.16f),
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = neutral.tone(0.90f),
+        tertiary = tertiary,
+        onTertiary = seed.rotate(32f).tone(0.16f),
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = seed.rotate(32f).tone(0.90f),
+        background = neutral.tint(0.07f, 0.06f),
+        onBackground = neutral.tone(0.92f),
+        surface = neutral.tint(0.07f, 0.06f),
+        onSurface = neutral.tone(0.92f),
+        surfaceVariant = neutral.tint(0.16f, 0.10f),
+        onSurfaceVariant = neutral.tone(0.78f),
+        surfaceDim = neutral.tint(0.06f, 0.06f),
+        surfaceBright = neutral.tint(0.26f, 0.08f),
+        surfaceContainerLowest = neutral.tint(0.05f, 0.05f),
+        surfaceContainerLow = neutral.tint(0.10f, 0.07f),
+        surfaceContainer = neutral.tint(0.13f, 0.08f),
+        surfaceContainerHigh = neutral.tint(0.18f, 0.09f),
+        surfaceContainerHighest = neutral.tint(0.22f, 0.10f),
+        inverseSurface = neutral.tone(0.92f),
+        inverseOnSurface = neutral.tone(0.12f),
+        error = Color(0xFFF2B8B5),
+        onError = Color(0xFF601410),
+        errorContainer = Color(0xFF8C1D18),
+        onErrorContainer = Color(0xFFF9DEDC),
+        outline = neutral.tint(0.45f, 0.12f),
+        outlineVariant = neutral.tint(0.28f, 0.10f),
+        scrim = Color.Black,
+        surfaceTint = primary
+    )
+}
+
+/** 取 HSV 并写入目标明度，保留色相与饱和度 */
+private fun Color.tone(lightness: Float): Color {
+    val hsv = toHsv()
+    return fromHsv(hsv[0], hsv[1], lightness)
+}
+
+/**
+ * 生成中性表面色：保留种子色的色相，把饱和度压到 [saturation]，
+ * 明度设为 [lightness]。这样背景/卡片带一点主题色气息而不显脏。
+ */
+private fun Color.tint(lightness: Float, saturation: Float): Color {
+    val hsv = toHsv()
+    return fromHsv(hsv[0], hsv[1] * saturation, lightness)
 }
 
 /** 旋转色相，用于派生三级色，避免主/次/三级同色 */
 private fun Color.rotate(degrees: Float): Color {
-    val hsv = FloatArray(3)
-    android.graphics.Color.RGBToHSV(
-        (red * 255).toInt(),
-        (green * 255).toInt(),
-        (blue * 255).toInt(),
-        hsv
-    )
-    val h = (hsv[0] + degrees) % 360f
-    val rgb = android.graphics.Color.HSVToColor(floatArrayOf(h, hsv[1], hsv[2]))
-    return Color(rgb)
+    val hsv = toHsv()
+    return fromHsv((hsv[0] + degrees) % 360f, hsv[1], hsv[2])
 }
 
-/** 把种子色与中性灰混合，用于派生表面色，保留一点色相而不过艳 */
-private fun Color.mixWithNeutral(targetLuminance: Float): Color {
-    val neutral = Color(targetLuminance, targetLuminance, targetLuminance)
-    return Color(
-        red * 0.12f + neutral.red * 0.88f,
-        green * 0.12f + neutral.green * 0.88f,
-        blue * 0.12f + neutral.blue * 0.88f
+private fun Color.toHsv(): FloatArray {
+    val hsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+        (red * 255).toInt().coerceIn(0, 255),
+        (green * 255).toInt().coerceIn(0, 255),
+        (blue * 255).toInt().coerceIn(0, 255),
+        hsv
     )
+    return hsv
 }
+
+private fun fromHsv(h: Float, s: Float, v: Float): Color =
+    Color(android.graphics.Color.HSVToColor(floatArrayOf(h, s.coerceIn(0f, 1f), v.coerceIn(0f, 1f))))
 
 /** 各预设的种子色；DYNAMIC 与 CUSTOM 不在此表 */
 val presetSeeds: Map<ColorTheme, Color> = mapOf(
@@ -145,7 +203,7 @@ val presetSeeds: Map<ColorTheme, Color> = mapOf(
     ColorTheme.FOREST to Color(0xFF3D6B4F)
 )
 
-/** 预设的中性色基准，让表面色更贴合预设气质（可选，缺省时用种子色） */
+/** 预设的中性色基准，让表面色更贴合预设气质（缺省时用种子色） */
 val presetNeutrals: Map<ColorTheme, Color> = mapOf(
     ColorTheme.OLIVE to Color(0xFF7A7A6A),
     ColorTheme.VELVET to Color(0xFF7A6A70),
@@ -159,7 +217,7 @@ val presetNeutrals: Map<ColorTheme, Color> = mapOf(
 /** 自定义主题的默认种子色（取 Material 默认蓝紫，用户可再调整） */
 val defaultCustomSeed = Color(0xFF4A5BC4)
 
-/** 解析用户保存的自定义颜色（#RRGGBB 或 #AARRGGBB）；非法时回退默认色 */
+/** 解析用户保存的自定义颜色（#RRGGBB 或 #AARRGGBB）；非法时回退 null */
 fun parseColorOrNull(value: String): Color? = runCatching {
     val hex = value.trim().removePrefix("#")
     val argb = when (hex.length) {
@@ -170,7 +228,7 @@ fun parseColorOrNull(value: String): Color? = runCatching {
     Color(argb)
 }.getOrNull()
 
-/** 格式化为 #AARRGGBB，与图中展示的写法一致 */
+/** 格式化为 #AARRGGBB，与参考图展示的写法一致 */
 fun Color.toHexString(): String = "#%08X".format(
     android.graphics.Color.argb(
         (alpha * 255).toInt(),

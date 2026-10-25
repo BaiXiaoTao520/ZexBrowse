@@ -486,4 +486,6 @@
     <string name="settings_language_en">English</string>
     <string name="settings_general">通用设置</string>
     <string name="settings_theme">主题</string>
+    <string name="color_custom_pick">取色</string>
+    <string name="color_custom_brightness">明度</string>
 </resources>
