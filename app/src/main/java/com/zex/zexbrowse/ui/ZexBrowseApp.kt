@@ -1664,6 +1664,7 @@ private fun ShieldBadge(
     assessment: SecurityScanner.RiskAssessment,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val (icon, tint) = when (assessment.level) {
         SecurityScanner.RiskLevel.SAFE -> Icons.Rounded.GppGood to MaterialTheme.colorScheme.primary
         SecurityScanner.RiskLevel.INSECURE -> Icons.Rounded.LockOpen to MaterialTheme.colorScheme.tertiary
@@ -1672,9 +1673,9 @@ private fun ShieldBadge(
     }
     val label = when (assessment.level) {
         SecurityScanner.RiskLevel.SAFE -> context.getString(R.string.risk_safe)
-        SecurityScanner.RiskLevel.INSECURE -> assessment.reason.ifBlank { "连接不安全" }
-        SecurityScanner.RiskLevel.SUSPICIOUS -> assessment.reason.ifBlank { "可疑网站" }
-        SecurityScanner.RiskLevel.DANGEROUS -> assessment.reason.ifBlank { "危险网站" }
+        SecurityScanner.RiskLevel.INSECURE -> assessment.reason.ifBlank { context.getString(R.string.risk_insecure) }
+        SecurityScanner.RiskLevel.SUSPICIOUS -> assessment.reason.ifBlank { context.getString(R.string.risk_suspicious) }
+        SecurityScanner.RiskLevel.DANGEROUS -> assessment.reason.ifBlank { context.getString(R.string.risk_dangerous) }
     }
     IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
         Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
@@ -1690,9 +1691,10 @@ private fun SecurityDetailDialog(
     assessment: SecurityScanner.RiskAssessment,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val title = when (assessment.level) {
         SecurityScanner.RiskLevel.SAFE -> context.getString(R.string.risk_safe)
-        SecurityScanner.RiskLevel.INSECURE -> "连接不安全"
+        SecurityScanner.RiskLevel.INSECURE -> context.getString(R.string.risk_insecure)
         SecurityScanner.RiskLevel.SUSPICIOUS -> context.getString(R.string.risk_suspicious)
         SecurityScanner.RiskLevel.DANGEROUS -> context.getString(R.string.risk_dangerous)
     }
@@ -2607,6 +2609,7 @@ private fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var showLinkDiagnostics by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     // 设置搜索：按关键词过滤上方入口卡片
     var searchQuery by rememberSaveable { mutableStateOf("") }
     // 搜索索引：子选项 -> 所属页面。搜索命中后直接展示子选项，点击即跳转到对应页面。
@@ -2639,20 +2642,43 @@ private fun SettingsScreen(
         )
     }
     // 默认入口卡片（搜索框为空时展示，保持原有视觉）
-    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit) {
+    // 注意：remember 的 lambda 不是 @Composable 上下文，不能在里面调用 stringResource，
+    // 所以先把需要的文案取成局部变量，再在 remember 里使用。
+    val entryGeneral = stringResource(R.string.s166)
+    val entryLanguage = stringResource(R.string.s173)
+    val entrySite = stringResource(R.string.s207)
+    val entryWebsiteSub = stringResource(R.string.s295)
+    val entryWebPerm = stringResource(R.string.s250)
+    val entryWebPermSub = stringResource(R.string.s296)
+    val entrySecurity = stringResource(R.string.s240)
+    val entryHistory = stringResource(R.string.s058)
+    val entryHistorySub = stringResource(R.string.s297)
+    val entryBookmarks = stringResource(R.string.s098)
+    val entryBookmarksSub = stringResource(R.string.s298)
+    val entryDefaultBrowser = stringResource(R.string.s042)
+    val entryDefaultBrowserSub = stringResource(R.string.s276)
+    val entryLinkDiag = stringResource(R.string.s277)
+    val entryLinkDiagSub = stringResource(R.string.s299)
+    val entryAbout = stringResource(R.string.s281)
+    val entryAboutSub = stringResource(R.string.s300)
+    val entryContact = stringResource(R.string.s288)
+    val entryContactSub = stringResource(R.string.s301)
+    val entryGeneralSub = stringResource(R.string.s293)
+    val entryPrivacy = stringResource(R.string.s225)
+    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, entryGeneral, entryLanguage, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy) {
         listOf(
-            SettingsEntryItem(stringResource(R.string.s166), "主题、动态取色、硬件加速、下载与保存路径", Icons.Rounded.Tune, onGeneralSettings),
-            SettingsEntryItem(stringResource(R.string.s173), "跟随系统、简体中文、繁体中文、English", Icons.Rounded.Language, onLanguage),
-            SettingsEntryItem(stringResource(R.string.s207), "强制适配深色模式、搜索引擎、浏览器标识", Icons.Rounded.Language, onSiteSettings),
-            SettingsEntryItem(context.getString(R.string.s225), cookieSettingsSubtitle(context, settings), Icons.Rounded.PrivacyTip, onCookieSettings),
-            SettingsEntryItem(stringResource(R.string.s250), "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
-            SettingsEntryItem(stringResource(R.string.s240), securityModeSubtitle(context, settings), Icons.Rounded.GppGood, onSecurity),
-            SettingsEntryItem(stringResource(R.string.s058), "查看最近访问的网页", Icons.Default.History, onHistory),
-            SettingsEntryItem(stringResource(R.string.s098), "管理首页书签，长按可删除", Icons.Rounded.Bookmarks, onBookmarks),
-            SettingsEntryItem(context.getString(R.string.s042), context.getString(R.string.s276), Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
-            SettingsEntryItem(context.getString(R.string.s277), "查看最近一次外部跳转传入的原始信息", Icons.Default.Language, { showLinkDiagnostics = true }),
-            SettingsEntryItem(context.getString(R.string.s281), "版本、许可、贡献者与赞助支持", Icons.Default.Info, onAbout),
-            SettingsEntryItem(context.getString(R.string.s288), "反馈问题与交流建议", Icons.Rounded.ContactSupport, onContactUs)
+            SettingsEntryItem(entryGeneral, entryGeneralSub, Icons.Rounded.Tune, onGeneralSettings),
+            SettingsEntryItem(entryLanguage, "跟随系统、简体中文、繁体中文、English", Icons.Rounded.Language, onLanguage),
+            SettingsEntryItem(entrySite, entryWebsiteSub, Icons.Rounded.Language, onSiteSettings),
+            SettingsEntryItem(entryPrivacy, cookieSettingsSubtitle(context, settings), Icons.Rounded.PrivacyTip, onCookieSettings),
+            SettingsEntryItem(entryWebPerm, entryWebPermSub, Icons.Rounded.Security, onWebPermissions),
+            SettingsEntryItem(entrySecurity, securityModeSubtitle(context, settings), Icons.Rounded.GppGood, onSecurity),
+            SettingsEntryItem(entryHistory, entryHistorySub, Icons.Default.History, onHistory),
+            SettingsEntryItem(entryBookmarks, entryBookmarksSub, Icons.Rounded.Bookmarks, onBookmarks),
+            SettingsEntryItem(entryDefaultBrowser, entryDefaultBrowserSub, Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
+            SettingsEntryItem(entryLinkDiag, entryLinkDiagSub, Icons.Default.Language, { showLinkDiagnostics = true }),
+            SettingsEntryItem(entryAbout, entryAboutSub, Icons.Default.Info, onAbout),
+            SettingsEntryItem(entryContact, entryContactSub, Icons.Rounded.ContactSupport, onContactUs)
         ).filter { !it.accent || !isDefaultBrowser }
     }
     // 搜索命中结果（仅在搜索框有输入时使用）
@@ -3505,7 +3531,8 @@ private fun WebPermissionsScreen(
     onMic: () -> Unit,
     onBack: () -> Unit
 ) {
-    SelectionScreen("网页权限管理", onBack) {
+    val context = LocalContext.current
+    SelectionScreen(stringResource(R.string.s250), onBack) {
         item { ListItem(headlineContent = { Text(stringResource(R.string.s249)) }, supportingContent = { Text(clipboardPolicyLabel(context, settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
         item { ListItem(headlineContent = { Text(stringResource(R.string.s053)) }, supportingContent = { Text(policyLabel(context, settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
         item { ListItem(headlineContent = { Text(stringResource(R.string.s259)) }, supportingContent = { Text(policyLabel(context, settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
@@ -3514,14 +3541,14 @@ private fun WebPermissionsScreen(
 }
 
 private fun policyLabel(context: Context, policy: String) = when (policy) {
-    "allow" -> "始终允许"
-    "deny" -> "始终拒绝"
+    "allow" -> context.getString(R.string.policy_allow)
+    "deny" -> context.getString(R.string.policy_deny)
     else -> context.getString(R.string.policy_ask)
 }
 
 private fun clipboardPolicyLabel(context: Context, policy: String) = when (policy) {
-    "allow" -> "始终允许"
-    "deny" -> "始终拒绝"
+    "allow" -> context.getString(R.string.policy_allow)
+    "deny" -> context.getString(R.string.policy_deny)
     else -> context.getString(R.string.policy_ask)
 }
 
