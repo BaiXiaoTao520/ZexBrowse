@@ -21,6 +21,7 @@ import androidx.work.WorkerParameters
 import com.zex.zexbrowse.data.BrowserDatabase
 import kotlinx.coroutines.CancellationException
 import com.zex.zexbrowse.BuildConfig
+import com.zex.zexbrowse.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.job
@@ -107,7 +108,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             var startOffset = record?.downloadedBytes?.coerceAtLeast(0L) ?: 0L
             val ifRange = record?.etag.orEmpty()
             if (localBin != null) {
-                // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完
+                // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完。
+                // fail 一出现就直接跳出，不再把剩下的超时时间白等完（否则界面会停在「正在下载」不动）。
                 val base = localBin.name.removeSuffix(".bin")
                 val doneFile = File(localBin.parentFile, "$base.done")
                 val failFile = File(localBin.parentFile, "$base.fail")
@@ -122,6 +124,9 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                     totalBytes = total
                     // 本地捕获文件是完整文件，不能与历史偏移叠加
                     startOffset = 0L
+                } else if (failFile.exists()) {
+                    // 捕获失败（例如拿到的是验证页而不是文件）：立即回退网络下载，不再等超时
+                    android.util.Log.d("ZexDownload", "capture failed, fallback to network: $url")
                 }
             }
 
@@ -138,7 +143,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                     if (it is CancellationException) c.cancel()
                 }
                 val response = c.execute()
-                if (!response.isSuccessful) { response.close(); error("下载失败：${response.code}") }
+                if (!response.isSuccessful) { response.close(); error(applicationContext.getString(R.string.dl_err_http, response.code)) }
                 // 兜底：若入队时仍未拿到真实文件名，用本次下载的响应头纠正，
                 // 保证「显示的文件名」与「实际落盘文件名」一致。
                 if (DownloadFileName.isGeneric(displayName)) {
@@ -149,7 +154,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                         setForeground(createForegroundInfo(id, displayName, 0, true))
                     }
                 }
-                val body = response.body ?: run { response.close(); error("下载响应内容为空") }
+                val body = response.body ?: run { response.close(); error(applicationContext.getString(R.string.dl_err_empty_body)) }
                 httpResponse = response
                 input = body.byteStream()
                 // 206 = 服务端同意从 startOffset 继续；200 = 只能从头给，必须舍弃历史偏移
@@ -188,7 +193,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             } else if (uri.scheme == "file" && startOffset > 0L) {
                 // 已有文件比记录短，无法可信追加。此时服务端已按 Range 只发了剩余部分，
                 // 直接从头写会缺掉前半段，只能报错让用户重新下载。
-                error("本地文件不完整，无法继续下载，请重新下载")
+                error(applicationContext.getString(R.string.dl_err_incomplete))
             }
             val output: OutputStream = if (uri.scheme == "file") {
                 // 续传时追加写入；从头开始时截断旧数据
@@ -196,8 +201,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             } else {
                 // SAF 无法可靠随机写入：若服务端已按 Range 只返回了剩余部分，
                 // 从头写会得到一个缺了前半段的坏文件，所以这种情况下直接报错让用户重新下载。
-                if (startOffset > 0L) error("该保存位置不支持断点续传，请重新下载")
-                applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选位置")
+                if (startOffset > 0L) error(applicationContext.getString(R.string.dl_err_no_resume))
+                applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error(applicationContext.getString(R.string.dl_err_cannot_write))
             }
             input!!.use { streamIn ->
                 output.buffered().use { stream ->
@@ -247,7 +252,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                     // 先把真实进度写回，否则续传会从 0 开始
                     savePausedProgress(id, downloadedBytes, totalBytes)
                 } else {
-                    database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+                    database.downloadDao().finishWithMessage(id, "cancelled", applicationContext.getString(R.string.dl_err_cancelled))
                     deletePartialFile(uri)
                 }
             }
@@ -257,14 +262,14 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 if (recordIsPauseRequested(id)) {
                     savePausedProgress(id, downloadedBytes, totalBytes)
                 } else {
-                    database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+                    database.downloadDao().finishWithMessage(id, "cancelled", applicationContext.getString(R.string.dl_err_cancelled))
                     deletePartialFile(uri)
                 }
             }
             throw cancelled
         } catch (error: Throwable) {
             val cancelled = isStopped
-            database.downloadDao().finishWithMessage(id, if (cancelled) "cancelled" else "failed", if (cancelled) "下载已取消" else (error.message ?: "未知错误"))
+            database.downloadDao().finishWithMessage(id, if (cancelled) "cancelled" else "failed", if (cancelled) applicationContext.getString(R.string.dl_err_cancelled) else (error.message ?: applicationContext.getString(R.string.dl_err_unknown)))
             if (!cancelled) notifyFinished(id, displayName, false)
             Result.failure()
         } finally {
@@ -289,8 +294,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         ensureChannel()
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(fileName.ifBlank { "正在下载" })
-            .setContentText("正在连接服务器…")
+            .setContentTitle(fileName.ifBlank { applicationContext.getString(R.string.dl_notify_preparing) })
+            .setContentText(applicationContext.getString(R.string.dl_notify_connecting))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPendingIntent())
@@ -306,8 +311,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         ensureChannel()
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(fileName.ifBlank { "正在下载" })
-            .setContentText(if (indeterminate) "正在下载" else "$progress%")
+            .setContentTitle(fileName.ifBlank { applicationContext.getString(R.string.dl_notify_preparing) })
+            .setContentText(if (indeterminate) applicationContext.getString(R.string.dl_notify_preparing) else "$progress%")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPendingIntent())
@@ -331,8 +336,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         ensureFinishedChannel()
         val notification = NotificationCompat.Builder(applicationContext, FINISHED_CHANNEL_ID)
             .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentTitle(fileName.ifBlank { "下载任务" })
-            .setContentText(if (success) "下载完成，点击查看" else "下载失败")
+            .setContentTitle(fileName.ifBlank { applicationContext.getString(R.string.dl_notify_task) })
+            .setContentText(applicationContext.getString(if (success) R.string.dl_notify_done_tap else R.string.dl_notify_failed))
             .setAutoCancel(true)
             .setContentIntent(openAppPendingIntent())
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -369,7 +374,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     private fun ensureChannel() {
         if (downloadChannelReady) return
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "浏览器下载", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, applicationContext.getString(R.string.dl_channel_name), NotificationManager.IMPORTANCE_LOW))
         downloadChannelReady = true
     }
 
@@ -381,7 +386,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     private fun ensureFinishedChannel() {
         if (finishedChannelReady) return
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(FINISHED_CHANNEL_ID, "下载完成", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(FINISHED_CHANNEL_ID, applicationContext.getString(R.string.dl_channel_done), NotificationManager.IMPORTANCE_DEFAULT))
         finishedChannelReady = true
     }
 
