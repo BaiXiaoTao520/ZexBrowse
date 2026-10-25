@@ -12,6 +12,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.BuildConfig
+import com.zex.zexbrowse.CrashReporter
 import com.zex.zexbrowse.R
 import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.data.BrowserDatabase
@@ -197,8 +198,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        lastColorScheme = runtime.settings.getPreferredColorScheme()
-        newTab()
+        // 兜底：ViewModel 构造期一旦抛异常，Compose 无法创建 ViewModel → 整个应用会直接闪退。
+        // 这里把初始化包住：最坏情况只是初始标签没建好（首页仍能打开），而不是应用打不开。
+        // 同时把异常写入崩溃日志，便于后续排查。
+        runCatching { lastColorScheme = runtime.settings.getPreferredColorScheme() }
+        runCatching { newTab() }
+            .onFailure { CrashReporter.record(application, it) }
     }
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val (session, id) = createSession(incognito)
