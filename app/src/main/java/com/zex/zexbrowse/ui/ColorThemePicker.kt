@@ -37,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -109,7 +108,8 @@ internal fun ColorThemeOption(label: String, selected: Boolean, swatch: Color, o
 /**
  * 颜色主题选择区。
  *
- * 固定 4 列网格：每格等宽，行末不足 4 项时补空位，保证永远对齐。
+ * 固定 4 列等分网格：每格宽度严格相等（weight(1f) + 固定间距），
+ * 行末不足 4 项时用等宽空位补齐，保证左右两端始终对齐。
  */
 @Composable
 internal fun ColorThemeGrid(
@@ -121,26 +121,33 @@ internal fun ColorThemeGrid(
     val currentTheme = ColorTheme.entries.firstOrNull { it.name.equals(current, ignoreCase = true) } ?: ColorTheme.DYNAMIC
     val customSeed = parseColorOrNull(customHex) ?: defaultCustomSeed
     val columns = 4
+    val spacing = 8.dp
     val items = ColorTheme.entries.toList()
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items.chunked(columns).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                row.forEach { theme ->
-                    val swatch = when (theme) {
-                        ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
-                        ColorTheme.CUSTOM -> customSeed
-                        else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
-                    }
-                    Box(Modifier.weight(1f)) {
-                        ColorThemeOption(
-                            label = colorThemeLabel(theme),
-                            selected = currentTheme == theme,
-                            swatch = swatch,
-                            onClick = { if (theme == ColorTheme.CUSTOM) onEditCustom() else onPick(theme) }
-                        )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing)
+            ) {
+                // 每格等宽占位；不足 4 项时补空格，保证列宽与行对齐一致
+                repeat(columns) { index ->
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
+                        val theme = row.getOrNull(index)
+                        if (theme != null) {
+                            val swatch = when (theme) {
+                                ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
+                                ColorTheme.CUSTOM -> customSeed
+                                else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
+                            }
+                            ColorThemeOption(
+                                label = colorThemeLabel(theme),
+                                selected = currentTheme == theme,
+                                swatch = swatch,
+                                onClick = { if (theme == ColorTheme.CUSTOM) onEditCustom() else onPick(theme) }
+                            )
+                        }
                     }
                 }
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -150,7 +157,10 @@ internal fun ColorThemeGrid(
  * 可拖动取色的色相/饱和度面板 + 明度滑条。
  *
  * 面板横轴为色相、纵轴为饱和度；下方滑条调明度。
- * 这样用户可以直接点/拖选颜色，不必知道颜色编号。
+ *
+ * 关键：hue/sat/value 只在首次进入时从 [color] 初始化一次（remember(Unit)），
+ * 之后完全由手势驱动。若写成 remember(color)，每次拖动改变颜色都会重建 HSV 并回写，
+ * 导致拖到边缘时数值被环回、颜色突然跳变到另一端。
  */
 @Composable
 private fun ColorPickerPanel(
@@ -160,31 +170,11 @@ private fun ColorPickerPanel(
     val density = LocalDensity.current
     var panelWidth by remember { mutableFloatStateOf(1f) }
     var panelHeight by remember { mutableFloatStateOf(1f) }
-    val hsv = remember(color) {
-        val arr = FloatArray(3)
-        android.graphics.Color.RGBToHSV(
-            (color.red * 255).toInt().coerceIn(0, 255),
-            (color.green * 255).toInt().coerceIn(0, 255),
-            (color.blue * 255).toInt().coerceIn(0, 255),
-            arr
-        )
-        arr
-    }
-    var hue by remember(color) { mutableFloatStateOf(hsv[0]) }
-    var sat by remember(color) { mutableFloatStateOf(hsv[1]) }
-    var value by remember(color) { mutableFloatStateOf(hsv[2].coerceAtLeast(0.15f)) }
 
-    fun emit(h: Float, s: Float, v: Float) {
-        onColorChange(Color(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))))
-    }
-
-    fun pickAt(pos: Offset) {
-        val h = (pos.x / panelWidth).coerceIn(0f, 1f) * 360f
-        val s = (pos.y / panelHeight).coerceIn(0f, 1f)
-        hue = h
-        sat = s
-        emit(h, s, value)
-    }
+    // 仅在首次组合时按传入颜色初始化，后续拖动不再被外部值覆盖
+    var hue by remember { mutableFloatStateOf(initialHue(color)) }
+    var sat by remember { mutableFloatStateOf(initialSat(color)) }
+    var value by remember { mutableFloatStateOf(initialValue(color)) }
 
     Column {
         // 色相 × 饱和度面板
@@ -195,17 +185,35 @@ private fun ColorPickerPanel(
                 .clip(RoundedCornerShape(10.dp))
                 .background(Brush.horizontalGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)))
                 .background(Brush.verticalGradient(listOf(Color.White, Color.Transparent)))
-                .onSizeChanged { panelWidth = it.width.toFloat().coerceAtLeast(1f); panelHeight = it.height.toFloat().coerceAtLeast(1f) }
-                .pointerInput(Unit) {
-                    detectTapGestures { pickAt(it) }
+                .onSizeChanged {
+                    panelWidth = it.width.toFloat().coerceAtLeast(1f)
+                    panelHeight = it.height.toFloat().coerceAtLeast(1f)
                 }
                 .pointerInput(Unit) {
-                    detectDragGestures { change, _ -> pickAt(change.position) }
+                    detectTapGestures { pos ->
+                        val h = (pos.x / panelWidth).coerceIn(0f, 1f) * 359.99f
+                        val s = (pos.y / panelHeight).coerceIn(0f, 1f)
+                        hue = h
+                        sat = s
+                        onColorChange(Color(android.graphics.Color.HSVToColor(floatArrayOf(h, s, value))))
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, _ ->
+                        // 把坐标夹紧到面板内，否则越界后取模会环回成另一端颜色
+                        val x = change.position.x.coerceIn(0f, panelWidth)
+                        val y = change.position.y.coerceIn(0f, panelHeight)
+                        val h = (x / panelWidth).coerceIn(0f, 1f) * 359.99f
+                        val s = (y / panelHeight).coerceIn(0f, 1f)
+                        hue = h
+                        sat = s
+                        onColorChange(Color(android.graphics.Color.HSVToColor(floatArrayOf(h, s, value))))
+                    }
                 }
         ) {
-            // 当前选中位置的小圆点
-            val dotX = with(density) { (hue / 360f * panelWidth).toDp() }
-            val dotY = with(density) { (sat * panelHeight).toDp() }
+            // 当前选中位置的小圆点（按面板实际尺寸定位，避免越界）
+            val dotX = with(density) { (hue / 359.99f * panelWidth - 9f.dp.toPx()).toDp() }.coerceAtLeast(0.dp)
+            val dotY = with(density) { (sat * panelHeight - 9f.dp.toPx()).toDp() }.coerceAtLeast(0.dp)
             Box(
                 Modifier
                     .padding(start = dotX, top = dotY)
@@ -216,12 +224,12 @@ private fun ColorPickerPanel(
             )
         }
         Spacer(Modifier.height(12.dp))
-        // 明度滑条
         Text(
             stringResource(R.string.color_custom_brightness),
             style = MaterialTheme.typography.labelMedium
         )
         Spacer(Modifier.height(4.dp))
+        // 明度滑条
         Box(
             Modifier
                 .fillMaxWidth()
@@ -233,22 +241,38 @@ private fun ColorPickerPanel(
                     )
                 )
                 .pointerInput(hue, sat) {
-                    // 不用嵌套局部函数：detectTapGestures 的闭包里直接算，避免作用域歧义
-                    detectTapGestures { offset ->
-                        val v = (offset.x / size.width).coerceIn(0f, 1f).coerceAtLeast(0.05f)
+                    fun apply(x: Float) {
+                        val v = (x / size.width.toFloat()).coerceIn(0f, 1f).coerceAtLeast(0.05f)
                         value = v
-                        emit(hue, sat, v)
+                        onColorChange(Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, v))))
                     }
+                    detectTapGestures { apply(it.x) }
                 }
                 .pointerInput(hue, sat) {
-                    detectDragGestures { change, _ ->
-                        val v = (change.position.x / size.width).coerceIn(0f, 1f).coerceAtLeast(0.05f)
+                    fun apply(x: Float) {
+                        val v = (x / size.width.toFloat()).coerceIn(0f, 1f).coerceAtLeast(0.05f)
                         value = v
-                        emit(hue, sat, v)
+                        onColorChange(Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, v))))
                     }
+                    detectDragGestures { change, _ -> apply(change.position.x) }
                 }
         )
     }
+}
+
+private fun initialHue(c: Color): Float = hsvOf(c)[0]
+private fun initialSat(c: Color): Float = hsvOf(c)[1]
+private fun initialValue(c: Color): Float = hsvOf(c)[2].coerceAtLeast(0.15f)
+
+private fun hsvOf(c: Color): FloatArray {
+    val arr = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+        (c.red * 255).toInt().coerceIn(0, 255),
+        (c.green * 255).toInt().coerceIn(0, 255),
+        (c.blue * 255).toInt().coerceIn(0, 255),
+        arr
+    )
+    return arr
 }
 
 /**

@@ -6,7 +6,7 @@ plugins {
 
 // GeckoView 内核版本：单一来源。依赖坐标与 BuildConfig 都从这里取值，
 // 避免升级内核时漏改某一处、导致 UA 声称的版本与实际内核不一致。
-val geckoViewVersion = "158.0.20261007201254"
+val geckoViewVersion = "158.0.20261021001945"
 // 仅保留主版本号（如 "158.0"），供 UA 生成使用
 val geckoViewMajorVersion = geckoViewVersion.split('.').take(2).joinToString(".")
 
