@@ -414,11 +414,11 @@
     <string name="s412">暂无贡献者信息</string>
     <string name="s413">%1$s 次提交</string>
     <string name="s414">如果 ZexBrowse 用起来顺手，欢迎请作者喝杯咖啡。</string>
-    <string name="s415">ZexBrowse 由个人在业余时间开发维护，持续免费、无广告，也不上架任何应用商店。你的支持会直接用于服务器与带宽开销、测试设备，以及后续功能的开发与维护。</string>
+    <string name="s415">ZexBrowse 由个人在业余时间开发维护，持续免费、无广告，也不上架任何应用商店。你的支持会用于后续功能的开发与维护，以及测试设备的开销。</string>
     <string name="s416">赞助完全出于自愿，金额不限；不赞助也完全不影响任何功能的使用。</string>
     <string name="s417">如何支持</string>
     <string name="s418">1. 点击下方「前往赞赏」，跳转到项目 README。</string>
-    <string name="s419">2. 在页面中向下滑动，找到「赞助与支持」中的赞赏码图片。</string>
+    <string name="s419">2. 在页面中向上滑动，找到「赞助与支持」中的赞赏码图片。</string>
     <string name="s420">3. 长按保存该图片（或截图保存），再打开微信「扫一扫」，从相册选择它即可完成。</string>
     <string name="s421">无论是否赞助，感谢你使用 ZexBrowse；遇到问题欢迎在 GitHub 仓库反馈，帮助它变得更好。</string>
     <string name="s422">前往赞赏</string>

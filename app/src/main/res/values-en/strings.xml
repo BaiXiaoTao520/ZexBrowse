@@ -34,7 +34,7 @@
     <string name="s031">Proxy settings caused the connection to fail</string>
     <string name="s032">Safe browsing blocked this visit</string>
     <string name="s033">Check your network connection and try again</string>
-    <string name="s034">If other sites work, the problem may be on this site's side</string>
+    <string name="s034">If other sites work, the problem may be on this site\'s side</string>
     <string name="s035">Go to Settings &gt; Apps &gt; Default apps to set ZexBrowse as your browser</string>
     <string name="s036">External storage selected</string>
     <string name="s037">Custom search</string>
@@ -342,13 +342,13 @@
     <string name="s339">When a site wants to read the clipboard: always allow or deny takes effect immediately; ask each time shows a prompt and remembers your choice per site.</string>
     <string name="s340">Clear saved site permissions</string>
     <string name="s341">Theme settings</string>
-    <string name="s342">Use the system's dynamic color</string>
+    <string name="s342">Use the system\'s dynamic color</string>
     <string name="s343">Use GPU composition (SurfaceView) for smoother scrolling and animation. On some devices this increases power use or heat; turn it off to use the compatible renderer.</string>
     <string name="s344">Downloads</string>
     <string name="s345">View download progress and history</string>
     <string name="s346">Compute a hash when downloading APKs</string>
     <string name="s347">External folder (not set)</string>
-    <string name="s348">When on, unadapted pages are forced dark to remove white backgrounds; when off, pages follow their own and the system's preference.</string>
+    <string name="s348">When on, unadapted pages are forced dark to remove white backgrounds; when off, pages follow their own and the system\'s preference.</string>
     <string name="s349">Search and browsing</string>
     <string name="s350">When off, new sessions will not save cookies</string>
     <string name="s351">Immediately clear cache, cookies and history</string>
@@ -370,7 +370,7 @@
     <string name="s367">On, private tabs only</string>
     <string name="s368">On, all tabs</string>
     <string name="s369">URL safety scanning</string>
-    <string name="s370">Judged locally: no network access, no browsing history uploaded. The shield in the address bar shows the current site's risk level in real time.</string>
+    <string name="s370">Judged locally: no network access, no browsing history uploaded. The shield in the address bar shows the current site\'s risk level in real time.</string>
     <string name="s371">Enhanced</string>
     <string name="s372">Blocks suspicious and dangerous sites</string>
     <string name="s373">Beyond clear risks, unusual domains and suspicious suffixes also trigger a prompt. The strictest option.</string>
@@ -402,7 +402,7 @@
     <string name="s399">Official SHA-256 (optional)</string>
     <string name="s400">Match or mismatch is shown after downloading</string>
     <string name="s401">Version %1$s (%2$s)</string>
-    <string name="s402">This project is open source under the Mozilla Public License 2.0 (MPL-2.0). GeckoView and related components follow Mozilla's respective licenses. Jetpack Compose, Material 3 and AndroidX libraries follow their own licenses.</string>
+    <string name="s402">This project is open source under the Mozilla Public License 2.0 (MPL-2.0). GeckoView and related components follow Mozilla\'s respective licenses. Jetpack Compose, Material 3 and AndroidX libraries follow their own licenses.</string>
     <string name="s403">GitHub repository</string>
     <string name="s404">Check for updates on launch</string>
     <string name="s405">Detect new versions in the background each time the app opens</string>
@@ -414,11 +414,11 @@
     <string name="s412">No contributor information</string>
     <string name="s413">%1$s commits</string>
     <string name="s414">If ZexBrowse works well for you, consider buying the author a coffee.</string>
-    <string name="s415">ZexBrowse is maintained by an individual in their spare time. It stays free, has no ads, and is not listed on any app store. Your support goes directly to servers, bandwidth, test devices and future development.</string>
+    <string name="s415">ZexBrowse is maintained by an individual in their spare time. It stays free, has no ads, and is not listed on any app store. Your support goes toward ongoing development and maintenance, as well as test devices.</string>
     <string name="s416">Sponsorship is entirely voluntary and any amount is welcome; not sponsoring does not affect any feature.</string>
     <string name="s417">How to support</string>
     <string name="s418">1. Tap Sponsorship below to open the project README.</string>
-    <string name="s419">2. Scroll down to the Sponsorship section and find the donation QR image.</string>
+    <string name="s419">2. Scroll up to find the donation QR image in the Sponsorship section.</string>
     <string name="s420">3. Long-press to save it (or take a screenshot), then open WeChat Scan and pick it from your album.</string>
     <string name="s421">Thank you for using ZexBrowse whether or not you sponsor. Feedback on the GitHub repository is always welcome.</string>
     <string name="s422">Sponsor</string>
