@@ -6,6 +6,7 @@
 
 package com.zex.zexbrowse.media
 
+import com.zex.zexbrowse.R
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -33,8 +34,8 @@ class MediaPlaybackService : Service() {
         ensureChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("正在播放媒体")
-            .setContentText("ZexBrowse 正在播放网页音频或视频")
+            .setContentTitle(getString(R.string.media_playing))
+            .setContentText(getString(R.string.media_playing_desc))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPendingIntent())
@@ -55,7 +56,7 @@ class MediaPlaybackService : Service() {
 
     private fun ensureChannel() {
         val manager = getSystemService(NotificationManager::class.java) ?: return
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "媒体播放", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, getString(R.string.media_channel), NotificationManager.IMPORTANCE_LOW))
     }
 
     private fun openAppPendingIntent(): PendingIntent {

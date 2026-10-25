@@ -154,7 +154,6 @@ abstract class BrowserDatabase : RoomDatabase() {
 data class BrowserSettings(
     val darkMode: String = "system",
     val forceDarkWeb: Boolean = true,
-    val dynamicColor: Boolean = true,
     val cookiesEnabled: Boolean = true,
     val apkHashEnabled: Boolean = true,
     val userAgentMode: String = "geckoview",
@@ -195,7 +194,13 @@ data class BrowserSettings(
     /** HTTPS-Only 开关：开启后自动尝试以 HTTPS 加密协议连接网站，增强安全性 */
     val httpsOnlyEnabled: Boolean = true,
     /** HTTPS-Only 生效范围：all（所有标签页）/ private（仅隐私标签页） */
-    val httpsOnlyMode: String = "all"
+    val httpsOnlyMode: String = "all",
+    /** 应用语言：system / zh-CN / zh-TW / en */
+    val language: String = "system",
+    /** 颜色主题：dynamic / olive / velvet / mist / glacier / dusk / titanium / forest / custom */
+    val colorTheme: String = "dynamic",
+    /** 自定义颜色主题的主色，格式 #AARRGGBB 或 #RRGGBB */
+    val customColor: String = ""
 )
 
 /** 自定义搜索引擎：标题 + 搜索 URL 模板（模板中用 {query} 表示关键词） */
@@ -234,7 +239,6 @@ fun resolveCustomSearchTemplate(settings: BrowserSettings): String {
 class SettingsStore(private val context: Context) {
     private val modeKey = stringPreferencesKey("theme_mode")
     private val forceDarkWebKey = booleanPreferencesKey("force_dark_web")
-    private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     private val cookiesKey = booleanPreferencesKey("cookies")
     private val apkHashKey = booleanPreferencesKey("apk_hash")
     private val userAgentModeKey = stringPreferencesKey("user_agent_mode")
@@ -267,12 +271,14 @@ class SettingsStore(private val context: Context) {
     private val securityModeKey = stringPreferencesKey("security_mode")
     private val httpsOnlyEnabledKey = booleanPreferencesKey("https_only_enabled")
     private val httpsOnlyModeKey = stringPreferencesKey("https_only_mode")
+    private val languageKey = stringPreferencesKey("language")
+    private val colorThemeKey = stringPreferencesKey("color_theme")
+    private val customColorKey = stringPreferencesKey("custom_color")
 
     val settings = context.dataStore.data.map { preferences ->
         BrowserSettings(
             darkMode = preferences[modeKey] ?: "system",
             forceDarkWeb = preferences[forceDarkWebKey] ?: true,
-            dynamicColor = preferences[dynamicColorKey] ?: true,
             cookiesEnabled = preferences[cookiesKey] ?: true,
             apkHashEnabled = preferences[apkHashKey] ?: true,
             userAgentMode = preferences[userAgentModeKey] ?: "geckoview",
@@ -312,7 +318,10 @@ class SettingsStore(private val context: Context) {
                 .filter { it.isNotBlank() },
             securityMode = preferences[securityModeKey] ?: "standard",
             httpsOnlyEnabled = preferences[httpsOnlyEnabledKey] ?: true,
-            httpsOnlyMode = preferences[httpsOnlyModeKey] ?: "all"
+            httpsOnlyMode = preferences[httpsOnlyModeKey] ?: "all",
+            language = preferences[languageKey] ?: "system",
+            colorTheme = preferences[colorThemeKey] ?: "dynamic",
+            customColor = preferences[customColorKey] ?: ""
         )
     }
 
@@ -321,7 +330,6 @@ class SettingsStore(private val context: Context) {
     suspend fun mode(value: String) = update { it[modeKey] = value }
     suspend fun forceDarkWeb(value: Boolean) = update { it[forceDarkWebKey] = value }
     suspend fun quickSites(value: String) = update { it[quickSitesKey] = value }
-    suspend fun dynamic(value: Boolean) = update { it[dynamicColorKey] = value }
     suspend fun cookies(value: Boolean) = update { it[cookiesKey] = value }
     suspend fun apkHash(value: Boolean) = update { it[apkHashKey] = value }
     suspend fun userAgentMode(value: String) = update { it[userAgentModeKey] = value }
@@ -353,6 +361,9 @@ class SettingsStore(private val context: Context) {
     suspend fun securityMode(value: String) = update { it[securityModeKey] = value }
     suspend fun httpsOnlyEnabled(value: Boolean) = update { it[httpsOnlyEnabledKey] = value }
     suspend fun httpsOnlyMode(value: String) = update { it[httpsOnlyModeKey] = value }
+    suspend fun language(value: String) = update { it[languageKey] = value }
+    suspend fun colorTheme(value: String) = update { it[colorThemeKey] = value }
+    suspend fun customColor(value: String) = update { it[customColorKey] = value }
 
     /** 记录一次搜索：去重后置顶，仅保留最近 10 条 */
     suspend fun addSearchHistory(keyword: String) = update { preferences ->

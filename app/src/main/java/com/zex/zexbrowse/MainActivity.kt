@@ -33,6 +33,11 @@ class MainActivity : ComponentActivity() {
 
     private var uriSeq = 0L
 
+    /** 应用语言在 Activity 创建前生效，避免首帧用错语言再跳变 */
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

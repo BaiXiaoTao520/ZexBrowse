@@ -14,6 +14,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.zex.zexbrowse.R
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.DownloadEntity
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +106,7 @@ class DownloadScheduler(private val context: Context) {
      */
     suspend fun cancel(id: String) {
         val target = runCatching { database.downloadDao().find(id)?.targetUri?.let(Uri::parse) }.getOrNull()
-        database.downloadDao().finishWithMessage(id, "cancelled", "下载已取消")
+        database.downloadDao().finishWithMessage(id, "cancelled", context.getString(R.string.dl_err_cancelled))
         workManager.cancelAllWorkByTag(id)
         if (target != null) withContext(Dispatchers.IO) { deleteTarget(target) }
     }
@@ -131,13 +132,13 @@ class DownloadScheduler(private val context: Context) {
     private fun createTargetUri(fileName: String, useExternalDirectory: Boolean, externalTreeUri: String): Uri {
         if (useExternalDirectory) {
             val treeUri = Uri.parse(externalTreeUri)
-            val directory = DocumentFile.fromTreeUri(context, treeUri) ?: error("外部下载目录不可用")
+            val directory = DocumentFile.fromTreeUri(context, treeUri) ?: error(context.getString(R.string.dl_err_dir_unavailable))
             val existing = directory.findFile(fileName)
-            val target = existing ?: directory.createFile(mimeType(fileName), fileName) ?: error("无法在外部目录创建文件")
+            val target = existing ?: directory.createFile(mimeType(fileName), fileName) ?: error(context.getString(R.string.dl_err_cannot_create_ext))
             return target.uri
         }
         val directory = File(context.filesDir, "downloads")
-        check(directory.exists() || directory.mkdirs()) { "无法创建内部下载目录" }
+        check(directory.exists() || directory.mkdirs()) { context.getString(R.string.dl_err_cannot_create_int) }
         return Uri.fromFile(File(directory, fileName))
     }
 

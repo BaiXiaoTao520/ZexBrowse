@@ -12,6 +12,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.BuildConfig
+import com.zex.zexbrowse.R
 import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.CUSTOM_SEARCH_PREFIX
@@ -232,11 +233,24 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         pendingLoadAttempts.remove(id)
     }
 
-    /** 延迟确认加载失败：等待可能的下载信号，避免下载场景误弹错误页 */
+    /**
+     * 延迟确认加载失败：等待可能的下载信号，避免下载场景误弹错误页。
+     *
+     * 延迟到期后再做一次实时校验：搜索站（如搜狗）结果页会不断触发后台跳转/重定向，
+     * Gecko 可能因此报一次 abort，但主页面其实已经渲染完成。
+     * 若到时页面已完整加载，就不能再把正常结果页换成错误页。
+     */
     private fun scheduleFailure(id: String, uri: String?, errorCode: Int, errorCategory: Int) {
         cancelPendingFailure(id)
         val task = Runnable {
             pendingFailures.remove(id)
+            val tab = _tabs.value.firstOrNull { it.id == id }
+            // 页面已真正加载成功（进度跑满且仍在同一条 http(s) 地址）时，丢弃这次失败。
+            // 这类 abort 来自页面内的推广跳转，不代表当前页面不能用。
+            if (tab != null && !tab.loading && tab.progress >= 100 && tab.url.startsWith("http") && !tab.failed) {
+                android.util.Log.d("ZexIntent", "skipFailure id=$id url=${tab.url} 页面已加载完成")
+                return@Runnable
+            }
             update(id) { it.copy(failed = true, failedUrl = uri ?: it.url, errorCode = errorCode, errorCategory = errorCategory) }
         }
         pendingFailures[id] = task
@@ -316,7 +330,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     // 当前标签停留在被拒绝的外部应用链接上时同样不算失败：
                     // 搜狗等搜索页会自动尝试跳 App，此时当前页仍是正常的结果页，不能换成错误页
                     val currentUrl = tab?.url.orEmpty()
-                    val isBlockedExternal = currentUrl.isNotBlank() && blockedExternalUris[id]?.contains(currentUrl) == true
+                    val isBlockedExternal = currentUrl.isNotBlank() && isBlockedExternal(id, currentUrl)
                     if (!isDownloadAbort && !isBlockedExternal) scheduleFailure(id, tab?.url, 0, 0)
                 }
             }
@@ -347,6 +361,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
                 // 收到下载信号：立即取消可能已排队的「加载失败」，避免下载时误弹错误页
                 cancelPendingFailure(id)
+                // 柠泽站点的 PoW 验证页是 HTML，Gecko 也会当它是一次外部响应。
+                // 若照单全收，用户会看到一个名为 verify 的「下载」，点下去又因没有真正的文件而卡住。
+                // 验证页应当留在网页内继续跑验证，不能弹下载框。
+                if (!isRealFileDownload(response)) {
+                    android.util.Log.d("ZexIntent", "ignoreNonFileResponse uri=${response.uri} type=${response.headers["Content-Type"]}")
+                    return
+                }
                 pendingDownloads[id] = response.uri
                 clearPending(id)
                 // 仅对柠枺镜像下载就地捕获响应体（它的一次性令牌二次请求必 403）。
@@ -424,7 +445,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val pendingDownload = pendingDownloads[id]
                 val isDownloadAbort = pendingDownload != null && (uri == null || isSameDownloadTarget(uri, pendingDownload))
                 // 被我们主动拒绕的外部应用导航同样不是失败，否则当前页面会被错误页覆盖
-                val isBlockedExternal = uri != null && blockedExternalUris[id]?.contains(uri) == true
+                val isBlockedExternal = uri != null && isBlockedExternal(id, uri)
                 if (!isDownloadAbort && !isBlockedExternal) scheduleFailure(id, uri, error.code, error.category)
                 return null
             }
@@ -628,7 +649,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun resumeDownload(id: String) {
         viewModelScope.launch {
             if (!downloadScheduler.resume(id)) {
-                android.widget.Toast.makeText(getApplication(), "下载记录已丢失，请重新下载", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.err_record_lost), android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -639,6 +660,32 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (!LemwoodMirror.isAvailable) return false
         val site = LemwoodMirror.siteUrl()
         return site.isNotBlank() && url.startsWith(site)
+    }
+
+    /**
+     * 判断这次外部响应是不是真的文件下载。
+     *
+     * Gecko 把「服务器要求存盘」的响应（带 Attachment、未知二进制类型等）交给 onExternalResponse，
+     * 但柠泽的 PoW 验证页也会走到这里。直接用文本类型判断不够：
+     * 1. 响应头带 Content-Disposition 且里面有 filename → 真实文件；
+     * 2. Content-Type 为 text/html / application/xhtml+xml → 是网页，不弹下载框；
+     * 3. 地址落在柠泽下载直链上（/download/...apk）→ 真实文件。
+     *
+     * 其余情况保持原有行为（当作下载），避免影响普通站点的下载。
+     */
+    private fun isRealFileDownload(response: WebResponse): Boolean {
+        val contentType = response.headers["Content-Type"].orEmpty().lowercase()
+        val isHtml = contentType.startsWith("text/html") || contentType.startsWith("application/xhtml")
+        val disposition = response.headers["Content-Disposition"].orEmpty()
+        val hasFileName = DownloadFileName.fromContentDisposition(disposition) != null
+        // 明确带了文件名附件头：以它为准，即使 MIME 被写成 text/*
+        if (hasFileName) return true
+        // 验证页等 HTML 响应：留在网页内，不弹下载框
+        if (isHtml) return false
+        // 柠泽下载直链：即使没带 Content-Disposition 也应当是真文件
+        if (isLemwoodUrl(response.uri) && response.uri.contains("/download/")) return true
+        // 其余保持原有行为（当作下载），不影响普通站点
+        return true
     }
     fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
     fun clearHistory() { applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
@@ -697,6 +744,24 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 搜索页会不断冒新的推广链接，限制条数避免无上限增长
         if (set.size > 64) set.clear()
         set.add(uri)
+        // 同一跳转的查询串/锚点可能变化（推广链接普遍带追踪参数），
+        // 额外按 scheme+host 登记一份，避免精确匹配落空后又弹错误页。
+        schemeHostKey(uri)?.let { set.add(it) }
+    }
+
+    /** 取 scheme://host 作为宽松匹配键；解析不出 host 时返回 null */
+    private fun schemeHostKey(uri: String): String? = runCatching {
+        val parsed = java.net.URI(uri)
+        val host = parsed.host?.takeIf { it.isNotBlank() }
+        if (host == null) null else "${parsed.scheme}://$host"
+    }.getOrNull()
+
+    /** 该地址（或它所属的 scheme+host）是否已被我们主动拒绘过 */
+    private fun isBlockedExternal(id: String, uri: String): Boolean {
+        val set = blockedExternalUris[id] ?: return false
+        if (uri in set) return true
+        val key = schemeHostKey(uri) ?: return false
+        return key in set
     }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
     /**

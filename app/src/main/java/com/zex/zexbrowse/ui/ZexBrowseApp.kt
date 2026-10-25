@@ -176,6 +176,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.res.stringResource
+import com.zex.zexbrowse.AppLocale
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
@@ -193,10 +195,11 @@ import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.data.recommendedApps
 import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadManager
-import com.zex.zexbrowse.download.UpdateDownloadResult
 import com.zex.zexbrowse.data.SecurityScanner
+import com.zex.zexbrowse.download.UpdateDownloadResult
 import com.zex.zexbrowse.ExternalLinkDiagnostics
 import com.zex.zexbrowse.BuildConfig
+import com.zex.zexbrowse.R
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -213,7 +216,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -275,7 +278,7 @@ private fun PageErrorView(
         ) {
             Icon(Icons.Default.WifiOff, null, modifier = Modifier.size(52.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(18.dp))
-            Text("无法访问此网站", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.s000), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
             // 同步显示请求失败的网址，方便用户核对是否输错或粘贴了错误链接
             Text(
@@ -298,7 +301,7 @@ private fun PageErrorView(
             Button(onClick = onRetry) {
                 Icon(Icons.Default.Refresh, null)
                 Spacer(Modifier.width(8.dp))
-                Text("重新加载")
+                Text(stringResource(R.string.s001))
             }
         }
     }
@@ -554,6 +557,13 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
 
     browserViewModel.browserSettings = settings
+    // 语言镜像同步：DataStore 是唯一事实源，SharedPreferences 只是给 attachBaseContext 的同步读缓存。
+    // 两者可能因异常退出/备份恢复而不一致，这里以 DataStore 为准修正一次。
+    LaunchedEffect(settings.language) {
+        if (AppLocale.current(context) != settings.language) {
+            AppLocale.remember(context, settings.language)
+        }
+    }
     // 网页请求麦克风 → 按「网页权限管理 → 麦克风权限」策略处理：
     // 始终拒绝直接回绝，始终允许直接放行，每次询问则弹窗并把选择按站点记住。
     // 放行前必须持有系统录音权限：未授权时先走系统询问，用户允许后才回传引擎。
@@ -720,13 +730,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     LaunchedEffect(settings.httpsOnlyEnabled, settings.httpsOnlyMode) {
         browserViewModel.applyHttpsOnly(settings.httpsOnlyEnabled, settings.httpsOnlyMode)
     }
-    val colorScheme = if (settings.dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
-        if (useDarkTheme) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
-    } else if (useDarkTheme) {
-        androidx.compose.material3.darkColorScheme()
-    } else {
-        androidx.compose.material3.lightColorScheme()
-    }
+    val colorScheme = resolveColorScheme(settings, useDarkTheme, context)
 
     // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清
     val view = LocalView.current
@@ -832,14 +836,14 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             if (showFirstRunStorageHint && startupUpdate == null) {
                 AlertDialog(
                     onDismissRequest = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } },
-                    title = { Text("建议修改下载目录") },
-                    text = { Text("当前下载目录为内部存储（应用私有目录）。为保证大文件与外部存储访问，建议改为外部存储目录。") },
+                    title = { Text(stringResource(R.string.s038)) },
+                    text = { Text(stringResource(R.string.s039)) },
                         confirmButton = { TextButton(onClick = {
                             showFirstRunStorageHint = false
                             scope.launch { settingsStore.storageHintShown(true) }
                             externalDirPicker.launch(null)
-                        }) { Text("设置外部存储") } },
-                    dismissButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } }) { Text("稍后") } }
+                        }) { Text(stringResource(R.string.s040)) } },
+                    dismissButton = { TextButton(onClick = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } }) { Text(stringResource(R.string.s041)) } }
                 )
             }
             // 首启引导第二弹：外部存储提示处理完（或无需提示）后询问是否设为默认浏览器
@@ -851,15 +855,15 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                 }
                 AlertDialog(
                     onDismissRequest = dismissDefaultBrowserPrompt,
-                    title = { Text("设为默认浏览器") },
-                    text = { Text("将 ZexBrowse 设为默认浏览器后，你从其它应用或分享菜单打开的网页链接会直接由它打开。是否设置完全由你自愿决定，也可以随时在系统设置中改回。") },
+                    title = { Text(stringResource(R.string.s042)) },
+                    text = { Text(stringResource(R.string.s043)) },
                     confirmButton = {
                         Button(onClick = {
                             dismissDefaultBrowserPrompt()
                             requestDefaultBrowser()
-                        }) { Text("设为默认") }
+                        }) { Text(stringResource(R.string.s044)) }
                     },
-                    dismissButton = { TextButton(onClick = dismissDefaultBrowserPrompt) { Text("稍后") } }
+                    dismissButton = { TextButton(onClick = dismissDefaultBrowserPrompt) { Text(stringResource(R.string.s041)) } }
                 )
             }
             // 网页请求麦克风且策略为「每次询问」时：按站点询问并记住选择。
@@ -881,10 +885,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                 }
                 AlertDialog(
                     onDismissRequest = { finishMic(false, false) },
-                    title = { Text("允许使用麦克风？") },
-                    text = { Text("$micSite 请求使用你的麦克风。") },
-                    confirmButton = { TextButton(onClick = { finishMic(true, true) }) { Text("始终允许") } },
-                    dismissButton = { TextButton(onClick = { finishMic(false, true) }) { Text("拒绝") } }
+                    title = { Text(stringResource(R.string.s045)) },
+                    text = { Text(stringResource(R.string.s046, micSite)) },
+                    confirmButton = { TextButton(onClick = { finishMic(true, true) }) { Text(stringResource(R.string.s047)) } },
+                    dismissButton = { TextButton(onClick = { finishMic(false, true) }) { Text(stringResource(R.string.s048)) } }
                 )
             }
         }
@@ -954,6 +958,7 @@ private fun PageContent(
             onHistory = { navigate(Page.HISTORY) },
             onBookmarks = { navigate(Page.BOOKMARKS) },
             onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
+            onLanguage = { navigate(Page.LANGUAGE) },
             onSiteSettings = { navigate(Page.SITE_SETTINGS) },
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
             onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
@@ -966,11 +971,22 @@ private fun PageContent(
         Page.GENERAL_SETTINGS -> GeneralSettingsScreen(
             settings = settings,
             setMode = { scope.launch { settingsStore.mode(it) } },
-            setDynamic = { scope.launch { settingsStore.dynamic(it) } },
             setApkHash = { scope.launch { settingsStore.apkHash(it) } },
             setHardwareAcceleration = { scope.launch { settingsStore.hardwareAcceleration(it) } },
+            setColorTheme = { scope.launch { settingsStore.colorTheme(it) } },
+            setCustomColor = { scope.launch { settingsStore.customColor(it) } },
             onDownloads = { navigate(Page.DOWNLOADS) },
             onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
+            onBack = goBack
+        )
+        Page.LANGUAGE -> LanguageScreen(
+            language = settings.language,
+            setLanguage = { tag ->
+                // 先同步镜像一份，再写 DataStore：这样无论何时重启，attachBaseContext 都能读到新语言
+                AppLocale.remember(context, tag)
+                scope.launch { settingsStore.language(tag) }
+                Toast.makeText(context, "语言已切换，重启应用后完全生效", Toast.LENGTH_SHORT).show()
+            },
             onBack = goBack
         )
         Page.SITE_SETTINGS -> WebSiteSettingsScreen(
@@ -1139,8 +1155,8 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
             AppRecommendationEntry(onClick = onAppRecommendations)
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("书签", style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { showQuickSiteDialog = true }) { Text("添加") }
+                Text(stringResource(R.string.s060), style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = { showQuickSiteDialog = true }) { Text(stringResource(R.string.s061)) }
             }
             BookmarkGrid(
                 sites = bookmarks,
@@ -1194,7 +1210,7 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("应用推荐") },
+                title = { Text(stringResource(R.string.s062)) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
             )
         }
@@ -1205,10 +1221,10 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text("Zex 开发者为您精选以下应用", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.s064), style = MaterialTheme.typography.titleMedium)
             }
             item {
-                Text("发现适合你的工具与创作体验", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.s065), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(recommendedApps) { app ->
                 RecommendationCard(app = app) { detail = app }
@@ -1475,7 +1491,7 @@ private fun RecommendationInfoDialog(
                 Text(if (app.isApk) "下载" else "浏览器打开")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -1506,7 +1522,7 @@ private fun BrowserNoticeDialog(
                 Text(notice.confirmLabel)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -1554,11 +1570,11 @@ private fun RecommendationDownloadDialog(
     val failed = record?.status == "failed" || record?.status == "cancelled"
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("下载 ${app.displayName}") },
+        title = { Text(stringResource(R.string.s072, app.displayName)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (finished) {
-                    Text("下载完成，可直接安装；文件也已保存到「下载设置」指定的目录。")
+                    Text(stringResource(R.string.s073))
                     record?.sha256?.takeIf { it.isNotBlank() }?.let { hash ->
                         Text("SHA-256：$hash", style = MaterialTheme.typography.bodySmall)
                     }
@@ -1569,24 +1585,24 @@ private fun RecommendationDownloadDialog(
                     if (progress > 0) {
                         // 确定态：沿用原来的平滑波浪进度条
                         WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
-                        Text("正在下载：$progress%")
+                        Text(stringResource(R.string.s075, progress))
                     } else {
                         // 连接中：不确定态波浪进度条，无限滚动
                         LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
-                        Text("正在连接服务器…")
+                        Text(stringResource(R.string.s076))
                     }
                 }
             }
         },
         confirmButton = {
             if (finished) {
-                TextButton(onClick = onInstall) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("立即安装") }
+                TextButton(onClick = onInstall) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.s077)) }
             }
         },
         dismissButton = {
             Row {
                 if (!finished) {
-                    TextButton(onClick = onCancel) { Text("取消下载") }
+                    TextButton(onClick = onCancel) { Text(stringResource(R.string.s078)) }
                 }
                 TextButton(onClick = onDismiss) { Text(if (finished) "关闭" else "后台下载") }
             }
@@ -1622,8 +1638,8 @@ private fun AppRecommendationEntry(onClick: () -> Unit) {
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("应用推荐", style = MaterialTheme.typography.titleMedium)
-                Text("精选工具与创作应用，一点即览", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.s062), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.s081), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -1690,7 +1706,7 @@ private fun SecurityDetailDialog(
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s087)) } }
     )
 }
 
@@ -1719,10 +1735,10 @@ private fun RiskySiteDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onBack) { Text("返回") }
+            TextButton(onClick = onBack) { Text(stringResource(R.string.s063)) }
         },
         dismissButton = {
-            TextButton(onClick = onProceed) { Text("仍然访问") }
+            TextButton(onClick = onProceed) { Text(stringResource(R.string.s090)) }
         }
     )
 }
@@ -1770,7 +1786,7 @@ private fun AddressInput(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
-            placeholder = { Text("搜索或输入网址") },
+            placeholder = { Text(stringResource(R.string.s091)) },
             singleLine = true,
             shape = MaterialTheme.shapes.extraLarge,
             leadingIcon = if (security != null) {
@@ -1892,12 +1908,12 @@ private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onEdit: (Qui
         }
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
             DropdownMenuItem(
-                text = { Text("编辑书签") },
+                text = { Text(stringResource(R.string.s096)) },
                 leadingIcon = { Icon(Icons.Default.Edit, null) },
                 onClick = { menuExpanded = false; onEdit(site) }
             )
             DropdownMenuItem(
-                text = { Text("删除书签") },
+                text = { Text(stringResource(R.string.s097)) },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menuExpanded = false; onDelete(site) }
             )
@@ -1918,7 +1934,7 @@ private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text("书签管理") },
+            title = { Text(stringResource(R.string.s098)) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
             actions = {
                 IconButton(onClick = { showAddDialog = true }) { Icon(Icons.Default.Add, "添加书签") }
@@ -1928,9 +1944,9 @@ private fun BookmarksScreen(settings: BrowserSettings, setQuickSites: (String) -
         if (bookmarks.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("暂无书签", style = MaterialTheme.typography.titleMedium)
-                    Text("长按列表中的书签即可编辑或删除", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { showAddDialog = true }) { Text("添加书签") }
+                    Text(stringResource(R.string.s100), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.s101), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { showAddDialog = true }) { Text(stringResource(R.string.s099)) }
                 }
             }
         } else {
@@ -1995,12 +2011,12 @@ private fun BookmarkManageRow(site: QuickSite, onEdit: () -> Unit, onDelete: () 
         )
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
             DropdownMenuItem(
-                text = { Text("编辑书签") },
+                text = { Text(stringResource(R.string.s096)) },
                 leadingIcon = { Icon(Icons.Default.Edit, null) },
                 onClick = { menuExpanded = false; onEdit() }
             )
             DropdownMenuItem(
-                text = { Text("删除书签") },
+                text = { Text(stringResource(R.string.s097)) },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menuExpanded = false; onDelete() }
             )
@@ -2019,12 +2035,12 @@ private fun BookmarkDialog(initial: QuickSite? = null, onSubmit: (QuickSite) -> 
         title = { Text(if (isEdit) "编辑书签" else "添加书签") },
         text = {
             Column {
-                OutlinedTextField(title, { title = it }, label = { Text("名称") })
-                OutlinedTextField(url, { url = it }, label = { Text("网址") })
+                OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.s102)) })
+                OutlinedTextField(url, { url = it }, label = { Text(stringResource(R.string.s103)) })
             }
         },
         confirmButton = { TextButton(onClick = { if (title.isNotBlank() && url.isNotBlank()) onSubmit(QuickSite(title, url, title.take(1))) }) { Text(if (isEdit) "保存" else "添加") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -2208,14 +2224,14 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 Box {
                     IconButton(onClick = { showBrowserMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
                     DropdownMenu(expanded = showBrowserMenu, onDismissRequest = { showBrowserMenu = false }, offset = androidx.compose.ui.unit.DpOffset(0.dp, 48.dp)) {
-                        DropdownMenuItem(text = { Text("电脑 UA 模式") }, leadingIcon = { if (selectedTab?.session?.settings?.userAgentOverride?.contains("X11") == true) Icon(Icons.Default.Check, null) else Icon(Icons.Default.Computer, null) }, onClick = { viewModel.toggleDesktopUserAgent(); showBrowserMenu = false })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.s116)) }, leadingIcon = { if (selectedTab?.session?.settings?.userAgentOverride?.contains("X11") == true) Icon(Icons.Default.Check, null) else Icon(Icons.Default.Computer, null) }, onClick = { viewModel.toggleDesktopUserAgent(); showBrowserMenu = false })
                         DropdownMenuItem(
                             text = { Text(if (bookmarked) "删除书签" else "添加书签") },
                             leadingIcon = { Icon(if (bookmarked) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
                             onClick = toggleBookmark
                         )
-                        DropdownMenuItem(text = { Text("下载记录") }, leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { showBrowserMenu = false; onDownloads() })
-                        DropdownMenuItem(text = { Text("浏览器设置") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showBrowserMenu = false; onSettings() })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.s117)) }, leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { showBrowserMenu = false; onDownloads() })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.s118)) }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showBrowserMenu = false; onSettings() })
                     }
                 }
             }
@@ -2240,8 +2256,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 if (selectedTab.incognito) {
                     Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.inverseSurface, shape = MaterialTheme.shapes.small) {
                         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("无痕浏览：退出后将关闭全部无痕标签并清除 Cookie 与缓存，普通标签不受影响。", Modifier.weight(1f), color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { viewModel.exitIncognito() }) { Text("退出无痕", color = MaterialTheme.colorScheme.inversePrimary) }
+                            Text(stringResource(R.string.s120), Modifier.weight(1f), color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { viewModel.exitIncognito() }) { Text(stringResource(R.string.s121), color = MaterialTheme.colorScheme.inversePrimary) }
                         }
                     }
                 }
@@ -2291,10 +2307,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     if (showNewTabDialog) {
         AlertDialog(
             onDismissRequest = { showNewTabDialog = false },
-            title = { Text("新建标签") },
-            text = { Text("无痕标签不会保存浏览历史、Cookie 或缓存。") },
-            confirmButton = { TextButton(onClick = { viewModel.newTab(); showNewTabDialog = false; onTabs(false) }) { Text("普通标签") } },
-            dismissButton = { TextButton(onClick = { viewModel.newTab(incognito = true); showNewTabDialog = false; onTabs(true) }) { Text("无痕标签") } }
+            title = { Text(stringResource(R.string.s113)) },
+            text = { Text(stringResource(R.string.s122)) },
+            confirmButton = { TextButton(onClick = { viewModel.newTab(); showNewTabDialog = false; onTabs(false) }) { Text(stringResource(R.string.s123)) } },
+            dismissButton = { TextButton(onClick = { viewModel.newTab(incognito = true); showNewTabDialog = false; onTabs(true) }) { Text(stringResource(R.string.s124)) } }
         )
     }
     // 护盾说明弹窗
@@ -2344,18 +2360,18 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     if (hashResult != null) {
         AlertDialog(
             onDismissRequest = { hashResult = null },
-            title = { Text("APK 哈希校验") },
+            title = { Text(stringResource(R.string.s126)) },
             text = { Text(hashResult!!) },
-            confirmButton = { TextButton(onClick = { hashResult = null }) { Text("确定") } }
+            confirmButton = { TextButton(onClick = { hashResult = null }) { Text(stringResource(R.string.s127)) } }
         )
     }
     if (pendingExternalAppUri != null) {
         AlertDialog(
             onDismissRequest = { pendingExternalAppUri = null; pendingExternalApp = null },
-            title = { Text("打开外部应用？") },
-            text = { Text("此链接将交给设备上的其它应用打开：\n${pendingExternalAppUri}") },
-            confirmButton = { TextButton(onClick = { pendingExternalApp?.invoke(); pendingExternalAppUri = null; pendingExternalApp = null }) { Text("打开") } },
-            dismissButton = { TextButton(onClick = { pendingExternalAppUri = null; pendingExternalApp = null }) { Text("取消") } }
+            title = { Text(stringResource(R.string.s128)) },
+            text = { Text(stringResource(R.string.s129, pendingExternalAppUri)) },
+            confirmButton = { TextButton(onClick = { pendingExternalApp?.invoke(); pendingExternalAppUri = null; pendingExternalApp = null }) { Text(stringResource(R.string.s093)) } },
+            dismissButton = { TextButton(onClick = { pendingExternalAppUri = null; pendingExternalApp = null }) { Text(stringResource(R.string.s071)) } }
         )
     }
     if (clipboardReadSite != null) {
@@ -2368,10 +2384,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         }
         AlertDialog(
             onDismissRequest = { finishClipboard(false, false) },
-            title = { Text("允许读取剪贴板？") },
-            text = { Text("${siteHost(site)} 请求读取你的剪贴板内容。") },
-            confirmButton = { TextButton(onClick = { finishClipboard(true, true) }) { Text("始终允许") } },
-            dismissButton = { TextButton(onClick = { finishClipboard(false, true) }) { Text("拒绝") } }
+            title = { Text(stringResource(R.string.s130)) },
+            text = { Text(stringResource(R.string.s131, siteHost(site))) },
+            confirmButton = { TextButton(onClick = { finishClipboard(true, true) }) { Text(stringResource(R.string.s047)) } },
+            dismissButton = { TextButton(onClick = { finishClipboard(false, true) }) { Text(stringResource(R.string.s048)) } }
         )
     }
 }
@@ -2384,14 +2400,14 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("全部标签") },
+                title = { Text(stringResource(R.string.s132)) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
                 actions = { TextButton(onClick = { if (incognitoOnly) viewModel.closeAllIncognito() else viewModel.closeAllNormal() }) { Text(if (incognitoOnly) "关闭无痕" else "关闭普通") } }
             )
         }
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text("普通标签") }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text("无痕标签") }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
+            item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
             if (displayedTabs.isEmpty()) item { Text(if (incognitoOnly) "暂无无痕标签" else "暂无普通标签") }
             items(displayedTabs, key = { it.id }) { tab ->
                 ElevatedCard(onClick = { viewModel.select(tab.id); onBack() }, modifier = Modifier.fillMaxWidth()) {
@@ -2421,7 +2437,7 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
     var deleteFiles by remember { mutableStateOf(false) }
     Scaffold(topBar = { TopAppBar(title = { Text(if (selectedIds.isEmpty()) "下载记录" else "已选 ${selectedIds.size} 项") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { if (selectedIds.isNotEmpty()) IconButton(onClick = { showDeleteConfirmation = true }) { Icon(Icons.Default.Delete, "删除选中项") } }) }) { padding ->
         if (downloads.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("暂无下载记录") }
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(stringResource(R.string.s139)) }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { TextButton(onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() }) { Text(if (selectedIds.size == downloads.size) "取消全选" else "全选") } }
@@ -2429,7 +2445,7 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
             }
         }
     }
-    if (showDeleteConfirmation) AlertDialog(onDismissRequest = { showDeleteConfirmation = false }, title = { Text("删除下载记录？") }, text = { Column { Text("将删除 ${selectedIds.size} 条下载记录。") ; CheckRow("同时删除本地下载文件", deleteFiles) { deleteFiles = it } } }, confirmButton = { TextButton(onClick = { downloads.filter { it.id in selectedIds }.forEach { viewModel.deleteDownload(it.id, it.targetUri, deleteFiles) }; Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show(); selectedIds = emptySet(); showDeleteConfirmation = false }) { Text("删除") } }, dismissButton = { TextButton(onClick = { showDeleteConfirmation = false }) { Text("取消") } })
+    if (showDeleteConfirmation) AlertDialog(onDismissRequest = { showDeleteConfirmation = false }, title = { Text(stringResource(R.string.s142)) }, text = { Column { Text("将删除 ${selectedIds.size} 条下载记录。") ; CheckRow("同时删除本地下载文件", deleteFiles) { deleteFiles = it } } }, confirmButton = { TextButton(onClick = { downloads.filter { it.id in selectedIds }.forEach { viewModel.deleteDownload(it.id, it.targetUri, deleteFiles) }; Toast.makeText(context, "已完成", Toast.LENGTH_SHORT).show(); selectedIds = emptySet(); showDeleteConfirmation = false }) { Text(stringResource(R.string.s145)) } }, dismissButton = { TextButton(onClick = { showDeleteConfirmation = false }) { Text(stringResource(R.string.s071)) } })
 }
 
 private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
@@ -2439,9 +2455,9 @@ private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit,
     val context = LocalContext.current
     val history by viewModel.history.collectAsState(initial = emptyList())
     var showClearConfirmation by remember { mutableStateOf(false) }
-    Scaffold(topBar = { TopAppBar(title = { Text("浏览历史") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { if (history.isNotEmpty()) TextButton(onClick = { showClearConfirmation = true }) { Text("清除") } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s058)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = { if (history.isNotEmpty()) TextButton(onClick = { showClearConfirmation = true }) { Text(stringResource(R.string.s146)) } }) }) { padding ->
         if (history.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("暂无浏览历史") }
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(stringResource(R.string.s147)) }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(history, key = { it.id }) { item ->
@@ -2505,7 +2521,7 @@ private fun openDownload(context: android.content.Context, item: DownloadEntity)
 
 private fun copyDownloadLink(context: android.content.Context, url: String) {
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("下载链接", url))
+    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(stringResource(R.string.s155), url))
 }
 
 @Composable
@@ -2524,11 +2540,11 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
                     Text("${item.progress}% · ${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}")
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (running) {
-                            TextButton(onClick = onPause) { Icon(Icons.Default.Pause, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("暂停") }
+                            TextButton(onClick = onPause) { Icon(Icons.Default.Pause, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.s156)) }
                         } else {
-                            TextButton(onClick = onResume) { Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("继续") }
+                            TextButton(onClick = onResume) { Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.s157)) }
                         }
-                        TextButton(onClick = onCancel) { Text("取消下载") }
+                        TextButton(onClick = onCancel) { Text(stringResource(R.string.s078)) }
                     }
                 } else if (item.status == "completed" || item.status == "hash_mismatch") {
                     IconButton(onClick = onOpen) { Icon(Icons.Default.OpenInNew, "打开文件") }
@@ -2538,7 +2554,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect
             }
             Box {
                 IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "更多") }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) { DropdownMenuItem(text = { Text("删除") }, onClick = { menuExpanded = false; onDelete() }) }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) { DropdownMenuItem(text = { Text(stringResource(R.string.s145)) }, onClick = { menuExpanded = false; onDelete() }) }
             }
         }
     }
@@ -2569,6 +2585,7 @@ private fun SettingsScreen(
     onHistory: () -> Unit,
     onBookmarks: () -> Unit,
     onGeneralSettings: () -> Unit,
+    onLanguage: () -> Unit,
     onSiteSettings: () -> Unit,
     onCookieSettings: () -> Unit,
     onHttpsOnly: () -> Unit,
@@ -2585,7 +2602,8 @@ private fun SettingsScreen(
     val searchIndex = remember {
         listOf(
             SettingSearchItem("主题", "通用设置", listOf("主题", "浅色", "深色", "夜间", "跟随系统", "亮色", "暗色"), onGeneralSettings),
-            SettingSearchItem("动态莫奈取色", "通用设置", listOf("取色", "莫奈", "Monet", "动态颜色", "壁纸", "主题色"), onGeneralSettings),
+            SettingSearchItem("语言", "语言", listOf("语言", "language", "中文", "英文", "繁体", "简体"), onLanguage),
+            SettingSearchItem("颜色主题", "通用设置", listOf("颜色", "主题", "配色", "取色", "动态", "莫奈", "Monet", "自定义颜色", "主题色"), onGeneralSettings),
             SettingSearchItem("硬件加速", "通用设置", listOf("硬件加速", "渲染", "性能", "GPU", "卡顿", "流畅", "掉帧", "加速"), onGeneralSettings),
             SettingSearchItem("下载记录", "通用设置", listOf("下载", "记录", "下载记录", "文件", "进度"), onGeneralSettings),
             SettingSearchItem("下载文件路径", "通用设置", listOf("路径", "保存位置", "存储", "目录", "下载位置", "下载路径"), onGeneralSettings),
@@ -2613,6 +2631,7 @@ private fun SettingsScreen(
     val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit) {
         listOf(
             SettingsEntryItem("通用设置", "主题、动态取色、硬件加速、下载与保存路径", Icons.Rounded.Tune, onGeneralSettings),
+            SettingsEntryItem("语言", "跟随系统、简体中文、繁体中文、English", Icons.Rounded.Language, onLanguage),
             SettingsEntryItem("网站设置", "强制适配深色模式、搜索引擎、浏览器标识", Icons.Rounded.Language, onSiteSettings),
             SettingsEntryItem("隐私", cookieSettingsSubtitle(settings), Icons.Rounded.PrivacyTip, onCookieSettings),
             SettingsEntryItem("网页权限管理", "剪贴板读取、外部 APP 跳转、麦克风", Icons.Rounded.Security, onWebPermissions),
@@ -2634,7 +2653,7 @@ private fun SettingsScreen(
                 (item.title.contains(q, ignoreCase = true) || item.keywords.any { it.contains(q, ignoreCase = true) })
         }
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s059)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             // 设置搜索框
             item {
@@ -2642,7 +2661,7 @@ private fun SettingsScreen(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    placeholder = { Text("搜索设置项") },
+                    placeholder = { Text(stringResource(R.string.s302)) },
                     singleLine = true,
                     shape = MaterialTheme.shapes.extraLarge,
                     leadingIcon = { Icon(Icons.Default.Search, "搜索") },
@@ -2698,9 +2717,9 @@ private fun SettingsScreen(
         val info by ExternalLinkDiagnostics.last.collectAsState()
         AlertDialog(
             onDismissRequest = { showLinkDiagnostics = false },
-            title = { Text("外链诊断") },
+            title = { Text(stringResource(R.string.s277)) },
             text = { Text(if (info.isBlank()) "尚未收到任何外部跳转。请从其它应用打开一个链接后再回来查看。" else info) },
-            confirmButton = { TextButton(onClick = { showLinkDiagnostics = false }) { Text("关闭") } }
+            confirmButton = { TextButton(onClick = { showLinkDiagnostics = false }) { Text(stringResource(R.string.s079)) } }
         )
     }
 }
@@ -2783,9 +2802,39 @@ private fun CheckRow(title: String, checked: Boolean, changed: (Boolean) -> Unit
     }
 }
 
+/**
+ * 根据「颜色主题」设置解析出实际使用的配色。
+ *
+ * - dynamic：走系统动态取色（Android 12+）；旧系统或无动态取色时退回默认配色
+ * - 预设：用种子色推导明暗两套完整色调
+ * - custom：用户自选的种子色，非法值回退默认自定义色
+ */
+@Composable
+private fun resolveColorScheme(settings: BrowserSettings, dark: Boolean, context: android.content.Context): androidx.compose.material3.ColorScheme {
+    val theme = ColorTheme.entries.firstOrNull { it.name.equals(settings.colorTheme, ignoreCase = true) }
+        ?: ColorTheme.DYNAMIC
+    if (theme == ColorTheme.DYNAMIC) {
+        return if (android.os.Build.VERSION.SDK_INT >= 31) {
+            if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+        } else {
+            if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+        }
+    }
+    val seed: Color
+    val neutral: Color?
+    if (theme == ColorTheme.CUSTOM) {
+        seed = parseColorOrNull(settings.customColor) ?: defaultCustomSeed
+        neutral = null
+    } else {
+        seed = presetSeeds[theme] ?: defaultCustomSeed
+        neutral = presetNeutrals[theme]
+    }
+    return if (dark) buildDarkScheme(seed, neutral) else buildLightScheme(seed, neutral)
+}
+
 @Composable
 private fun ConfirmDialog(title: String, message: String, confirm: () -> Unit, dismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { TextButton(onClick = confirm) { Text("确定") } }, dismissButton = { TextButton(onClick = dismiss) { Text("取消") } })
+    AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { TextButton(onClick = confirm) { Text(stringResource(R.string.s127)) } }, dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.s071)) } })
 }
 
 private fun searchEngineLabel(settings: BrowserSettings) = when {
@@ -2820,9 +2869,9 @@ private fun DownloadDirectoryScreen(settings: BrowserSettings, onSave: (String, 
             externalPath = uri.path?.substringAfterLast(":")?.let { "/storage/emulated/0/$it/" } ?: ""
         }
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("下载文件路径") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = {
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s194)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }, actions = {
         if (!useExternal || externalUri.isNotBlank()) {
-            TextButton(onClick = { onSave(if (useExternal) "external" else "internal", externalUri, externalPath) }) { Text("确定") }
+            TextButton(onClick = { onSave(if (useExternal) "external" else "internal", externalUri, externalPath) }) { Text(stringResource(R.string.s127)) }
         }
     }) }) { padding ->
         Column(
@@ -2830,11 +2879,11 @@ private fun DownloadDirectoryScreen(settings: BrowserSettings, onSave: (String, 
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             ChoiceItem("内部应用目录", !useExternal) { useExternal = false }
-            Text("内部目录不可修改，卸载应用后会一并清理。", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.s316), style = MaterialTheme.typography.bodySmall)
             ChoiceItem("外部目录", useExternal) { useExternal = true }
             Text(externalPath.ifEmpty { "未设置（请点击下方按钮选择目录）" }, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(enabled = useExternal, onClick = { treeLauncher.launch(null) }) { Text("修改外部目录") }
-            Text("选择目录时将由系统授予访问权限，支持任意可授权的外部目录。", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(enabled = useExternal, onClick = { treeLauncher.launch(null) }) { Text(stringResource(R.string.s319)) }
+            Text(stringResource(R.string.s320), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -2935,12 +2984,12 @@ private fun CustomSearchEngineRow(
         )
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
             DropdownMenuItem(
-                text = { Text("编辑") },
+                text = { Text(stringResource(R.string.s323)) },
                 leadingIcon = { Icon(Icons.Default.Edit, null) },
                 onClick = { menuExpanded = false; onEdit() }
             )
             DropdownMenuItem(
-                text = { Text("删除") },
+                text = { Text(stringResource(R.string.s145)) },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menuExpanded = false; onDelete() }
             )
@@ -2965,12 +3014,12 @@ private fun CustomSearchEngineDialog(
         title = { Text(if (isEdit) "编辑搜索引擎" else "添加搜索引擎") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.s102)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
                     url,
                     { url = it },
-                    label = { Text("搜索 URL") },
-                    supportingText = { Text("使用 {query} 表示关键词") },
+                    label = { Text(stringResource(R.string.s325)) },
+                    supportingText = { Text(stringResource(R.string.s326)) },
                     isError = url.isNotBlank() && !url.contains("{query}"),
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth()
@@ -2982,7 +3031,7 @@ private fun CustomSearchEngineDialog(
                 Text(if (isEdit) "保存" else "添加")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -2993,7 +3042,7 @@ private fun UserAgentScreen(settings: BrowserSettings, onSelect: (String) -> Uni
     SelectionScreen("浏览器标识", onBack) {
         agents.forEach { (value, title) -> item { ChoiceItem(title, settings.userAgentMode == value) { onSelect(value) } } }
         item { SwitchRow("简化浏览器标识", "减少 User-Agent 中的设备信息", settings.simplifiedUserAgent, onSimplified, leading = Icons.Default.Computer) }
-        item { ListItem(headlineContent = { Text("自定义浏览器标识") }, supportingContent = { Text(if (customCount > 0) "$customCount 个" else "未添加") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s329)) }, supportingContent = { Text(if (customCount > 0) "$customCount 个" else "未添加") }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
     }
 }
 
@@ -3012,7 +3061,7 @@ private fun CustomUserAgentScreen(
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text("自定义浏览器标识") },
+            title = { Text(stringResource(R.string.s329)) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
             actions = { IconButton(onClick = { showAddDialog = true }) { Icon(Icons.Default.Add, "添加") } }
         )
@@ -3020,9 +3069,9 @@ private fun CustomUserAgentScreen(
         if (agents.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("暂无自定义浏览器标识", style = MaterialTheme.typography.titleMedium)
-                    Text("点击右上角添加", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { showAddDialog = true }) { Text("添加") }
+                    Text(stringResource(R.string.s332), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.s333), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { showAddDialog = true }) { Text(stringResource(R.string.s061)) }
                 }
             }
         } else {
@@ -3085,12 +3134,12 @@ private fun CustomUserAgentRow(agent: CustomUserAgent, selected: Boolean, onSele
         )
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
             DropdownMenuItem(
-                text = { Text("编辑") },
+                text = { Text(stringResource(R.string.s323)) },
                 leadingIcon = { Icon(Icons.Default.Edit, null) },
                 onClick = { menuExpanded = false; onEdit() }
             )
             DropdownMenuItem(
-                text = { Text("删除") },
+                text = { Text(stringResource(R.string.s145)) },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { menuExpanded = false; onDelete() }
             )
@@ -3109,12 +3158,12 @@ private fun CustomUserAgentDialog(initial: CustomUserAgent? = null, onSubmit: (C
         title = { Text(if (isEdit) "编辑浏览器标识" else "添加浏览器标识") },
         text = {
             Column {
-                OutlinedTextField(title, { title = it }, label = { Text("标题") }, singleLine = true)
-                OutlinedTextField(ua, { ua = it }, label = { Text("浏览器标识内容") }, minLines = 4)
+                OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.s336)) }, singleLine = true)
+                OutlinedTextField(ua, { ua = it }, label = { Text(stringResource(R.string.s337)) }, minLines = 4)
             }
         },
         confirmButton = { TextButton(onClick = { if (title.isNotBlank() && ua.isNotBlank()) onSubmit(CustomUserAgent(title.trim(), ua.trim())) }) { Text(if (isEdit) "保存" else "添加") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -3125,9 +3174,9 @@ private fun ClipboardPermissionScreen(settings: BrowserSettings, onSelect: (Stri
         item { ChoiceItem("始终允许", settings.clipboardReadPolicy == "allow") { onSelect("allow") } }
         item { ChoiceItem("始终拒绝", settings.clipboardReadPolicy == "deny") { onSelect("deny") } }
         // 说明文字：上下留白，避免贴到上方选项与下方按钮的边缘
-        item { Text("网站请求读取剪贴板时：始终允许/拒绝将直接放行或拦截；每次询问则会弹出提示，并将你的选择按网站永久记住。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+        item { Text(stringResource(R.string.s339), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
         item { Spacer(Modifier.height(24.dp)) }
-        item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text("清除已记住的网站权限") } }
+        item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text(stringResource(R.string.s340)) } }
     }
 }
 
@@ -3159,23 +3208,53 @@ private fun SimplePolicyScreen(
 private fun GeneralSettingsScreen(
     settings: BrowserSettings,
     setMode: (String) -> Unit,
-    setDynamic: (Boolean) -> Unit,
     setApkHash: (Boolean) -> Unit,
     setHardwareAcceleration: (Boolean) -> Unit,
+    setColorTheme: (String) -> Unit,
+    setCustomColor: (String) -> Unit,
     onDownloads: () -> Unit,
     onDownloadDirectory: () -> Unit,
     onBack: () -> Unit
 ) {
+    var showCustomColor by remember { mutableStateOf(false) }
     SelectionScreen("通用设置", onBack) {
         item { SectionHeader("主题设置") }
         item { ThemeSelector(settings.darkMode, setMode) }
-        item { SwitchRow("动态莫奈取色", "使用系统动态颜色", settings.dynamicColor, setDynamic, leading = Icons.Rounded.Palette) }
+        item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(stringResource(R.string.color_theme_section), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.color_theme_section_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                ColorThemeGrid(
+                    current = settings.colorTheme,
+                    customHex = settings.customColor,
+                    onPick = { setColorTheme(it.name.lowercase()) },
+                    onEditCustom = { showCustomColor = true }
+                )
+            }
+        }
         item { SectionHeader("性能") }
         item { SwitchRow("硬件加速", "使用 GPU 合成图层（SurfaceView）提升滚动与动画流畅度；部分机型开启后耗电或发热较高，可关闭改用兼容渲染", settings.hardwareAcceleration, setHardwareAcceleration, leading = Icons.Rounded.Speed) }
         item { SectionHeader("下载设置") }
-        item { ListItem(headlineContent = { Text("下载记录") }, supportingContent = { Text("查看下载进度与历史") }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
-        item { ListItem(headlineContent = { Text("下载文件路径") }, supportingContent = { Text(downloadDirectoryLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s117)) }, supportingContent = { Text(stringResource(R.string.s345)) }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s194)) }, supportingContent = { Text(downloadDirectoryLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
         item { SwitchRow("APK SHA-256 校验", "下载 APK 时计算哈希值", settings.apkHashEnabled, setApkHash, leading = Icons.Rounded.VerifiedUser) }
+    }
+
+    if (showCustomColor) {
+        CustomColorDialog(
+            initialHex = settings.customColor,
+            onConfirm = { hex ->
+                setCustomColor(hex)
+                setColorTheme("custom")
+                showCustomColor = false
+            },
+            onDismiss = { showCustomColor = false }
+        )
     }
 }
 
@@ -3212,8 +3291,8 @@ private fun WebSiteSettingsScreen(
         item { SectionHeader("网页渲染") }
         item { SwitchRow("强制适配深色模式", "开启后强制暗化未适配网页去除白底；关闭后网页按自身与系统偏好渲染", settings.forceDarkWeb, setForceDarkWeb, leading = Icons.Rounded.DarkMode) }
         item { SectionHeader("搜索与浏览") }
-        item { ListItem(headlineContent = { Text("搜索引擎") }, supportingContent = { Text(searchEngineLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
-        item { ListItem(headlineContent = { Text("浏览器标识") }, supportingContent = { Text(userAgentLabel(settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s213)) }, supportingContent = { Text(searchEngineLabel(settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s219)) }, supportingContent = { Text(userAgentLabel(settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
     }
 }
 
@@ -3243,7 +3322,7 @@ private fun CookieSettingsScreen(
                 modifier = Modifier.clickable(onClick = onHttpsOnly)
             )
         }
-        item { ListItem(headlineContent = { Text("清除缓存与 Cookie") }, supportingContent = { Text("立即清除缓存、Cookie 和浏览历史") }, leadingContent = { Icon(Icons.Default.Delete, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s228)) }, supportingContent = { Text(stringResource(R.string.s351)) }, leadingContent = { Icon(Icons.Default.Delete, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
         item { SwitchRow("退出时清除浏览器数据", "离开应用后清除缓存、Cookie 与历史记录", settings.clearOnExit, { showExitOptions = true }, leading = Icons.Default.Delete) }
     }
     if (showClearConfirmation) ConfirmDialog("清除浏览器数据？", "将清除缓存、Cookie 和浏览历史，此操作无法撤销。", {
@@ -3252,7 +3331,7 @@ private fun CookieSettingsScreen(
     if (showExitOptions) {
         AlertDialog(
             onDismissRequest = { showExitOptions = false },
-            title = { Text("退出时清除浏览器数据") },
+            title = { Text(stringResource(R.string.s232)) },
             text = {
                 Column {
                     CheckRow("Cookie 与站点数据", exitCookies) { exitCookies = it }
@@ -3264,9 +3343,9 @@ private fun CookieSettingsScreen(
                 TextButton(onClick = {
                     setClearOnExit(exitCookies || exitCache || exitHistory, exitCookies, exitCache, exitHistory)
                     showExitOptions = false
-                }) { Text("确定") }
+                }) { Text(stringResource(R.string.s127)) }
             },
-            dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { showExitOptions = false }) { Text(stringResource(R.string.s071)) } }
         )
     }
 }
@@ -3315,8 +3394,8 @@ private fun HttpsOnlyScreen(
         }
         item {
             ListItem(
-                headlineContent = { Text("工作原理") },
-                supportingContent = { Text("开启后，浏览器会优先以加密的 HTTPS 协议连接网站；若站点不支持，会根据上面的范围决定是否提醒或拦截，避免在不安全连接上泄露数据。") },
+                headlineContent = { Text(stringResource(R.string.s364)) },
+                supportingContent = { Text(stringResource(R.string.s365)) },
                 leadingContent = { Icon(Icons.Rounded.Policy, null) }
             )
         }
@@ -3341,15 +3420,15 @@ private fun SecuritySettingsScreen(
 ) {
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text("安全防护") },
+            title = { Text(stringResource(R.string.s240)) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
         )
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item {
                 ListItem(
-                    headlineContent = { Text("网址安全扫描") },
-                    supportingContent = { Text("本地判定，不联网、不上传浏览记录。地址栏护盾会实时显示当前网站的风险状态。") },
+                    headlineContent = { Text(stringResource(R.string.s369)) },
+                    supportingContent = { Text(stringResource(R.string.s370)) },
                     leadingContent = { Icon(Icons.Rounded.GppGood, null, tint = MaterialTheme.colorScheme.primary) }
                 )
             }
@@ -3360,8 +3439,8 @@ private fun SecuritySettingsScreen(
             item { HorizontalDivider() }
             item {
                 ListItem(
-                    headlineContent = { Text("扫描范围") },
-                    supportingContent = { Text("网址欺骗、域名仿冒、punycode、可疑后缀、IP 直连、异常域名结构，以及证书失效与混合内容。全部在本地完成，不发送任何请求。") },
+                    headlineContent = { Text(stringResource(R.string.s380)) },
+                    supportingContent = { Text(stringResource(R.string.s381)) },
                     leadingContent = { Icon(Icons.Rounded.Policy, null) }
                 )
             }
@@ -3412,10 +3491,10 @@ private fun WebPermissionsScreen(
     onBack: () -> Unit
 ) {
     SelectionScreen("网页权限管理", onBack) {
-        item { ListItem(headlineContent = { Text("剪贴板读取权限") }, supportingContent = { Text(clipboardPolicyLabel(settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
-        item { ListItem(headlineContent = { Text("跳转至外部 APP 权限") }, supportingContent = { Text(policyLabel(settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
-        item { ListItem(headlineContent = { Text("麦克风权限") }, supportingContent = { Text(policyLabel(settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
-        item { Text("这些权限会实时作用于网页请求：始终允许/拒绝直接放行或拦截，每次询问则先征求你的意见。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s249)) }, supportingContent = { Text(clipboardPolicyLabel(settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s053)) }, supportingContent = { Text(policyLabel(settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
+        item { ListItem(headlineContent = { Text(stringResource(R.string.s259)) }, supportingContent = { Text(policyLabel(settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
+        item { Text(stringResource(R.string.s383), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
     }
 }
 
@@ -3516,23 +3595,23 @@ private fun MicPermissionScreen(
         item { ChoiceItem("每次询问（弹窗并记住选择）", settings.micPolicy == "ask") { onSelect("ask") } }
         item { ChoiceItem("始终允许", settings.micPolicy == "allow") { onSelect("allow") } }
         item { ChoiceItem("始终拒绝", settings.micPolicy == "deny") { onSelect("deny") } }
-        item { Text("网页请求使用麦克风（如语音搜索、语音输入）时：始终允许/拒绝直接放行或拦截；每次询问则先弹窗并将你的选择按网站记住。选择「始终拒绝」会同时撤销系统的录音授权（Android 13 及以上，系统在合适时机执行，届时应用可能重启）。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
+        item { Text(stringResource(R.string.s384), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
         item { Spacer(Modifier.height(8.dp)) }
         item {
             ListItem(
-                headlineContent = { Text("系统录音权限") },
+                headlineContent = { Text(stringResource(R.string.s385)) },
                 supportingContent = { Text(if (osGranted) "已允许" else "未允许") },
                 leadingContent = { Icon(Icons.Rounded.Mic, null) },
                 trailingContent = {
                     TextButton(onClick = {
                         runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                             .onFailure { Toast.makeText(context, "无法打开系统设置", Toast.LENGTH_SHORT).show() }
-                    }) { Text("系统设置") }
+                    }) { Text(stringResource(R.string.s389)) }
                 }
             )
         }
         item { Spacer(Modifier.height(8.dp)) }
-        item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text("清除已记住的网站权限") } }
+        item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text(stringResource(R.string.s340)) } }
     }
 }
 
@@ -3551,13 +3630,43 @@ private fun ChoiceItem(title: String, selected: Boolean, onClick: () -> Unit) {
     ListItem(headlineContent = { Text(title) }, leadingContent = { if (selected) Icon(Icons.Default.Check, null) }, modifier = Modifier.clickable(onClick = onClick))
 }
 
+/**
+ * 语言选择页。
+ *
+ * 语言是全局设置：选定后会同步镜像一份到 SharedPreferences，
+ * Activity 下次创建时在 attachBaseContext 里立即生效。
+ */
+@Composable
+private fun LanguageScreen(language: String, setLanguage: (String) -> Unit, onBack: () -> Unit) {
+    val options = listOf(
+        AppLocale.SYSTEM to stringResource(R.string.settings_language_follow_system),
+        AppLocale.ZH_CN to stringResource(R.string.settings_language_zh_cn),
+        AppLocale.ZH_TW to stringResource(R.string.settings_language_zh_tw),
+        AppLocale.EN to stringResource(R.string.settings_language_en)
+    )
+    SelectionScreen("语言", onBack) {
+        options.forEach { (value, label) ->
+            item { ChoiceItem(label, language == value) { setLanguage(value) } }
+        }
+        item { Spacer(Modifier.height(8.dp)) }
+        item {
+            Text(
+                "切换后需重启应用才能完全生效。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun ThemeSelector(mode: String, setMode: (String) -> Unit) {
     val labels = linkedMapOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色")
     var expanded by remember { mutableStateOf(false) }
     ListItem(
-        headlineContent = { Text("主题") },
-        supportingContent = { Text("跟随系统、浅色或深色") },
+        headlineContent = { Text(stringResource(R.string.s165)) },
+        supportingContent = { Text(stringResource(R.string.s391)) },
         leadingContent = { Icon(Icons.Rounded.Palette, null) },
         trailingContent = {
             Box {
@@ -3574,8 +3683,8 @@ private fun ThemeSelector(mode: String, setMode: (String) -> Unit) {
 private fun UserAgentSelector(mode: String, labels: Map<String, String>, setMode: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     ListItem(
-        headlineContent = { Text("浏览器标识") },
-        supportingContent = { Text("更改后仅新建标签页生效") },
+        headlineContent = { Text(stringResource(R.string.s219)) },
+        supportingContent = { Text(stringResource(R.string.s392)) },
         trailingContent = {
             Box {
                 TextButton(onClick = { expanded = true }) { Text(labels[mode] ?: "默认 GeckoView") }
@@ -3616,12 +3725,12 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("下载文件") },
+        title = { Text(stringResource(R.string.s393)) },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 if (resolving) {
                     Spacer(Modifier.height(6.dp))
-                    Text("正在获取文件信息…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.s394), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(12.dp))
                 // 文件名可编辑：部分站点（网盘跳转、需登录的下载入口）拿不到真实文件名，
@@ -3629,26 +3738,26 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
                 OutlinedTextField(
                     value = fileName,
                     onValueChange = { fileName = it },
-                    label = { Text("保存文件名") },
+                    label = { Text(stringResource(R.string.s395)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { copyDownloadLink(context, url); Toast.makeText(context, "已复制下载链接", Toast.LENGTH_SHORT).show() }) { Text("复制下载链接") }
+                OutlinedButton(onClick = { copyDownloadLink(context, url); Toast.makeText(context, "已复制下载链接", Toast.LENGTH_SHORT).show() }) { Text(stringResource(R.string.s397)) }
                 if (isApk) {
                     Spacer(Modifier.height(12.dp))
-                    Text("APK 下载完成后将自动计算 SHA-256。", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(expectedHash, { expectedHash = it }, label = { Text("官方 SHA-256（可选）") }, supportingText = { Text("下载后会显示匹配或不匹配结果") })
+                    Text(stringResource(R.string.s398), style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(expectedHash, { expectedHash = it }, label = { Text(stringResource(R.string.s399)) }, supportingText = { Text(stringResource(R.string.s400)) })
                 }
             }
         },
         confirmButton = {
             // 解析中禁用：否则会把 download.aspx 作为文件名入队，用户看到的与实际落盘不一致
             TextButton(enabled = !resolving && fileName.isNotBlank(), onClick = { onDownload(fileName, expectedHash) }) {
-                Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("下载")
+                Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.s069))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -3684,19 +3793,19 @@ private fun AboutScreen(
     // 加载请求令牌：用于丢弃被用户提前关闭弹窗后的过期结果，避免弹窗被加载结果重新弹回
     var contributorsRequest by remember { mutableStateOf(0) }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("关于") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s282)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }) }) { padding ->
         // 条目较多，在窄屏/横屏/大字体下会超出一屏，必须可滚动，否则底部内容点不到
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
-            Text("本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。")
+            Text(stringResource(R.string.s401, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE))
+            Text(stringResource(R.string.s402))
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
                 Spacer(Modifier.width(8.dp))
-                Text("GitHub 仓库")
+                Text(stringResource(R.string.s403))
             }
             OutlinedButton(onClick = {
                 val request = ++contributorsRequest
@@ -3709,7 +3818,7 @@ private fun AboutScreen(
                         contributorsLoading = false
                     }
                 }
-            }) { Text("贡献者") }
+            }) { Text(stringResource(R.string.s285)) }
             SwitchRow("启动时自动检查更新", "每次打开应用时在后台检测新版本", settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
             // 赞助与支持：与其它入口保持相同的卡片样式
             SettingsEntry(
@@ -3746,7 +3855,7 @@ private fun AboutScreen(
     if (contributors != null || contributorsLoading) {
         AlertDialog(
             onDismissRequest = dismissContributors,
-            title = { Text("贡献者") },
+            title = { Text(stringResource(R.string.s285)) },
             text = {
                 val list = contributors
                 if (list == null) {
@@ -3756,7 +3865,7 @@ private fun AboutScreen(
                         ContainedLoadingIndicator(modifier = Modifier.size(48.dp))
                     }
                 } else if (list.isEmpty()) {
-                    Text("暂无贡献者信息")
+                    Text(stringResource(R.string.s412))
                 } else {
                     LazyColumn { items(list) { contributor ->
                         val homepage = "https://github.com/${contributor.name}"
@@ -3768,14 +3877,14 @@ private fun AboutScreen(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(contributor.name)
-                                Text("${contributor.contributions} 次提交", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.s413, contributor.contributions), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } }
                 }
             },
-            confirmButton = { TextButton(onClick = dismissContributors) { Text("确定") } }
+            confirmButton = { TextButton(onClick = dismissContributors) { Text(stringResource(R.string.s127)) } }
         )
     }
 
@@ -3783,9 +3892,9 @@ private fun AboutScreen(
     message?.let { content ->
         AlertDialog(
             onDismissRequest = { message = null },
-            title = { Text("更新") },
+            title = { Text(stringResource(R.string.s287)) },
             text = { Text(content) },
-            confirmButton = { TextButton(onClick = { message = null }) { Text("确定") } }
+            confirmButton = { TextButton(onClick = { message = null }) { Text(stringResource(R.string.s127)) } }
         )
     }
 }
@@ -3800,7 +3909,7 @@ private fun SponsorDialog(onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.VolunteerActivism, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text("赞助与支持")
+                Text(stringResource(R.string.s406))
             }
         },
         text = {
@@ -3808,21 +3917,21 @@ private fun SponsorDialog(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("如果 ZexBrowse 用起来顺手，欢迎请作者喝杯咖啡。")
-                Text("ZexBrowse 由个人在业余时间开发维护，持续免费、无广告，也不上架任何应用商店。你的支持会直接用于服务器与带宽开销、测试设备，以及后续功能的开发与维护。")
-                Text("赞助完全出于自愿，金额不限；不赞助也完全不影响任何功能的使用。")
-                Text("如何支持", style = MaterialTheme.typography.titleSmall)
-                Text("1. 点击下方「前往赞赏」，跳转到项目 README。")
-                Text("2. 在页面中向下滑动，找到「赞助与支持」中的赞赏码图片。")
-                Text("3. 长按保存该图片（或截图保存），再打开微信「扫一扫」，从相册选择它即可完成。")
-                Text("无论是否赞助，感谢你使用 ZexBrowse；遇到问题欢迎在 GitHub 仓库反馈，帮助它变得更好。")
+                Text(stringResource(R.string.s414))
+                Text(stringResource(R.string.s415))
+                Text(stringResource(R.string.s416))
+                Text(stringResource(R.string.s417), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.s418))
+                Text(stringResource(R.string.s419))
+                Text(stringResource(R.string.s420))
+                Text(stringResource(R.string.s421))
             }
         },
         confirmButton = {
             Button(onClick = { openInBrowser(context, SPONSOR_PAGE_URL); onDismiss() }) {
                 Icon(Icons.Rounded.VolunteerActivism, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("前往赞赏")
+                Text(stringResource(R.string.s422))
             }
         }
     )
@@ -3874,7 +3983,7 @@ private fun LemwoodChannelCard(onClick: () -> Unit) {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("柠泽镜像站通道", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.s423), style = MaterialTheme.typography.titleSmall)
                 Text(
                     "需在网页完成验证后下载",
                     style = MaterialTheme.typography.bodySmall,
@@ -3901,7 +4010,7 @@ private fun UpdateIntroDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.SystemUpdate, "升级更新", tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text("发现新版本 ${release.version}")
+                Text(stringResource(R.string.s426, release.version))
             }
         },
         text = {
@@ -3916,7 +4025,7 @@ private fun UpdateIntroDialog(
                 }
                 // 无 GitHub 直链但可走镜像站时，不当作错误提示
                 if (effectiveUrl.isBlank() && !release.lemwoodAvailable) {
-                    Text("未获取到可用的下载地址，可稍后重试或前往项目页手动下载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.s428), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
                 // 镜像站高速通道：站点已同步该版本时才渲染，
                 // 未配置的公开构建不会出现空壳入口。
@@ -3937,10 +4046,10 @@ private fun UpdateIntroDialog(
             ) {
                 Icon(Icons.Default.Download, null)
                 Spacer(Modifier.width(6.dp))
-                Text("下载")
+                Text(stringResource(R.string.s069))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
     )
 }
 
@@ -4024,21 +4133,21 @@ private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("下载通道：$channel", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.s434, channel), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 when {
                     result != null -> {
-                        Text("文件名：${result!!.file.name}")
+                        Text(stringResource(R.string.s435, result!!.file.name))
                         Text("SHA-256：${result!!.sha256}", style = MaterialTheme.typography.bodySmall)
                         Text(result!!.file.absolutePath, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    error != null -> Text("下载失败：$error", color = MaterialTheme.colorScheme.error)
+                    error != null -> Text(stringResource(R.string.s436, error), color = MaterialTheme.colorScheme.error)
                     connecting -> {
                         LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
-                        Text("正在连接服务器…")
+                        Text(stringResource(R.string.s076))
                     }
                     else -> {
                         WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
-                        Text("正在下载：$progress%")
+                        Text(stringResource(R.string.s075, progress))
                     }
                 }
             }
@@ -4048,15 +4157,15 @@ private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
                 Button(onClick = { openUpdateApk(context, result!!.file); onBack() }) {
                     Icon(Icons.Default.OpenInNew, null)
                     Spacer(Modifier.width(6.dp))
-                    Text("立即安装")
+                    Text(stringResource(R.string.s077))
                 }
             } else if (error != null) {
-                Button(onClick = { attempt += 1 }) { Text("重试") }
+                Button(onClick = { attempt += 1 }) { Text(stringResource(R.string.s437)) }
             }
         },
         dismissButton = {
             // 三种状态下的「取消」都停下载并删除文件（含已完成的安装包），不留残留
-            TextButton(onClick = { cancelAndClean(); onBack() }) { Text("取消") }
+            TextButton(onClick = { cancelAndClean(); onBack() }) { Text(stringResource(R.string.s071)) }
         }
     )
 }

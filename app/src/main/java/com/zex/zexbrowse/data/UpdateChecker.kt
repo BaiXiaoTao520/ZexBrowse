@@ -195,8 +195,8 @@ class UpdateChecker(
     suspend fun contributors(): List<Contributor> = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("https://api.github.com/repos/BaiXiaoTao520/ZexBrowse/contributors").build()
         client.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "贡献者加载失败：${response.code}" }
-            val body = response.body ?: error("贡献者响应为空")
+            check(response.isSuccessful) { "HTTP ${response.code}" }
+            val body = response.body ?: error("empty body")
             val array = org.json.JSONArray(body.string())
             (0 until array.length()).map { index ->
                 val item = array.getJSONObject(index)
