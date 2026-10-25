@@ -169,6 +169,33 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // key = 下载地址
     private val capturedBodies = ConcurrentHashMap<String, CapturedBody>()
     val selected get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
+
+    /**
+     * 内核版本号（如 "158.0"），用于生成 UA。
+     *
+     * 优先用构建配置的版本：GeckoSession.getDefaultUserAgent() 在部分渠道/首次初始化时
+     * 会返回一个与真实内核不同的旧版本号（实测会停在 150），
+     * 导致版本检测网站报「不是最新版」。
+     * 构建配置与依赖坐标同源（app/build.gradle.kts 的 geckoViewVersion），
+     * 所以它一定等于实际打包进 APK 的内核版本，比运行时自报更可靠。
+     *
+     * 注意：必须声明在 init 之前！init 里的 newTab() → createSession() → userAgentOverride()
+     * 会读取本属性；Kotlin 按声明顺序初始化字段，若本属性（by lazy 的委托字段）声明在 init 之后，
+     * 构造期读取会命中尚未初始化的委托字段 → NullPointerException 导致启动闪退。
+     */
+    private val engineVersion: String by lazy {
+        val configured = FALLBACK_ENGINE_VERSION.substringBefore('.').takeIf { it.toIntOrNull() != null }
+        val runtime = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
+        val runtimeMajor = Regex("Firefox/([0-9]+)").find(runtime)?.groupValues?.getOrNull(1)
+            ?: Regex("rv:([0-9]+)").find(runtime)?.groupValues?.getOrNull(1)
+        // 取两者中较大的主版本号：避免内核已升级但 UA 仍报旧版
+        val major = listOfNotNull(configured, runtimeMajor)
+            .mapNotNull { it.toIntOrNull() }
+            .maxOrNull()
+            ?: return@lazy FALLBACK_ENGINE_VERSION
+        "$major.0"
+    }
+
     init {
         lastColorScheme = runtime.settings.getPreferredColorScheme()
         newTab()
@@ -775,32 +802,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return key in set
     }
     private fun saveHistory(id: String) { val tab = _tabs.value.firstOrNull { it.id == id } ?: return; if (tab.url.startsWith("http")) viewModelScope.launch(Dispatchers.IO) { database.dao().addHistory(HistoryEntity(title = tab.title, url = tab.url)) } }
-    /**
-     * 内核真实版本号（如 "158.0"）。从 GeckoView 的默认 UA 中解析，
-     * 避免硬编码导致「内核已升级但 UA 仍声称旧版本」的不一致——
-     * 那会让网站按旧内核能力降级、也让版本检测工具显示错误信息。
-     */
-    /**
-     * 内核版本号（如 "158.0"），用于生成 UA。
-     *
-     * 优先用构建配置的版本：GeckoSession.getDefaultUserAgent() 在部分渠道/首次初始化时
-     * 会返回一个与真实内核不同的旧版本号（实测会停在 150），
-     * 导致版本检测网站报「不是最新版」。
-     * 构建配置与依赖坐标同源（app/build.gradle.kts 的 geckoViewVersion），
-     * 所以它一定等于实际打包进 APK 的内核版本，比运行时自报更可靠。
-     */
-    private val engineVersion: String by lazy {
-        val configured = FALLBACK_ENGINE_VERSION.substringBefore('.').takeIf { it.toIntOrNull() != null }
-        val runtime = runCatching { GeckoSession.getDefaultUserAgent() }.getOrNull().orEmpty()
-        val runtimeMajor = Regex("Firefox/([0-9]+)").find(runtime)?.groupValues?.getOrNull(1)
-            ?: Regex("rv:([0-9]+)").find(runtime)?.groupValues?.getOrNull(1)
-        // 取两者中较大的主版本号：避免内核已升级但 UA 仍报旧版
-        val major = listOfNotNull(configured, runtimeMajor)
-            .mapNotNull { it.toIntOrNull() }
-            .maxOrNull()
-            ?: return@lazy FALLBACK_ENGINE_VERSION
-        "$major.0"
-    }
 
     private fun userAgentOverride(settings: BrowserSettings): String? {
         // 简化标识：去掉设备型号、Build 号等隐私信息，但必须保持 Firefox UA 的合法格式，
