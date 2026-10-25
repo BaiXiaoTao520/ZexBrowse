@@ -7,9 +7,11 @@
 package com.zex.zexbrowse.data
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Dao
@@ -24,9 +26,15 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
-private val Context.dataStore by preferencesDataStore("zexbrowse_settings")
+// DataStore 文件损坏兜底：异常退出/断电可能把偏好文件写坏，默认会抛 CorruptionException，
+// 若直接读取会让应用每次启动都闪退。这里改为遇到损坏直接重建为空偏好，保证应用可启动。
+private val Context.dataStore by preferencesDataStore(
+    name = "zexbrowse_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 @Entity(tableName = "history")
 data class HistoryEntity(
@@ -275,7 +283,7 @@ class SettingsStore(private val context: Context) {
     private val colorThemeKey = stringPreferencesKey("color_theme")
     private val customColorKey = stringPreferencesKey("custom_color")
 
-    val settings = context.dataStore.data.map { preferences ->
+    val settings = context.dataStore.data.catch { emit(emptyPreferences()) }.map { preferences ->
         BrowserSettings(
             darkMode = preferences[modeKey] ?: "system",
             forceDarkWeb = preferences[forceDarkWebKey] ?: true,

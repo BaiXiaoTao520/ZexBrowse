@@ -144,7 +144,10 @@ configurations.configureEach {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    // 回退到上一次实际使用且能构建的版本：compose-bom 2026.09.00 与单独固定的
+    // material3 1.5.0-beta02 / compose 编译器(Kotlin 2.2.10) 存在 ABI 错配风险，
+    // 会在首帧组合期直接崩溃且 App 层 try/catch 无法拦截。先用与 material3 同期匹配的 2026.01.00。
+    implementation(platform("androidx.compose:compose-bom:2026.01.00"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.activity:activity-compose:1.10.1")

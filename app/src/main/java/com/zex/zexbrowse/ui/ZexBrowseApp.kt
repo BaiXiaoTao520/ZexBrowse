@@ -178,6 +178,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.res.stringResource
 import com.zex.zexbrowse.AppLocale
+import com.zex.zexbrowse.CrashReporter
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
@@ -432,6 +433,13 @@ private fun openDefaultAppSettings(context: Context) {
 fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUrlHandled: () -> Unit = {}) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
+    // 上次运行如果是崩溃退出，启动时把保存的崩溃日志弹出来，方便用户复制反馈
+    var previousCrashLog by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        previousCrashLog = CrashReporter.readLast(context)
+        // 首帧组合成功：清除「启动进行中」标记，表示本次启动已完成（未崩溃）
+        CrashReporter.markStarted(context)
+    }
     val settings by settingsStore.settings.collectAsState(initial = BrowserSettings())
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
@@ -831,6 +839,32 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         )
                     }
                 }
+            }
+            // 上次崩溃日志展示：启动可读，支持一键复制 / 清除
+            previousCrashLog?.let { log ->
+                AlertDialog(
+                    onDismissRequest = { CrashReporter.clear(context); previousCrashLog = null },
+                    title = { Text("上次运行发生了崩溃") },
+                    text = {
+                        Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                            Text("以下为上次启动时的崩溃信息，请点击「复制」后反馈给开发者：", style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(8.dp))
+                            Text(log, style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            runCatching {
+                                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(android.content.ClipData.newPlainText("crash", log))
+                            }
+                            Toast.makeText(context, "已复制崩溃日志", Toast.LENGTH_SHORT).show()
+                        }) { Text("复制") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { CrashReporter.clear(context); previousCrashLog = null }) { Text("关闭并清除") }
+                    }
+                )
             }
             startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
             if (sponsorInfo) SponsorDialog(onDismiss = { sponsorInfo = false })

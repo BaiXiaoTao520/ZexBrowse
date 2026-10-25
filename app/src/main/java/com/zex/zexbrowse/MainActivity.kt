@@ -40,24 +40,111 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        // 不受支持的系统：直接拦截，弹出不可取消的提示，仅能点「退出应用」后退出
-        UnsupportedSystem.detect()?.let {
-            showUnsupportedDialog(it)
+        // 最早安装崩溃捕获（Application.onCreate 通常已装，这里幂等再装一次，确保万无一失）
+        CrashReporter.install(this)
+        // 上次启动如果在「启动阶段」就崩了（标记没有被成功启动清除），
+        // 这次不再盲目再次启动（否则就是无限闪退），而是直接把上次的崩溃日志展示出来。
+        if (CrashReporter.didCrashLastBoot(this)) {
+            CrashReporter.markStarted(this) // 清除标记，下次重试正常启动
+            showBootCrashScreen()
             return
         }
-        consumeViewIntent(intent)
-        // 帧率优化：向系统请求设备支持的最高刷新率，让滚动/动画/页面合成以更高帧率运行。
-        requestMaxRefreshRate()
-        setContent {
-            val request by incomingUrl.collectAsState()
-            ZexBrowseApp(
-                incomingUrl = request?.url,
-                incomingUrlSeq = request?.seq ?: 0L,
-                onIncomingUrlHandled = { incomingUrl.value = null }
-            )
+        // 整个启动流程加同步兜底：Compose 首帧组合是在 setContent 内同步执行的，
+        // 一旦依赖不匹配/主题/资源等在组合期抛异常，会被这里捕获，
+        // 转而显示可读的错误卡片（而不是直接退回桌面），同时把栈写入崩溃日志文件。
+        try {
+            enableEdgeToEdge()
+            // 不受支持的系统：直接拦截，弹出不可取消的提示，仅能点「退出应用」后退出
+            UnsupportedSystem.detect()?.let {
+                showUnsupportedDialog(it)
+                return
+            }
+            consumeViewIntent(intent)
+            // 帧率优化：向系统请求设备支持的最高刷新率，让滚动/动画/页面合成以更高帧率运行。
+            requestMaxRefreshRate()
+            // 真正进入组合前才打启动标记：未受支持系统提前 return 时不会留下标记
+            CrashReporter.markBoot(this)
+            setContent {
+                val request by incomingUrl.collectAsState()
+                ZexBrowseApp(
+                    incomingUrl = request?.url,
+                    incomingUrlSeq = request?.seq ?: 0L,
+                    onIncomingUrlHandled = { incomingUrl.value = null }
+                )
+            }
+            (application as ZexBrowseApplication).ensureDarkExtension()
+        } catch (t: Throwable) {
+            // 兜底：记录完整栈并展示错误卡片，避免「打开即闪退」且看不到任何原因
+            CrashReporter.record(this, t)
+            CrashReporter.markStarted(this)
+            showStartupCrash(t)
         }
-        (application as ZexBrowseApplication).ensureDarkExtension()
+    }
+
+    /**
+     * 「上次启动崩溃」界面：用最原始的 Android View 展示已保存的崩溃日志，
+     * 提供一个「重试启动」按钮。这样即使首帧组合崩了，也能稳定把崩溃信息展示给用户，
+     * 避免陷入「打开→闪退→打开→闪退」的死循环且什么也看不到。
+     */
+    private fun showBootCrashScreen() {
+        val log = CrashReporter.readLast(this) ?: "（未捕获到详细栈信息，可能是 native 层崩溃）"
+        val msg = buildString {
+            append("ZexBrowse 上次启动时崩溃了\n\n")
+            append("以下为上次的崩溃信息（可长按选中复制后反馈）：\n\n")
+            append(log)
+        }
+        val textView = android.widget.TextView(this).apply {
+            text = msg
+            textSize = 12f
+            setTextIsSelectable(true)
+            setPadding(48, 96, 48, 48)
+            setTextColor(android.graphics.Color.DKGRAY)
+        }
+        val button = android.widget.Button(this).apply {
+            text = "重试启动"
+            setOnClickListener {
+                CrashReporter.clear(this@MainActivity)
+                recreate()
+            }
+        }
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(
+                android.widget.ScrollView(this@MainActivity).apply { addView(textView) },
+                android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+                )
+            )
+            addView(button)
+        }
+        setContentView(container)
+    }
+
+    /**
+     * 启动阶段发生致命异常时的兜底界面。
+     *
+     * 刻意用最原始的 Android View（ScrollView + TextView）绘制，不依赖 Compose / Material，
+     * 因为它本身可能就是崩溃来源。用户可长按选中复制完整堆栈发回，便于精准修复。
+     */
+    private fun showStartupCrash(t: Throwable) {
+        val stack = java.io.StringWriter().also { t.printStackTrace(java.io.PrintWriter(it)) }.toString()
+        val logPath = CrashReporter.crashFile(this).absolutePath
+        val msg = buildString {
+            append("ZexBrowse 启动失败\n\n")
+            append("错误信息：\n").append(t.toString()).append("\n\n")
+            append("已自动保存崩溃日志到：\n").append(logPath).append("\n\n")
+            append("请长按选中以下内容复制后反馈：\n\n")
+            append(stack)
+        }
+        val textView = android.widget.TextView(this).apply {
+            text = msg
+            textSize = 12f
+            setTextIsSelectable(true)
+            setPadding(48, 96, 48, 96)
+            setTextColor(android.graphics.Color.DKGRAY)
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(textView) }
+        setContentView(scroll)
     }
 
     /**
