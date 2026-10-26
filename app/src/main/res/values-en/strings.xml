@@ -479,6 +479,13 @@
     <string name="color_theme_titanium">Titanium</string>
     <string name="color_theme_forest">Quiet Forest Morning</string>
     <string name="color_theme_custom">Custom</string>
+    <string name="settings_language_sub">App language and regional display</string>
+    <string name="ad_block_title">Ad blocking</string>
+    <string name="ad_block_sub">Block ads and tracking scripts on web pages</string>
+    <string name="ad_block_switch_title">Ad blocking</string>
+    <string name="ad_block_switch_sub">Blocks ads and tracker requests and hides common ad slots; when off, pages load as-is</string>
+    <string name="ad_block_on">On · blocking ads and trackers</string>
+    <string name="ad_block_off">Off</string>
     <string name="color_custom_title">Custom color</string>
     <string name="color_custom_style">Color style</string>
     <string name="color_custom_hex_label">Color value (#RRGGBB or #AARRGGBB)</string>

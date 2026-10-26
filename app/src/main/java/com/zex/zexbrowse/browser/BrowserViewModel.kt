@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
@@ -317,6 +318,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private fun createSession(incognito: Boolean): Pair<GeckoSession, String> {
         val sessionSettings = GeckoSessionSettings.Builder()
             .usePrivateMode(incognito)
+            // 广告拦截：开启时对该会话启用 GeckoView 原生追踪保护（拦截广告/追踪请求）
+            .useTrackingProtection(browserSettings.adBlockEnabled)
             // 会话转为非活动（切换标签/离开浏览页）时也保持媒体播放，避免音频被打断
             .suspendMediaWhenInactive(false)
         if (incognito) {
@@ -607,6 +610,42 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             else -> GeckoRuntimeSettings.HTTPS_ONLY
         }
         runCatching { runtime.settings.setAllowInsecureConnections(level) }
+    }
+
+    /**
+     * 应用「广告拦截」设置。
+     *
+     * 双层防护：
+     * 1) 请求层：更新 GeckoView 反跟踪类别（关闭时置为 NONE），
+     *    并同步每个已有会话的 useTrackingProtection（新建会话在 createSession 中已按设置设置）；
+     * 2) 展示层：启用/停用内置 zex_adblock 扩展，用 CSS 隐藏网络层拦不到的常见内联广告位。
+     *
+     * 会话设置变更需重载页面才能生效，所以状态真正变化时对所有标签页 reload 一次。
+     */
+    fun applyAdBlock(enabled: Boolean) {
+        val categories = if (enabled) {
+            ContentBlocking.AntiTracking.AD or
+                ContentBlocking.AntiTracking.ANALYTIC or
+                ContentBlocking.AntiTracking.SOCIAL or
+                ContentBlocking.AntiTracking.CRYPTOMINING
+        } else {
+            ContentBlocking.AntiTracking.NONE
+        }
+        runCatching { runtime.settings.contentBlocking.setAntiTracking(categories) }
+        runCatching { (getApplication<Application>() as ZexBrowseApplication).setAdBlockExtensionEnabled(enabled) }
+
+        var changed = false
+        _tabs.value.forEach { tab ->
+            runCatching {
+                if (tab.session.settings.useTrackingProtection != enabled) {
+                    tab.session.settings.setUseTrackingProtection(enabled)
+                    changed = true
+                }
+            }
+        }
+        if (changed) {
+            _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
+        }
     }
 
     fun applyCurrentUserAgentToSelected() {

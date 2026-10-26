@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "ZexBrowse AdBlock",
+  "version": "1.0.0",
+  "description": "Cosmetic ad hiding for ZexBrowse.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zex-adblock@zexbrowse"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "css": ["adblock.css"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

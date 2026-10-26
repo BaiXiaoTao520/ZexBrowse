@@ -89,6 +89,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Bookmarks
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Cookie
 import androidx.compose.material.icons.rounded.ContactSupport
@@ -217,7 +218,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -739,6 +740,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     LaunchedEffect(settings.httpsOnlyEnabled, settings.httpsOnlyMode) {
         browserViewModel.applyHttpsOnly(settings.httpsOnlyEnabled, settings.httpsOnlyMode)
     }
+    // 广告拦截：开关变化时同步到 Gecko 运行时、现有会话与内置广告隐藏扩展
+    LaunchedEffect(settings.adBlockEnabled) {
+        browserViewModel.applyAdBlock(settings.adBlockEnabled)
+    }
     val colorScheme = resolveColorScheme(settings, useDarkTheme, context)
 
     // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清
@@ -999,6 +1004,7 @@ private fun PageContent(
             onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
             onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
             onSecurity = { navigate(Page.SECURITY) },
+            onAdBlock = { navigate(Page.ADBLOCK) },
             onAbout = { navigate(Page.ABOUT) },
             onContactUs = { openInBrowser(context, CONTACT_URL) },
             onBack = goBack
@@ -1064,6 +1070,11 @@ private fun PageContent(
         Page.SECURITY -> SecuritySettingsScreen(
             settings = settings,
             onSelectMode = { mode -> scope.launch { settingsStore.securityMode(mode) } },
+            onBack = goBack
+        )
+        Page.ADBLOCK -> AdBlockScreen(
+            settings = settings,
+            setAdBlock = { enabled -> scope.launch { settingsStore.adBlock(enabled) } },
             onBack = goBack
         )
         Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
@@ -2638,6 +2649,7 @@ private fun SettingsScreen(
     onHttpsOnly: () -> Unit,
     onWebPermissions: () -> Unit,
     onSecurity: () -> Unit,
+    onAdBlock: () -> Unit,
     onAbout: () -> Unit,
     onContactUs: () -> Unit,
     onBack: () -> Unit
@@ -2664,6 +2676,7 @@ private fun SettingsScreen(
             SettingSearchItem("退出时清除浏览器数据", "隐私", listOf("退出", "清除", "数据", "无痕", "清理", "退出时清除"), onCookieSettings),
             SettingSearchItem("HTTPS-Only", "隐私", listOf("HTTPS", "加密", "安全", "协议", "Only", "强制加密", "隐私标签页"), onHttpsOnly),
             SettingSearchItem("安全防护", "安全防护", listOf("安全", "防护", "拦截", "诈骗", "木马", "护盾", "钓鱼", "风险", "银狐"), onSecurity),
+            SettingSearchItem("广告拦截", "广告拦截", listOf("广告", "拦截", "广告拦截", "追踪", "跟踪", "弹窗", "推广", "adblock", "ad", "去广告"), onAdBlock),
             SettingSearchItem("剪贴板读取权限", "网页权限管理", listOf("剪贴板", "复制", "粘贴", "权限", "读取"), onWebPermissions),
             SettingSearchItem("跳转至外部 APP 权限", "网页权限管理", listOf("外部", "跳转", "APP", "应用", "Intent", "权限"), onWebPermissions),
             SettingSearchItem("麦克风权限", "网页权限管理", listOf("麦克风", "录音", "权限", "语音", "音频"), onWebPermissions),
@@ -2680,6 +2693,7 @@ private fun SettingsScreen(
     // 所以先把需要的文案取成局部变量，再在 remember 里使用。
     val entryGeneral = stringResource(R.string.s166)
     val entryLanguage = stringResource(R.string.s173)
+    val entryLanguageSub = stringResource(R.string.settings_language_sub)
     val entrySite = stringResource(R.string.s207)
     val entryWebsiteSub = stringResource(R.string.s295)
     val entryWebPerm = stringResource(R.string.s250)
@@ -2699,14 +2713,16 @@ private fun SettingsScreen(
     val entryContactSub = stringResource(R.string.s301)
     val entryGeneralSub = stringResource(R.string.s293)
     val entryPrivacy = stringResource(R.string.s225)
-    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, entryGeneral, entryLanguage, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy) {
+    val entryAdBlock = stringResource(R.string.ad_block_title)
+    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled) {
         listOf(
             SettingsEntryItem(entryGeneral, entryGeneralSub, Icons.Rounded.Tune, onGeneralSettings),
-            SettingsEntryItem(entryLanguage, "跟随系统、简体中文、繁体中文、English", Icons.Rounded.Language, onLanguage),
+            SettingsEntryItem(entryLanguage, entryLanguageSub, Icons.Rounded.Language, onLanguage),
             SettingsEntryItem(entrySite, entryWebsiteSub, Icons.Rounded.Language, onSiteSettings),
             SettingsEntryItem(entryPrivacy, cookieSettingsSubtitle(context, settings), Icons.Rounded.PrivacyTip, onCookieSettings),
             SettingsEntryItem(entryWebPerm, entryWebPermSub, Icons.Rounded.Security, onWebPermissions),
             SettingsEntryItem(entrySecurity, securityModeSubtitle(context, settings), Icons.Rounded.GppGood, onSecurity),
+            SettingsEntryItem(entryAdBlock, adBlockSubtitle(context, settings), Icons.Rounded.Block, onAdBlock),
             SettingsEntryItem(entryHistory, entryHistorySub, Icons.Default.History, onHistory),
             SettingsEntryItem(entryBookmarks, entryBookmarksSub, Icons.Rounded.Bookmarks, onBookmarks),
             SettingsEntryItem(entryDefaultBrowser, entryDefaultBrowserSub, Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
@@ -2816,6 +2832,7 @@ private fun settingsEntryIcon(title: String): androidx.compose.ui.graphics.vecto
     "隐私" -> Icons.Rounded.PrivacyTip
     "网页权限管理" -> Icons.Rounded.Security
     "安全防护" -> Icons.Rounded.GppGood
+    "广告拦截" -> Icons.Rounded.Block
     "浏览历史" -> Icons.Default.History
     "书签管理" -> Icons.Rounded.Bookmarks
     "设为默认浏览器" -> Icons.Rounded.Public
@@ -3526,6 +3543,50 @@ private fun SecuritySettingsScreen(
                     leadingContent = { Icon(Icons.Rounded.Policy, null) }
                 )
             }
+        }
+    }
+}
+
+/** 广告拦截入口副标题 */
+private fun adBlockSubtitle(context: Context, settings: BrowserSettings): String =
+    context.getString(if (settings.adBlockEnabled) R.string.ad_block_on else R.string.ad_block_off)
+
+/**
+ * 广告拦截设置页。
+ *
+ * 单开关：开启后由 GeckoView 原生追踪保护在请求层拦截广告/追踪域请求，
+ * 同时启用内置 zex_adblock 扩展隐藏页面内常见广告位；关闭则完全放行。
+ */
+@Composable
+private fun AdBlockScreen(
+    settings: BrowserSettings,
+    setAdBlock: (Boolean) -> Unit,
+    onBack: () -> Unit
+) {
+    SelectionScreen(stringResource(R.string.ad_block_title), onBack) {
+        item {
+            SwitchRow(
+                title = stringResource(R.string.ad_block_switch_title),
+                subtitle = stringResource(R.string.ad_block_switch_sub),
+                checked = settings.adBlockEnabled,
+                onCheckedChange = setAdBlock,
+                leading = Icons.Rounded.Block
+            )
+        }
+        item { HorizontalDivider() }
+        item {
+            ListItem(
+                headlineContent = { Text("工作原理") },
+                supportingContent = { Text("开启时请求层拦截广告与追踪域名，并用页面样式隐藏常见广告位；关闭后网页按原样加载。更改会立即应用到所有已打开的标签页。") },
+                leadingContent = { Icon(Icons.Rounded.GppGood, null) }
+            )
+        }
+        item {
+            ListItem(
+                headlineContent = { Text("提示") },
+                supportingContent = { Text("拦截可能导致极少数网站内容显示异常，如遇问题可临时关闭。") },
+                leadingContent = { Icon(Icons.Rounded.Policy, null) }
+            )
         }
     }
 }

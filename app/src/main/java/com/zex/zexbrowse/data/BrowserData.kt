@@ -203,6 +203,8 @@ data class BrowserSettings(
     val httpsOnlyEnabled: Boolean = true,
     /** HTTPS-Only 生效范围：all（所有标签页）/ private（仅隐私标签页） */
     val httpsOnlyMode: String = "all",
+    /** 广告拦截：开启后由 GeckoView 追踪保护拦截广告/追踪请求，并启用内置广告隐藏扩展 */
+    val adBlockEnabled: Boolean = true,
     /** 应用语言：system / zh-CN / zh-TW / en */
     val language: String = "system",
     /** 颜色主题：dynamic / olive / velvet / mist / glacier / dusk / titanium / forest / custom */
@@ -279,6 +281,7 @@ class SettingsStore(private val context: Context) {
     private val securityModeKey = stringPreferencesKey("security_mode")
     private val httpsOnlyEnabledKey = booleanPreferencesKey("https_only_enabled")
     private val httpsOnlyModeKey = stringPreferencesKey("https_only_mode")
+    private val adBlockEnabledKey = booleanPreferencesKey("ad_block_enabled")
     private val languageKey = stringPreferencesKey("language")
     private val colorThemeKey = stringPreferencesKey("color_theme")
     private val customColorKey = stringPreferencesKey("custom_color")
@@ -327,6 +330,7 @@ class SettingsStore(private val context: Context) {
             securityMode = preferences[securityModeKey] ?: "standard",
             httpsOnlyEnabled = preferences[httpsOnlyEnabledKey] ?: true,
             httpsOnlyMode = preferences[httpsOnlyModeKey] ?: "all",
+            adBlockEnabled = preferences[adBlockEnabledKey] ?: true,
             language = preferences[languageKey] ?: "system",
             colorTheme = preferences[colorThemeKey] ?: "dynamic",
             customColor = preferences[customColorKey] ?: ""
@@ -369,6 +373,7 @@ class SettingsStore(private val context: Context) {
     suspend fun securityMode(value: String) = update { it[securityModeKey] = value }
     suspend fun httpsOnlyEnabled(value: Boolean) = update { it[httpsOnlyEnabledKey] = value }
     suspend fun httpsOnlyMode(value: String) = update { it[httpsOnlyModeKey] = value }
+    suspend fun adBlock(value: Boolean) = update { it[adBlockEnabledKey] = value }
     suspend fun language(value: String) = update { it[languageKey] = value }
     suspend fun colorTheme(value: String) = update { it[colorThemeKey] = value }
     suspend fun customColor(value: String) = update { it[customColorKey] = value }

@@ -14,6 +14,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,16 +46,21 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zex.zexbrowse.R
 
 /** 圆圈选中标记：外圈描边 + 选中时内圈填充 */
 @Composable
-internal fun ThemeRadioCircle(selected: Boolean, swatch: Color, onClick: () -> Unit) {
+internal fun ThemeRadioCircle(
+    selected: Boolean,
+    swatch: Color,
+    onClick: () -> Unit,
+    diameter: Dp = 18.dp
+) {
     Box(
         Modifier
-            .size(26.dp)
+            .size(diameter)
             .clip(CircleShape)
             .border(
                 width = 2.dp,
@@ -66,7 +73,7 @@ internal fun ThemeRadioCircle(selected: Boolean, swatch: Color, onClick: () -> U
         if (selected) {
             Box(
                 Modifier
-                    .size(13.dp)
+                    .size(diameter * 0.55f)
                     .clip(CircleShape)
                     .background(swatch)
             )
@@ -75,31 +82,32 @@ internal fun ThemeRadioCircle(selected: Boolean, swatch: Color, onClick: () -> U
 }
 
 /**
- * 单个主题选项：圆圈在上、名称在下，等宽居中。
+ * 单个主题选项：小圆圈在左、名称在右，整体呈胶囊状，选中时高亮背景。
  *
- * 之前是圆圈与文字横排塞进 weight(1f) 的格子里，长名称（如「动态颜色（Android 12+）」）
- * 会被挤成竖排单字。改为纵向布局并限制 2 行、自动缩排，任何语言都不再挤压错乱。
+ * 采用「圆圈 + 右侧文字」的横向紧凑排布，由 FlowRow 自动换行并居中，
+ * 相比之前「圆圈上、文字下」的四列网格占用高度更低、更整齐。
  */
 @Composable
 internal fun ColorThemeOption(label: String, selected: Boolean, swatch: Color, onClick: () -> Unit) {
-    Column(
+    val bg = if (selected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    } else {
+        Color.Transparent
+    }
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(50))
+            .background(bg)
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        ThemeRadioCircle(selected, swatch, onClick)
-        Spacer(Modifier.height(6.dp))
+        ThemeRadioCircle(selected = selected, swatch = swatch, onClick = onClick)
+        Spacer(Modifier.width(6.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            minLines = 2,
-            // 长名称自动缩小，避免撑破格子
-            fontSize = MaterialTheme.typography.labelMedium.fontSize * 0.95f,
-            lineHeight = MaterialTheme.typography.labelMedium.fontSize * 1.15f,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -108,9 +116,10 @@ internal fun ColorThemeOption(label: String, selected: Boolean, swatch: Color, o
 /**
  * 颜色主题选择区。
  *
- * 固定 4 列等分网格：每格宽度严格相等（weight(1f) + 固定间距），
- * 行末不足 4 项时用等宽空位补齐，保证左右两端始终对齐。
+ * 用 [FlowRow] 横向流式排布所有选项（圆圈在左、文字在右），
+ * 宽度不够时自动换行，每行按居中对齐，避免出现大片空位或紊乱错落。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ColorThemeGrid(
     current: String,
@@ -120,35 +129,24 @@ internal fun ColorThemeGrid(
 ) {
     val currentTheme = ColorTheme.entries.firstOrNull { it.name.equals(current, ignoreCase = true) } ?: ColorTheme.DYNAMIC
     val customSeed = parseColorOrNull(customHex) ?: defaultCustomSeed
-    val columns = 4
-    val spacing = 8.dp
     val items = ColorTheme.entries.toList()
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items.chunked(columns).forEach { row ->
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(spacing)
-            ) {
-                // 每格等宽占位；不足 4 项时补空格，保证列宽与行对齐一致
-                repeat(columns) { index ->
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
-                        val theme = row.getOrNull(index)
-                        if (theme != null) {
-                            val swatch = when (theme) {
-                                ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
-                                ColorTheme.CUSTOM -> customSeed
-                                else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
-                            }
-                            ColorThemeOption(
-                                label = colorThemeLabel(theme),
-                                selected = currentTheme == theme,
-                                swatch = swatch,
-                                onClick = { if (theme == ColorTheme.CUSTOM) onEditCustom() else onPick(theme) }
-                            )
-                        }
-                    }
-                }
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items.forEach { theme ->
+            val swatch = when (theme) {
+                ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
+                ColorTheme.CUSTOM -> customSeed
+                else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
             }
+            ColorThemeOption(
+                label = colorThemeLabel(theme),
+                selected = currentTheme == theme,
+                swatch = swatch,
+                onClick = { if (theme == ColorTheme.CUSTOM) onEditCustom() else onPick(theme) }
+            )
         }
     }
 }

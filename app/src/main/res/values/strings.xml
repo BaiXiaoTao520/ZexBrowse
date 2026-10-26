@@ -479,6 +479,13 @@
     <string name="color_theme_titanium">钛影</string>
     <string name="color_theme_forest">静林之晨</string>
     <string name="color_theme_custom">自定义</string>
+    <string name="settings_language_sub">界面语言与区域显示</string>
+    <string name="ad_block_title">广告拦截</string>
+    <string name="ad_block_sub">拦截网页广告与追踪脚本</string>
+    <string name="ad_block_switch_title">广告拦截</string>
+    <string name="ad_block_switch_sub">开启后拦截广告与跟踪器请求，并隐藏常见广告位；关闭后网页按原样加载</string>
+    <string name="ad_block_on">已开启 · 拦截广告与追踪</string>
+    <string name="ad_block_off">已关闭</string>
     <string name="color_custom_title">自定义颜色</string>
     <string name="color_custom_style">配色风格</string>
     <string name="color_custom_hex_label">颜色值（#RRGGBB 或 #AARRGGBB）</string>
