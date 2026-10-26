@@ -1,0 +1,65 @@
+/*
+ * ZexBrowse AdBlock — cosmetic ad hiding.
+ *
+ * Request-level ad/tracker blocking is handled by GeckoView tracking protection
+ * (see ContentBlocking anti-tracking categories). This stylesheet only hides the
+ * common in-page ad slots that same-origin / inline ads cannot be filtered by the
+ * network layer. Selectors are intentionally limited to well-known ad markup so
+ * that regular content is not touched.
+ */
+
+/* ── Google AdSense / Ad Manager ─────────────────────────────── */
+ins.adsbygoogle,
+.adsbygoogle,
+ins[data-ad-client],
+ins[data-ad-slot],
+[id^="google_ads_iframe"],
+[id^="google_ads_"],
+[id^="div-gpt-ad"],
+div[data-google-query-id] {
+  display: none !important;
+}
+
+/* ── Ad-network iframes ──────────────────────────────────────── */
+iframe[src*="doubleclick.net"],
+iframe[src*="googlesyndication.com"],
+iframe[src*="googleadservices.com"],
+iframe[src*="adservice.google"],
+iframe[src*="amazon-adsystem.com"],
+iframe[src*="ads.yahoo.com"],
+iframe[src*="-ad."],
+iframe[src*="/ads/"],
+iframe[id^="google_ads_iframe"],
+iframe[name^="google_ads_iframe"] {
+  display: none !important;
+}
+
+/* ── Common ad container class / id patterns ─────────────────── */
+[id^="ad-slot"],
+[id^="ad_unit"],
+[id^="ads-"],
+[class^="ad-slot"],
+[class*=" ad-slot"],
+[class^="ad-unit"],
+[class*=" ad-unit"],
+[class*="ad-banner"],
+[class*="ad-banner-"],
+[class*="ad-container"],
+[class*="ad-wrapper"],
+[class*="advertisement"],
+[class*="advertising"],
+[class~="ads"],
+[class~="advert"],
+[class*="sponsor-ad"],
+[class*="ad-placeholder"] {
+  display: none !important;
+}
+
+/* ── Floating / popup ad overlays ────────────────────────────── */
+[class*="ad-overlay"],
+[class*="ad-popup"],
+[class*="ads-popup"],
+[id*="ad-overlay"],
+[id*="adpopup"] {
+  display: none !important;
+}

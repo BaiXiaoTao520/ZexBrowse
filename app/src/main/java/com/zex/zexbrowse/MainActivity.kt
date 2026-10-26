@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             (application as ZexBrowseApplication).ensureDarkExtension()
+            (application as ZexBrowseApplication).ensureAdBlockExtension()
         } catch (t: Throwable) {
             // 兜底：记录完整栈并展示错误卡片，避免「打开即闪退」且看不到任何原因
             CrashReporter.record(this, t)

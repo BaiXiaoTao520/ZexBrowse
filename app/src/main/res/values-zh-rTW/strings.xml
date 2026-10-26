@@ -479,6 +479,13 @@
     <string name="color_theme_titanium">鈦影</string>
     <string name="color_theme_forest">靜林之晨</string>
     <string name="color_theme_custom">自訂</string>
+    <string name="settings_language_sub">介面語言與區域顯示</string>
+    <string name="ad_block_title">廣告封鎖</string>
+    <string name="ad_block_sub">封鎖網頁廣告與追蹤腳本</string>
+    <string name="ad_block_switch_title">廣告封鎖</string>
+    <string name="ad_block_switch_sub">開啟後封鎖廣告與追蹤器請求，並隱藏常見廣告版位；關閉後網頁依原樣載入</string>
+    <string name="ad_block_on">已開啟 · 封鎖廣告與追蹤</string>
+    <string name="ad_block_off">已關閉</string>
     <string name="color_custom_title">自訂顏色</string>
     <string name="color_custom_style">配色風格</string>
     <string name="color_custom_hex_label">顏色值（#RRGGBB 或 #AARRGGBB）</string>
