@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#F7F2FA</color>
+    <!-- 自适应图标的背景层。取图标本身深蓝底的中间值，
+         使圆形/圆角遮罩下不会露出与图案反差的浅色边，视觉上等同「铺满」。 -->
+    <color name="ic_launcher_background">#22344F</color>
 </resources>

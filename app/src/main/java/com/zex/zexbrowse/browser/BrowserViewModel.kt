@@ -153,6 +153,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 否则在 open() 后立即 loadUri 会因会话尚未附加而被丢弃（表现为空白新标签）
     private val pendingInitialLoads = HashMap<String, String>()
     private val pendingLoadAttempts = HashMap<String, Int>()
+    // 已把会话挂到 GeckoView 上的标签 id。
+    // 未挂载前 loadUri 会被静默丢弃，load() 据此决定「立即加载」还是「先入队等挂载」。
+    private val attachedSessions = HashSet<String>()
     // 记录「地址是下载直链、未能加载成页面」的标签对应的下载网址。
     // 这类标签会话停在 about:blank，刷新无意义；改为用工具栏刷新按钮手动重新触发下载弹窗。
     private val pendingDownloads = HashMap<String, String>()
@@ -241,7 +244,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // GeckoView 视图挂载完会话后调用；此时 loadUri 才能可靠生效。
     // 仅在尚未开始尝试时触发，后续交给内部重试链，避免重复触发导致重复加载。
     fun onSessionAttached(id: String) {
+        attachedSessions.add(id)
         if (pendingInitialLoads.containsKey(id) && (pendingLoadAttempts[id] ?: 0) == 0) loadPending(id)
+    }
+
+    /**
+     * GeckoView 视图销毁时调用。
+     *
+     * 视图被重建（切换硬件加速、页面离开组合）后，旧视图已不再是该会话的宿主，
+     * 必须清掉挂载标记；否则 load() 会以为「已挂载」而直接 loadUri，
+     * 在真正挂载完成前又被静默丢弃，重新变成空白页。
+     */
+    fun onSessionDetached(id: String) {
+        attachedSessions.remove(id)
     }
 
     // 外部链接的待加载地址需重试：视图刚挂载时 display 可能尚未就绪，
@@ -344,6 +359,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 android.util.Log.d("ZexIntent", "onPageStart id=$id url=$url")
+                // 页面已真正开始加载，待加载重试链必须立即停止。
+                // 否则它会在 400ms 后再次 loadUri，把正在进行的重定向链条打断，
+                // 表现为搜索后停在空白页。必须只在「真正的 http(s) 地址」
+                // 上清除：会话初挂载会先产生一次 about:blank，那一次不能算数。
+                if (url.startsWith("http")) clearPending(id)
                 // 新一次加载开始，上一次排队的失败确认作废，避免中途误弹错误页
                 cancelPendingFailure(id)
                 update(id) { tab ->
@@ -533,6 +553,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
         clearPending(id)
+        attachedSessions.remove(id)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
         blockedExternalUris.remove(id)
@@ -544,12 +565,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
     // 仅关闭普通标签，不动无痕标签
     fun closeAllNormal() {
-        _tabs.value.filter { !it.incognito }.forEach { tab -> runCatching { tab.session.close() } }
+        _tabs.value.filter { !it.incognito }.forEach { tab ->
+            attachedSessions.remove(tab.id)
+            runCatching { tab.session.close() }
+        }
         _tabs.value = _tabs.value.filter { it.incognito }
         if (_tabs.value.isEmpty()) newTab() else _selectedId.value = _tabs.value.last().id
     }
     fun closeAllIncognito() {
-        _tabs.value.filter { it.incognito }.forEach { tab -> runCatching { tab.session.close() } }
+        _tabs.value.filter { it.incognito }.forEach { tab ->
+            attachedSessions.remove(tab.id)
+            runCatching { tab.session.close() }
+        }
         _tabs.value = _tabs.value.filterNot { it.incognito }
         incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
         incognitoContextId = null
@@ -678,7 +705,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             if (!pendingInitialLoads.containsKey(tab.id)) runCatching { tab.session.reload() }
         }
     }
-    fun load(input: String) { val target = normalize(input); selected?.let { cancelPendingFailure(it.id); it.session.loadUri(target) } }
+    /**
+     * 加载一个地址（地址栏、首页搜索、外部链接共用）。
+     *
+     * 不能直接调 loadUri：首页搜索时浏览页还没组合，
+     * GeckoView 尚未通过 setSession 挂到会话上，此时 loadUri 会被静默丢弃，
+     * 表现为「搜索后直接是一个空白页」，且因为是竞态（渲染与挂载先后不定）只有概率出现。
+     * 解法：视图已通过 onSessionAttached 声明就绪时才直接加载，
+     * 否则先入队，等挂载回调到来时由重试链控制加载时机。
+     */
+    fun load(input: String) {
+        val target = normalize(input)
+        val tab = selected ?: return
+        cancelPendingFailure(tab.id)
+        if (attachedSessions.contains(tab.id)) {
+            runCatching { tab.session.loadUri(target) }
+            return
+        }
+        // 视图尚未挂载：交给待加载重试链，它会在 onPageStart 后自行停止
+        pendingInitialLoads[tab.id] = target
+        pendingLoadAttempts.remove(tab.id)
+        mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+    }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
     fun reload() {
         val tab = selected ?: return

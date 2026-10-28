@@ -100,6 +100,7 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Public
@@ -181,6 +182,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.res.stringResource
 import com.zex.zexbrowse.AppLocale
 import com.zex.zexbrowse.CrashReporter
+import com.zex.zexbrowse.PromotedNotification
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
 import com.zex.zexbrowse.data.BrowserSettings
@@ -219,7 +221,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -245,6 +247,7 @@ private enum class SearchGroup(val labelRes: Int, val icon: androidx.compose.ui.
     WEB_PERMISSIONS(R.string.s250, Icons.Rounded.Security),
     SECURITY(R.string.s240, Icons.Rounded.GppGood),
     AD_BLOCK(R.string.ad_block_title, Icons.Rounded.Block),
+    NOTIFICATION(R.string.notification_title, Icons.Rounded.Notifications),
     HISTORY(R.string.s058, Icons.Default.History),
     BOOKMARKS(R.string.s098, Icons.Rounded.Bookmarks),
     DEFAULT_BROWSER(R.string.s042, Icons.Rounded.Public),
@@ -716,29 +719,35 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                 if (!backActive && event.progress > 0f) beginBack()
                 backProgress.snapTo(event.progress)
             }
-            // 手势完成：先把整页顺完滑出屏幕，再换页。
+            // 手势完成：把整页顺完滑出屏幕，然后换页。
             backProgress.animateTo(1f, tween(100))
-            // 标志在换页的整个重组周期内保持为 true，使 AnimatedContent 不插自己的滑入滑出动画；
-            // 若在此处立即改回 false，重组时标志已复位，过渡动画依旧会启动。
+            // 关键顺序：先标记「跳过页面切换动画」，再执行返回。
+            // 这两步必须在同一帧内完成，否则 AnimatedContent 会先按默认方向播一次滑入滑出，
+            // 与整页位移叠加，表现为返回瞬间闪一下。
             predictivePop = true
             performBack()
-            // 换页与复位放在同一帧提交：旧页已完全滑出，下方的目标页已在原位静止渲染，
-            // 切页后画面完全一致，因此看不到空白也不会跳帧。
-            // 复位必须用 NonCancellable：若协程在换页后被取消，标志会永久停在 true，
-            // 导致之后所有页面切换都丢失动画。
+            // 复位放在 NonCancellable 中：换页后协程可能被取消，
+            // 若复位被取消，predictivePop 会永久停在 true，之后所有页面切换都将丢失动画。
             withContext(NonCancellable) {
+                // 先复位位移：新页面必须在原位绘制。
+                // 若先 withFrameNanos 再复位，新页会在「进度仍为 1」的状态下先被画出来一帧
+                // （整页仍偏移在屏幕外 + 缩放圆角），下一帧再跳回原位，这就是看到的屏闪。
                 backProgress.snapTo(0f)
+                // 下层预渲染页与上层遮罩都要在同一帧撤掉，避免叠出一层残影
+                backActive = false
                 withFrameNanos { }
                 predictivePop = false
-                backActive = false
             }
         } catch (cancelled: CancellationException) {
             // 手势取消：本协程已处于取消态，回弹动画需放在 NonCancellable 中，
             // 否则 animateTo 会立即再抛 CancellationException，导致回弹不执行、页面停在半途。
             withContext(NonCancellable) {
+                // 先回弹到位再撤下层：若先撤下层，上层仍在偏移动画中，
+                // 页面下方会短暂露出底色，看上去像闪了一下
                 backProgress.animateTo(0f, tween(180))
-                // 取消手势：下层目标页也随之收起
                 backActive = false
+                // 取消路径同样要复位，否则下次普通跳转会被跳过动画
+                predictivePop = false
             }
             throw cancelled
         }
@@ -1023,6 +1032,7 @@ private fun PageContent(
             onWebPermissions = { navigate(Page.WEB_PERMISSIONS) },
             onSecurity = { navigate(Page.SECURITY) },
             onAdBlock = { navigate(Page.ADBLOCK) },
+            onNotification = { navigate(Page.NOTIFICATION) },
             onAbout = { navigate(Page.ABOUT) },
             onContactUs = { openInBrowser(context, CONTACT_URL) },
             onBack = goBack
@@ -1104,6 +1114,7 @@ private fun PageContent(
                 onBack = goBack
             )
         }
+        Page.NOTIFICATION -> NotificationSettingsScreen(onBack = goBack)
         Page.DOWNLOADS -> DownloadsScreen(browserViewModel, onBack = goBack)
         Page.BOOKMARKS -> BookmarksScreen(
             settings = settings,
@@ -1267,24 +1278,17 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
         ) {
             HomeHeader(onHistory = onHistory, onSettings = onSettings)
 
-            // 搜索卡：略微抬升 + 主色描边，作为整页的视觉焦点
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 3.dp
-            ) {
-                Box(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                    AddressInput(
-                        value = query,
-                        onValueChange = { query = it },
-                        onSubmit = { onOpen(query) },
-                        searchHistory = searchHistory,
-                        onRemoveHistory = onRemoveSearchHistory
-                    )
-                }
-            }
+            // 搜索框：直接用描边圈线形式呈现，不套卡片外壳。
+            // 之前卡片 + 输入框两层边框叠在一起会在四角留下双重描边，看着很脏；
+            // 单层细圈线既干净也更接近系统搜索框的观感。
+            AddressInput(
+                value = query,
+                onValueChange = { query = it },
+                onSubmit = { onOpen(query) },
+                searchHistory = searchHistory,
+                onRemoveHistory = onRemoveSearchHistory,
+                modifier = Modifier.padding(top = 18.dp)
+            )
 
             Spacer(Modifier.height(20.dp))
             AppRecommendationEntry(onClick = onAppRecommendations)
@@ -1914,6 +1918,7 @@ private fun AddressInput(
     value: String,
     onValueChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
     onFocusChange: (Boolean) -> Unit = {},
     searchHistory: List<String> = emptyList(),
     onRemoveHistory: (String) -> Unit = {},
@@ -1947,32 +1952,42 @@ private fun AddressInput(
     val fallbackHistory = value.isNotBlank() && suggestions.isEmpty() && matchedHistory.isNotEmpty()
     val expanded = showSuggestionsPanel && focused && (showHistory || showSuggestions || fallbackHistory)
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
-            placeholder = { Text(stringResource(R.string.s091)) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
+            placeholder = { Text(stringResource(R.string.s091), style = MaterialTheme.typography.bodyMedium) },
             singleLine = true,
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = RoundedCornerShape(26.dp),
+            textStyle = MaterialTheme.typography.bodyMedium,
             leadingIcon = if (security != null) {
                 {
                     ShieldBadge(assessment = security, onClick = onSecurityClick)
                 }
-            } else null,
+            } else {
+                // 无护盾时用放大镜占位，保持左侧图标位置稳定，避免输入前后文字左右跳动
+                { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
             trailingIcon = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (value.isNotBlank()) {
                         IconButton(onClick = { onValueChange("") }) { Icon(Icons.Default.Close, stringResource(R.string.s092)) }
                     }
-                    IconButton(onClick = { if (value.isNotBlank()) onSubmit() }) { Icon(Icons.Default.Search, stringResource(R.string.s093)) }
                 }
             },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Go),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (value.isNotBlank()) onSubmit() }),
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                // 线框风：常态细描边、聚焦时换主色
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                // 描边内部给一层比页面底色略深的容器色，输入内容与描边不会叠在一起；
+                // OutlinedTextField 自身会把容器背景裁到 shape（RoundedCornerShape(26.dp)）内，
+                // 因此不会溢出描线之外
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
         )
 
@@ -2472,6 +2487,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     WavyProgressBar(progress = selectedTab.progress / 100f, modifier = Modifier.fillMaxWidth())
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
+                    // 视图销毁（切换硬件加速、离开浏览页）时清除挂载标记，
+                    // 否则视图重建后会话其实尚未挂载，loadUri 会被静默丢弃并停在空白页。
+                    DisposableEffect(selectedTab.id, settings.hardwareAcceleration) {
+                        onDispose { viewModel.onSessionDetached(selectedTab.id) }
+                    }
                     key(settings.hardwareAcceleration) {
                         AndroidView(
                             factory = { ctx ->
@@ -2803,6 +2823,7 @@ private fun SettingsScreen(
     onWebPermissions: () -> Unit,
     onSecurity: () -> Unit,
     onAdBlock: () -> Unit,
+    onNotification: () -> Unit,
     onAbout: () -> Unit,
     onContactUs: () -> Unit,
     onBack: () -> Unit
@@ -2831,6 +2852,7 @@ private fun SettingsScreen(
         SettingSearchItem("HTTPS-Only", SearchGroup.PRIVACY, listOf("HTTPS", "加密", "安全", "协议", "Only", "强制加密", "隐私标签页", "encrypt", "secure", "protocol", "private"), onHttpsOnly),
         SettingSearchItem(stringResource(R.string.s240), SearchGroup.SECURITY, listOf("安全", "防护", "拦截", "诈骗", "木马", "护盾", "钓鱼", "风险", "银狐", "security", "protection", "block", "phishing", "malware", "risk"), onSecurity),
         SettingSearchItem(stringResource(R.string.ad_block_title), SearchGroup.AD_BLOCK, listOf("广告", "拦截", "广告拦截", "追踪", "跟踪", "弹窗", "推广", "adblock", "ad", "ads", "去广告", "block", "tracker", "popup"), onAdBlock),
+        SettingSearchItem(stringResource(R.string.notification_title), SearchGroup.NOTIFICATION, listOf("通知", "实时", "流体云", "灵动岛", "实时活动", "状态栏", "notification", "live update", "live activity", "promoted"), onNotification),
         SettingSearchItem(stringResource(R.string.s249), SearchGroup.WEB_PERMISSIONS, listOf("剪贴板", "复制", "粘贴", "权限", "读取", "clipboard", "copy", "paste", "permission"), onWebPermissions),
         SettingSearchItem(stringResource(R.string.s053), SearchGroup.WEB_PERMISSIONS, listOf("外部", "跳转", "APP", "应用", "Intent", "权限", "external", "app", "link", "permission"), onWebPermissions),
         SettingSearchItem(stringResource(R.string.s259), SearchGroup.WEB_PERMISSIONS, listOf("麦克风", "录音", "权限", "语音", "音频", "microphone", "mic", "record", "audio", "permission"), onWebPermissions),
@@ -2867,7 +2889,9 @@ private fun SettingsScreen(
     val entryGeneralSub = stringResource(R.string.s293)
     val entryPrivacy = stringResource(R.string.s225)
     val entryAdBlock = stringResource(R.string.ad_block_title)
-    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled) {
+    val entryNotification = stringResource(R.string.notification_title)
+    val entryNotificationSub = stringResource(R.string.notification_sub)
+    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled, entryNotification, entryNotificationSub) {
         listOf(
             SettingsEntryItem(entryGeneral, entryGeneralSub, Icons.Rounded.Tune, onGeneralSettings),
             SettingsEntryItem(entryLanguage, entryLanguageSub, Icons.Rounded.Language, onLanguage),
@@ -2876,6 +2900,7 @@ private fun SettingsScreen(
             SettingsEntryItem(entryWebPerm, entryWebPermSub, Icons.Rounded.Security, onWebPermissions),
             SettingsEntryItem(entrySecurity, securityModeSubtitle(context, settings), Icons.Rounded.GppGood, onSecurity),
             SettingsEntryItem(entryAdBlock, adBlockSubtitle(context, settings), Icons.Rounded.Block, onAdBlock),
+            SettingsEntryItem(entryNotification, entryNotificationSub, Icons.Rounded.Notifications, onNotification),
             SettingsEntryItem(entryHistory, entryHistorySub, Icons.Default.History, onHistory),
             SettingsEntryItem(entryBookmarks, entryBookmarksSub, Icons.Rounded.Bookmarks, onBookmarks),
             SettingsEntryItem(entryDefaultBrowser, entryDefaultBrowserSub, Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
@@ -3758,6 +3783,88 @@ private fun AdBlockScreen(
             ListItem(
                 headlineContent = { Text(stringResource(R.string.ad_block_tip_title)) },
                 supportingContent = { Text(stringResource(R.string.ad_block_tip)) },
+                leadingContent = { Icon(Icons.Rounded.Policy, null) }
+            )
+        }
+    }
+}
+
+/**
+ * 通知设置页。
+ *
+ * 目前只有一项「实时通知」。它不存在本地开关：
+ * 能否升格为流体云 / 灵动岛 / 实时活动完全由系统掌控，
+ * 所以这里做的是「实时查询 + 跳转系统设置」，而不是伪造一个开关。
+ * 这样用户在系统里改完回来，这里的状态也是真的。
+ */
+@Composable
+private fun NotificationSettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var notificationsEnabled by remember { mutableStateOf(PromotedNotification.areNotificationsEnabled(context)) }
+    var promotedEnabled by remember { mutableStateOf(PromotedNotification.isEnabled(context)) }
+    val supported = PromotedNotification.isSupported()
+
+    // 回到本页时重新读取：用户可能刚在系统设置里改过开关
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsEnabled = PromotedNotification.areNotificationsEnabled(context)
+                promotedEnabled = PromotedNotification.isEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    SelectionScreen(stringResource(R.string.notification_title), onBack) {
+        item {
+            val status = when {
+                !supported -> stringResource(R.string.notification_unsupported)
+                !notificationsEnabled -> stringResource(R.string.notification_blocked)
+                promotedEnabled -> stringResource(R.string.notification_on)
+                else -> stringResource(R.string.notification_off)
+            }
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.notification_live_title)) },
+                supportingContent = { Text(status) },
+                leadingContent = { Icon(Icons.Rounded.Notifications, null) },
+                trailingContent = {
+                    if (supported) {
+                        // 已开启也保留入口：用户可能想关掉，不替系统做决定
+                        TextButton(onClick = { PromotedNotification.openSettings(context) }) {
+                            Text(
+                                stringResource(
+                                    if (promotedEnabled) R.string.notification_manage else R.string.notification_enable
+                                )
+                            )
+                        }
+                    }
+                }
+            )
+        }
+        if (supported && !notificationsEnabled) {
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.notification_need_permission_title)) },
+                    supportingContent = { Text(stringResource(R.string.notification_need_permission_body)) },
+                    leadingContent = { Icon(Icons.Rounded.Block, null) }
+                )
+            }
+        }
+        item { HorizontalDivider() }
+        item {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.s364)) },
+                supportingContent = { Text(stringResource(R.string.notification_how_it_works)) },
+                leadingContent = { Icon(Icons.Rounded.GppGood, null) }
+            )
+        }
+        item {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.notification_tip_title)) },
+                supportingContent = { Text(stringResource(R.string.notification_tip)) },
                 leadingContent = { Icon(Icons.Rounded.Policy, null) }
             )
         }
