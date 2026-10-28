@@ -18,7 +18,7 @@ ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack
 
 - GeckoView 网页渲染、地址与搜索合一输入栏、前进/后退/刷新与多标签页
 - 无痕标签：退出即关闭并清除 Cookie 与缓存
-- 快捷访问书签、Room 保存的浏览历史与书签数据
+- 快捷访问书签、本地保存的浏览历史与书签数据
 - 自定义浏览器标识（UA），内置桌面模式一键切换
 
 **界面**
@@ -47,20 +47,17 @@ ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack
 
 ## 构建
 
-项目通过 [GitHub Actions 工作流](.github/workflows/android-release.yml) 自动构建并发布，Release 会附带 `SHA256SUMS.txt`。
-
-发布构建需要以下配置（由 CI Secrets 或本地 `gradle.properties` 提供），缺失时会在编译前直接失败以避免产出功能残缺的包：
-
-| 配置项 | 说明 |
-| --- | --- |
-| `LEMWOOD_API_BASE` | 柠枺镜像服务地址，形如 `https://<域名>/api/v2` |
-| `LEMWOOD_LAUNCHER_ID` | 启动器标识 |
-| `ANDROID_KEYSTORE_PATH` 等 | 发布签名配置 |
+项目使用 Gradle 构建，发布产物由仓库内配置的 GitHub Actions 工作流自动完成并附带校验文件。
 
 ```bash
-# 本地调试构建（不需要上面的发布配置）
+# 调试构建
 ./gradlew assembleDebug
+
+# 发布构建
+./gradlew assembleRelease
 ```
+
+发布所需的签名与可选服务配置由维护者在构建环境中自行提供，不随仓库分发。
 
 ## 赞助与支持
 
