@@ -252,14 +252,6 @@ private enum class SearchGroup(val labelRes: Int, val icon: androidx.compose.ui.
     ABOUT(R.string.s281, Icons.Default.Info),
     CONTACT(R.string.s288, Icons.Rounded.ContactSupport)
 }
-private data class SettingSearchItem(
-    val title: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val keywords: List<String>,
-    val onClick: () -> Unit,
-    val accent: Boolean = false,
-    val subtitle: String? = null
-)
 
 /** 设置页入口卡片（搜索框为空时的默认展示） */
 private data class SettingsEntryItem(
