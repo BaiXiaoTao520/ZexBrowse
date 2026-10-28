@@ -721,21 +721,21 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             }
             // 手势完成：把整页顺完滑出屏幕，然后换页。
             backProgress.animateTo(1f, tween(100))
-            // 关键顺序：先标记「跳过页面切换动画」，再执行返回。
-            // 这两步必须在同一帧内完成，否则 AnimatedContent 会先按默认方向播一次滑入滑出，
-            // 与整页位移叠加，表现为返回瞬间闪一下。
+            // 先标记「跳过页面切换动画」，再执行返回。
+            // 此时上层整页已在屏幕外，屏幕上看到的是下层预渲染的目标页。
             predictivePop = true
             performBack()
-            // 复位放在 NonCancellable 中：换页后协程可能被取消，
-            // 若复位被取消，predictivePop 会永久停在 true，之后所有页面切换都将丢失动画。
             withContext(NonCancellable) {
-                // 先复位位移：新页面必须在原位绘制。
-                // 若先 withFrameNanos 再复位，新页会在「进度仍为 1」的状态下先被画出来一帧
-                // （整页仍偏移在屏幕外 + 缩放圆角），下一帧再跳回原位，这就是看到的屏闪。
-                backProgress.snapTo(0f)
-                // 下层预渲染页与上层遮罩都要在同一帧撤掉，避免叠出一层残影
-                backActive = false
+                // 等一帧再复位：AnimatedContent 的内容换转由内部协程驱动，
+                // 即使过渡为空，也要到下一帧才把当前内容换成新页。
+                // 若在同一批量复位位移，重新回到原位的仍是旧页，
+                // 就是用户看到的「返回后停留一帧原页面」。
+                // 此时上层仍在屏幕外，所以多等这一帧不会露底。
                 withFrameNanos { }
+                // 复位位移与撤掉下层放在同一批量，保证同一帧生效。
+                // predictivePop 最后才复位：它控制着 key，提早复位会触发一次无意义的重建。
+                backProgress.snapTo(0f)
+                backActive = false
                 predictivePop = false
             }
         } catch (cancelled: CancellationException) {
@@ -824,51 +824,65 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
                         val progress = backProgress.value
-                        if (progress > 0f) {
-                            translationX = size.width * progress
-                            val scale = 1f - 0.16f * progress
-                            scaleX = scale
-                            scaleY = scale
-                            // Miuix 风格：跟手缩放时边缘圆角收拢并投下阴影
-                            shape = RoundedCornerShape((24f * progress).dp)
-                            clip = true
-                            shadowElevation = (14f * progress).dp.toPx()
-                            ambientShadowColor = Color.Black.copy(alpha = 0.35f)
-                            spotShadowColor = Color.Black.copy(alpha = 0.35f)
-                        }
+                        // 每次都显式赋值全部属性，不能只在 progress > 0 时设。
+                        // graphicsLayer 会沿用上一次的值：若回零时不重置 clip/shape/translationX，
+                        // 下一帧就会带着残留的位移与裁剪继续绘制，表现为「返回后停留一帧原页面」。
+                        translationX = size.width * progress
+                        val scale = 1f - 0.16f * progress
+                        scaleX = scale
+                        scaleY = scale
+                        // Miuix 风格：跟手缩放时边缘圆角收拢并投下阴影
+                        shape = RoundedCornerShape((24f * progress).dp)
+                        clip = progress > 0f
+                        shadowElevation = (14f * progress).dp.toPx()
+                        ambientShadowColor = Color.Black.copy(alpha = 0.35f)
+                        spotShadowColor = Color.Black.copy(alpha = 0.35f)
                     }
                 ) {
                     // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
-                    // 侧滑手势完成时跳过该动画，由整页位移接管，避免双重动画。
-                    AnimatedContent(
-                        targetState = page,
-                        transitionSpec = {
-                            if (predictivePop) {
-                                EnterTransition.None togetherWith ExitTransition.None
-                            } else {
-                                val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
-                                slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
-                            }
-                        },
-                        label = "page"
-                    ) { destination ->
-                        PageContent(
-                            destination = destination,
-                            settings = settings,
-                            searchHistory = settings.searchHistory,
-                            settingsStore = settingsStore,
-                            browserViewModel = browserViewModel,
-                            scope = scope,
-                            context = context,
-                            isDefaultBrowser = isDefaultBrowser,
-                            requestDefaultBrowser = requestDefaultBrowser,
-                            micPermissionLauncher = micPermissionLauncher,
-                            tabsIncognito = tabsIncognito,
-                            onTabsIncognitoChange = { tabsIncognito = it },
-                            navigate = navigate,
-                            goBack = goBack,
-                            onSponsor = { sponsorInfo = true }
-                        )
+                    // 手势返回提交时直接不播任何过渡，并同时禁用尺寸动画。
+                    //
+                    // why：AnimatedContent 在 targetState 变化时会把新旧两套内容同时组合并绘制，
+                    // 它内部的过渡协程需要至少一帧才会丢弃旧内容。
+                    // 在那一帧里上层若已复位位移，重新回到原位的仍是旧页，
+                    // 就是用户看到的「返回后停留一帧原页面」。
+                    // 因此这里同时做两件事：过渡置空 + 尺寸变换置 null，
+                    // 保证新旧内容在同一帧完成交接。
+                    // 手势提交时 key 变化 → AnimatedContent 被彻底重建，
+                    // 不会把旧页面作为「正在退出的内容」再绘制一帧。
+                    // 这是消除「返回后停留一帧」最直接的手段：
+                    // 不再依赖过渡时长是否为 0，也不依赖内部协程何时清理旧内容。
+                    key(predictivePop) {
+                        AnimatedContent(
+                            targetState = page,
+                            transitionSpec = {
+                                if (predictivePop) {
+                                    EnterTransition.None togetherWith ExitTransition.None using null
+                                } else {
+                                    val direction = if (navForward) AnimatedContentTransitionScope.SlideDirection.Left else AnimatedContentTransitionScope.SlideDirection.Right
+                                    slideIntoContainer(direction, animationSpec = tween(260)) togetherWith slideOutOfContainer(direction, animationSpec = tween(260))
+                                }
+                            },
+                            label = "page"
+                        ) { destination ->
+                            PageContent(
+                                destination = destination,
+                                settings = settings,
+                                searchHistory = settings.searchHistory,
+                                settingsStore = settingsStore,
+                                browserViewModel = browserViewModel,
+                                scope = scope,
+                                context = context,
+                                isDefaultBrowser = isDefaultBrowser,
+                                requestDefaultBrowser = requestDefaultBrowser,
+                                micPermissionLauncher = micPermissionLauncher,
+                                tabsIncognito = tabsIncognito,
+                                onTabsIncognitoChange = { tabsIncognito = it },
+                                navigate = navigate,
+                                goBack = goBack,
+                                onSponsor = { sponsorInfo = true }
+                            )
+                        }
                     }
                 }
             }
