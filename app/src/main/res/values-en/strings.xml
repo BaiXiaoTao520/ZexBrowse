@@ -670,4 +670,18 @@
     <string name="notice_pan_download">Open file host</string>
     <string name="engine_baidu">Baidu</string>
     <string name="engine_bing">Bing</string>
+    <string name="notification_title">Notifications</string>
+    <string name="notification_sub">Live updates and status bar</string>
+    <string name="notification_live_title">Live updates</string>
+    <string name="notification_on">On · download progress appears in the status bar and on the lock screen</string>
+    <string name="notification_off">Off · download progress only appears in the notification shade</string>
+    <string name="notification_blocked">System notifications are off. Allow notifications in system settings first.</string>
+    <string name="notification_unsupported">This system does not support live updates. Download progress will appear in the notification shade.</string>
+    <string name="notification_enable">Turn on</string>
+    <string name="notification_manage">Manage</string>
+    <string name="notification_need_permission_title">Notification permission needed</string>
+    <string name="notification_need_permission_body">Live updates rely on system notifications. Allow ZexBrowse to send notifications in system settings, then turn on live updates.</string>
+    <string name="notification_how_it_works">Live updates are controlled by the system; apps cannot toggle them directly. Once enabled, download progress appears as system surfaces such as a status chip or lock-screen card. Names and styles vary by system.</string>
+    <string name="notification_tip_title">Note</string>
+    <string name="notification_tip">This status is read directly from system settings. Change it in the system and come back to see the updated result.</string>
 </resources>

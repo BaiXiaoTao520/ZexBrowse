@@ -670,4 +670,18 @@
     <string name="notice_pan_download">网盘下载</string>
     <string name="engine_baidu">百度</string>
     <string name="engine_bing">必应</string>
+    <string name="notification_title">通知设置</string>
+    <string name="notification_sub">实时通知与状态栏展示</string>
+    <string name="notification_live_title">实时通知</string>
+    <string name="notification_on">已开启 · 下载进度会显示在状态栏与锁屏</string>
+    <string name="notification_off">已关闭 · 下载进度只在通知栏显示</string>
+    <string name="notification_blocked">系统通知已关闭，需先在系统中允许通知</string>
+    <string name="notification_unsupported">当前系统不支持实时通知，下载进度会在通知栏显示</string>
+    <string name="notification_enable">去开启</string>
+    <string name="notification_manage">去管理</string>
+    <string name="notification_need_permission_title">需要通知权限</string>
+    <string name="notification_need_permission_body">实时通知依附于系统通知。请在系统设置中允许 ZexBrowse 发送通知后，再开启实时通知。</string>
+    <string name="notification_how_it_works">实时通知由系统统一管控，应用无法自行开关。开启后，下载进度会以胶囊、锁屏卡片等系统形式展示；不同系统的名称与样式不同（如实时活动、流体云）。</string>
+    <string name="notification_tip_title">提示</string>
+    <string name="notification_tip">此处的状态直接读取系统设置，你在系统里改动后返回本页即可看到最新结果。</string>
 </resources>
