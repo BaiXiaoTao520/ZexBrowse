@@ -9,6 +9,7 @@ package com.zex.zexbrowse.download
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import com.zex.zexbrowse.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -61,12 +62,12 @@ class DownloadManager(private val context: Context) {
     suspend fun download(url: String, target: Uri): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", DOWNLOAD_USER_AGENT).build()
         client.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "下载失败：${response.code}" }
-            val responseBody = response.body ?: error("下载响应内容为空")
-            val output = context.contentResolver.openOutputStream(target) ?: error("无法写入目标文件")
+            check(response.isSuccessful) { context.getString(R.string.dl_err_http, response.code.toString()) }
+            val responseBody = response.body ?: error(context.getString(R.string.dl_err_empty_body))
+            val output = context.contentResolver.openOutputStream(target) ?: error(context.getString(R.string.dl_err_cannot_write))
             output.use { stream -> responseBody.byteStream().use { input -> input.copyTo(stream) } }
         }
-        val downloadedFile = context.contentResolver.openInputStream(target) ?: error("无法读取已下载文件")
+        val downloadedFile = context.contentResolver.openInputStream(target) ?: error(context.getString(R.string.dl_err_cannot_read))
         ApkHashVerifier.sha256(downloadedFile)
     }
 
@@ -76,7 +77,7 @@ class DownloadManager(private val context: Context) {
         onProgress: (Int) -> Unit
     ): UpdateDownloadResult = withContext(Dispatchers.IO) {
         val directory = updateDirectory()
-        check(directory.exists() || directory.mkdirs()) { "无法创建更新下载目录" }
+        check(directory.exists() || directory.mkdirs()) { context.getString(R.string.dl_err_cannot_create_dir) }
         val (destination, temporary) = updateFiles(fileName)
         temporary.delete()
 
@@ -88,8 +89,8 @@ class DownloadManager(private val context: Context) {
             }
             try {
                 call.execute().use { response ->
-                    check(response.isSuccessful) { "下载失败：${response.code}" }
-                    val responseBody = response.body ?: error("下载响应内容为空")
+                    check(response.isSuccessful) { context.getString(R.string.dl_err_http, response.code.toString()) }
+                    val responseBody = response.body ?: error(context.getString(R.string.dl_err_empty_body))
                     val totalBytes = responseBody.contentLength()
                     var downloadedBytes = 0L
                     val digest = MessageDigest.getInstance("SHA-256")
@@ -110,7 +111,7 @@ class DownloadManager(private val context: Context) {
                     }
                     withContext(Dispatchers.Main.immediate) { onProgress(100) }
                     if (destination.exists()) destination.delete()
-                    check(temporary.renameTo(destination)) { "无法完成更新文件保存" }
+                    check(temporary.renameTo(destination)) { context.getString(R.string.dl_err_cannot_save_update) }
                     UpdateDownloadResult(destination, digest.digest().joinToString("") { byte -> "%02x".format(byte) })
                 }
             } finally {

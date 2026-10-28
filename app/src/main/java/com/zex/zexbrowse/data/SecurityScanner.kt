@@ -6,6 +6,10 @@
 
 package com.zex.zexbrowse.data
 
+import android.content.Context
+import androidx.annotation.StringRes
+import com.zex.zexbrowse.R
+
 /**
  * 网页安全扫描。
  *
@@ -26,16 +30,31 @@ object SecurityScanner {
     /**
      * 扫描结论。
      *
+     * 文案以字符串资源 + 参数的形式保存，而不是提前拼好的中文串：
+     * 扫描发生在设置切换之外，若直接存文本，切到英文后这些提示仍会停在中文。
+     *
      * @param level 风险等级
-     * @param reason 面向用户的简短原因，如「连接未加密」
-     * @param detail 展开说明，解释判定依据
+     * @param reasonRes 面向用户的简短原因资源，如「连接未加密」
+     * @param reasonArgs 原因文案的格式参数
+     * @param detailRes 展开说明资源，解释判定依据
+     * @param detailArgs 展开说明的格式参数
      */
     data class RiskAssessment(
         val level: RiskLevel = RiskLevel.SAFE,
-        val reason: String = "",
-        val detail: String = ""
+        @StringRes val reasonRes: Int = 0,
+        val reasonArgs: List<String> = emptyList(),
+        @StringRes val detailRes: Int = 0,
+        val detailArgs: List<String> = emptyList()
     ) {
         val isRisky: Boolean get() = level == RiskLevel.SUSPICIOUS || level == RiskLevel.DANGEROUS
+
+        /** 当前语言下的简短原因；无风险时为空串 */
+        fun reason(context: Context): String =
+            if (reasonRes == 0) "" else context.getString(reasonRes, *reasonArgs.toTypedArray())
+
+        /** 当前语言下的详细说明；无风险时为空串 */
+        fun detail(context: Context): String =
+            if (detailRes == 0) "" else context.getString(detailRes, *detailArgs.toTypedArray())
     }
 
     /**
@@ -79,8 +98,8 @@ object SecurityScanner {
         if (!https) {
             return RiskAssessment(
                 level = RiskLevel.INSECURE,
-                reason = "连接未加密",
-                detail = "此页面使用 HTTP 明文传输，你输入的内容可能被同一网络中的其他人看到或篡改。"
+                reasonRes = R.string.risk_reason_not_encrypted,
+                detailRes = R.string.risk_detail_not_encrypted
             )
         }
 
@@ -88,8 +107,8 @@ object SecurityScanner {
         if (loaded) {
             return RiskAssessment(
                 level = RiskLevel.INSECURE,
-                reason = "存在不安全内容",
-                detail = "页面主体为 HTTPS，但其中的脚本或表单通过明文加载，可能被第三方篡改。"
+                reasonRes = R.string.risk_reason_mixed_active,
+                detailRes = R.string.risk_detail_mixed_active
             )
         }
 
@@ -97,20 +116,16 @@ object SecurityScanner {
             // 明确拿到证书却仍不安全：证书校验未通过
             return RiskAssessment(
                 level = RiskLevel.INSECURE,
-                reason = if (hasCertificate) "证书不可信" else "安全连接异常",
-                detail = if (hasCertificate) {
-                    "服务器证书未通过校验，可能已过期、与域名不匹配或不受信任。"
-                } else {
-                    "无法确认此连接的安全性。"
-                }
+                reasonRes = if (hasCertificate) R.string.risk_reason_bad_cert else R.string.risk_reason_tls_error,
+                detailRes = if (hasCertificate) R.string.risk_detail_bad_cert else R.string.risk_detail_tls_unknown
             )
         }
 
         if (passiveLoaded) {
             return RiskAssessment(
                 level = RiskLevel.INSECURE,
-                reason = "部分内容未加密",
-                detail = "页面中的图片等资源通过明文加载，不影响登录安全，但内容可能被替换。"
+                reasonRes = R.string.risk_reason_mixed_passive,
+                detailRes = R.string.risk_detail_mixed_passive
             )
         }
 
@@ -135,8 +150,8 @@ object SecurityScanner {
         if (authority.contains('@')) {
             return RiskAssessment(
                 level = RiskLevel.DANGEROUS,
-                reason = "网址具有欺骗性",
-                detail = "这个链接用「@」隐藏了真实网站，实际访问的是 ${host}。这是常见的钓鱼手法。"
+                reasonRes = R.string.risk_reason_deceptive_url,
+                detailRes = R.string.risk_detail_deceptive_url, detailArgs = listOf(host)
             )
         }
 
@@ -145,18 +160,18 @@ object SecurityScanner {
 
         // 2. 内置黑名单（域名与路径关键词）
         blockedDomain(host)?.let {
-            return RiskAssessment(level = RiskLevel.DANGEROUS, reason = "已知风险网站", detail = it)
+            return RiskAssessment(level = RiskLevel.DANGEROUS, reasonRes = R.string.risk_reason_known_bad, detailRes = it)
         }
         blockedPath(url)?.let {
-            return RiskAssessment(level = RiskLevel.DANGEROUS, reason = "疑似木马或欺诈", detail = it)
+            return RiskAssessment(level = RiskLevel.DANGEROUS, reasonRes = R.string.risk_reason_trojan, detailRes = it)
         }
 
         // 3. 仿冒知名站点（同形字符归一化后比较）
         impersonatedBrand(host)?.let {
             return RiskAssessment(
                 level = RiskLevel.DANGEROUS,
-                reason = "疑似仿冒网站",
-                detail = "该域名与 $it 高度相似，但不是其官方域名，常用于骗取账号密码。"
+                reasonRes = R.string.risk_reason_impersonation,
+                detailRes = R.string.risk_detail_impersonation, detailArgs = listOf(it)
             )
         }
 
@@ -164,8 +179,8 @@ object SecurityScanner {
         if (host.startsWith("xn--") || host.contains(".xn--")) {
             return RiskAssessment(
                 level = RiskLevel.SUSPICIOUS,
-                reason = "域名含特殊字符",
-                detail = "该域名使用编码字符，显示出来可能与真实网站几乎一样，请仔细核对。"
+                reasonRes = R.string.risk_reason_punycode,
+                detailRes = R.string.risk_detail_punycode
             )
         }
 
@@ -174,8 +189,8 @@ object SecurityScanner {
         if (tld in ABUSED_TLDS) {
             return RiskAssessment(
                 level = RiskLevel.SUSPICIOUS,
-                reason = "可疑域名后缀",
-                detail = "该域名以 .$tld 结尾，这类后缀因可免费注册，常被用于一次性欺诈站点。"
+                reasonRes = R.string.risk_reason_bad_tld,
+                detailRes = R.string.risk_detail_bad_tld, detailArgs = listOf(tld)
             )
         }
 
@@ -183,14 +198,14 @@ object SecurityScanner {
         if (isIpAddress(host) && !url.startsWith("https://", ignoreCase = true)) {
             return RiskAssessment(
                 level = RiskLevel.SUSPICIOUS,
-                reason = "直接访问 IP 地址",
-                detail = "正规站点通常使用域名。直接访问 IP 且未加密，常见于临时搭建的钓鱼页面。"
+                reasonRes = R.string.risk_reason_raw_ip,
+                detailRes = R.string.risk_detail_raw_ip
             )
         }
 
         // 7. 域名结构异常
         abnormalHost(host)?.let {
-            return RiskAssessment(level = RiskLevel.SUSPICIOUS, reason = "域名结构异常", detail = it)
+            return RiskAssessment(level = RiskLevel.SUSPICIOUS, reasonRes = R.string.risk_reason_abnormal_host, detailRes = it)
         }
 
         return RiskAssessment()
@@ -207,28 +222,28 @@ object SecurityScanner {
         host.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")) || host.startsWith("[") || host.contains(':')
 
     /** 域名结构异常：过长标签、层级过深、数字占比过高 */
-    private fun abnormalHost(host: String): String? {
+    private fun abnormalHost(host: String): Int? {
         val labels = host.split('.').filter { it.isNotBlank() }
         if (labels.isEmpty()) return null
         if (labels.any { it.length > 40 }) {
-            return "域名中存在异常超长的片段，常被用于隐藏真实目标。"
+            return R.string.risk_detail_host_long
         }
         if (labels.size > 5) {
-            return "域名层级异常深，可能在使用随机子域绕过拦截。"
+            return R.string.risk_detail_host_deep
         }
         // 去掉后缀，只看主体部分；数字占比过高多见于自动生成的域名
         val body = labels.dropLast(1).joinToString("")
         if (body.length >= 8) {
             val digits = body.count { it.isDigit() }
             if (digits * 100 / body.length >= 40) {
-                return "域名中包含大量数字，可能是自动生成的临时站点。"
+                return R.string.risk_detail_host_digits
             }
         }
         return null
     }
 
     /** 已知风险域名：命中即危险 */
-    private fun blockedDomain(host: String): String? {
+    private fun blockedDomain(host: String): Int? {
         for ((domain, note) in BLOCKED_DOMAINS) {
             if (host == domain || host.endsWith(".$domain")) return note
         }
@@ -236,7 +251,7 @@ object SecurityScanner {
     }
 
     /** URL 路径中的风险关键词（正常网站不会用这些词做路径） */
-    private fun blockedPath(url: String): String? {
+    private fun blockedPath(url: String): Int? {
         val lower = url.lowercase()
         for ((keyword, note) in BLOCKED_PATH_KEYWORDS) {
             if (lower.contains(keyword)) return note
@@ -350,18 +365,18 @@ object SecurityScanner {
         SAFE_DOMAINS.any { host == it || host.endsWith(".$it") }
 
     /** 已知风险域名（示例名单，可在后续按需扩充） */
-    private val BLOCKED_DOMAINS: Map<String, String> = mapOf(
-        "silverfox-c2.com" to "该域名被用于投放银狐木马，会窃取通讯录与短信。",
-        "yinhu-muma.top" to "该域名与银狐木马（远控木马）分发相关。"
+    private val BLOCKED_DOMAINS: Map<String, Int> = mapOf(
+        "silverfox-c2.com" to R.string.risk_detail_silverfox_domain,
+        "yinhu-muma.top" to R.string.risk_detail_yinhu_domain
     )
 
     /** 路径关键词：覆盖银狐木马、常见诈骗落地页的特征 */
-    private val BLOCKED_PATH_KEYWORDS: Map<String, String> = mapOf(
-        "silverfox" to "链接指向银狐木马下载，安装后会远程控制你的设备。",
-        "yinhu" to "链接疑似银狐木马（远控木马）分发地址。",
-        "muma" to "链接疑似木马分发地址。",
-        "apk-update" to "以「更新」为名诱导安装安卓安装包，是常见的木马投放方式。",
-        "install-apk" to "该地址直接推装安卓安装包，请确认来源可靠。"
+    private val BLOCKED_PATH_KEYWORDS: Map<String, Int> = mapOf(
+        "silverfox" to R.string.risk_detail_silverfox_path,
+        "yinhu" to R.string.risk_detail_yinhu_path,
+        "muma" to R.string.risk_detail_trojan_path,
+        "apk-update" to R.string.risk_detail_apk_update,
+        "install-apk" to R.string.risk_detail_install_apk
     )
 
     /** 受保护品牌（仅用于识别仿冒，不长于 4 字符的会被跳过以减少误伤） */

@@ -78,18 +78,18 @@ object CrashReporter {
     private fun write(context: Context, throwable: Throwable) {
         val stack = StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
         val text = buildString {
-            append("===== ZexBrowse 崩溃报告 =====\n")
-            append("时间：").append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())).append('\n')
-            append("线程：").append(Thread.currentThread().name).append('\n')
-            append("版本：").append(runCatching {
+            append(context.getString(R.string.crash_report_header)).append('\n')
+            append(context.getString(R.string.crash_report_time)).append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())).append('\n')
+            append(context.getString(R.string.crash_report_thread)).append(Thread.currentThread().name).append('\n')
+            append(context.getString(R.string.crash_report_version)).append(runCatching {
                 val info = context.packageManager.getPackageInfo(context.packageName, 0)
                 "${info.versionName} (${info.longVersionCode})"
-            }.getOrNull() ?: "未知").append('\n')
-            append("设备：").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL).append('\n')
-            append("系统：Android ").append(android.os.Build.VERSION.RELEASE)
+            }.getOrNull() ?: context.getString(R.string.crash_report_unknown)).append('\n')
+            append(context.getString(R.string.crash_report_device)).append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL).append('\n')
+            append(context.getString(R.string.crash_report_os)).append(android.os.Build.VERSION.RELEASE)
                 .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n")
-            append("ABI：").append(runCatching { android.os.Build.SUPPORTED_ABIS.joinToString(",") }.getOrNull() ?: "未知").append('\n')
-            append("----- 异常栈 -----\n")
+            append(context.getString(R.string.crash_report_abi)).append(runCatching { android.os.Build.SUPPORTED_ABIS.joinToString(",") }.getOrNull() ?: context.getString(R.string.crash_report_unknown)).append('\n')
+            append(context.getString(R.string.crash_report_stack)).append('\n')
             append(stack)
         }
         runCatching { crashFile(context).writeText(text) }

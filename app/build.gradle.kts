@@ -68,9 +68,9 @@ android {
     defaultConfig {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
-        targetSdk = 36
-        versionCode = 68
-        versionName = "6.6.0"
+        targetSdk = 37
+        versionCode = 110000
+        versionName = "11.0.0"
         ndk { abiFilters += "arm64-v8a" }
 
         // GeckoView 内核主版本号（如 "158.0"），供 UA 生成与兜底使用
@@ -145,7 +145,9 @@ configurations.configureEach {
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    implementation("androidx.core:core-ktx:1.15.0")
+    // core 1.17.0：提供 NotificationCompat.ProgressStyle 与 setRequestPromotedOngoing，
+    // 下载通知才能升级为 Android 16+ 的实时活动（Live Update）。
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
