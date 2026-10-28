@@ -7,23 +7,60 @@
 >
 > 源码公开意味着任何人都可以编译、篡改后重新打包分发。若你使用的版本提示付费解锁（例如要求输入卡密、购买激活码、付费才能开启功能），**一律属于未经授权的盗版篡改版**，并非本项目发布。请立即停止使用并卸载，改为从本仓库的 Releases 获取。
 
-ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack Compose Material 3 的开源 Android 浏览器
+ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack Compose Material 3 的开源 Android 浏览器。
 
+- 支持 Android 8.0（API 28）及以上，已适配 Android 17（API 37）
 - 许可证：[Mozilla Public License 2.0](LICENSE)
 
 ## 功能
 
-- Compose MD3 首页、动态取色、深浅色主题界面
-- GeckoView 网页渲染、地址搜索、前进/后退/刷新和多标签页
-- 快捷访问、无痕标签、Cookie/缓存控制和 Room 浏览历史/书签数据层
-- 网页下载捕获、APK SHA-256 校验和 GitHub Release 更新检查
-- 不内置广告、追踪统计、代理/VPN；仅内置深色强制样式扩展
+**浏览**
 
-## 构建与发布
+- GeckoView 网页渲染、地址与搜索合一输入栏、前进/后退/刷新与多标签页
+- 无痕标签：退出即关闭并清除 Cookie 与缓存
+- 快捷访问书签、Room 保存的浏览历史与书签数据
+- 自定义浏览器标识（UA），内置桌面模式一键切换
 
-项目提供 [GitHub Actions 工作流](.github/workflows/android-release.yml)
+**界面**
 
-Release 会附带 `SHA256SUMS.txt`
+- Material 3 动态取色，跟随系统 / 浅色 / 深色三种模式
+- 8 套内置颜色主题 + 自定义取色器（色相/饱和度面板 + 明度滑条 + HEX 输入）
+- 简体中文、繁体中文、English 三套界面语言，可在应用内切换
+
+**安全与隐私**
+
+- 网址安全扫描：钓鱼、仿冒、punycode、可疑后缀、IP 直连、证书异常与混合内容，全部本地判定
+- HTTPS-Only：优先加密连接，可按全部标签页或仅隐私标签页生效
+- 广告拦截：请求层拦截广告与追踪域名，并隐藏页面内常见广告位，可开关并显示累计拦截次数
+- 剪贴板、外部 APP 跳转、麦克风三类网页权限可分别设为询问 / 允许 / 拒绝
+
+**应用推荐**
+
+- 精选工具与创作类应用，APK 直链走应用内下载，网页/网盘类给出打开说明
+
+**下载**
+
+- 网页下载捕获，支持断点续传、暂停与继续（暂停后继续从断点接续，不会重头下载）
+- 下载进度通知，在 Android 16+ 上自动升级为实时活动（Live Update），锁屏与状态栏即可查看
+- APK SHA-256 校验，下载完成后自动计算并可对比官方哈希
+- 下载目录可选内部或任意可授权的外部目录
+
+## 构建
+
+项目通过 [GitHub Actions 工作流](.github/workflows/android-release.yml) 自动构建并发布，Release 会附带 `SHA256SUMS.txt`。
+
+发布构建需要以下配置（由 CI Secrets 或本地 `gradle.properties` 提供），缺失时会在编译前直接失败以避免产出功能残缺的包：
+
+| 配置项 | 说明 |
+| --- | --- |
+| `LEMWOOD_API_BASE` | 柠枺镜像服务地址，形如 `https://<域名>/api/v2` |
+| `LEMWOOD_LAUNCHER_ID` | 启动器标识 |
+| `ANDROID_KEYSTORE_PATH` 等 | 发布签名配置 |
+
+```bash
+# 本地调试构建（不需要上面的发布配置）
+./gradlew assembleDebug
+```
 
 ## 赞助与支持
 

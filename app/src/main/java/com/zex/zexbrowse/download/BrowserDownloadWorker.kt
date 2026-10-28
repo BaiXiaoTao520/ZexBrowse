@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ForegroundInfo
@@ -56,10 +57,18 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     private suspend fun recordIsPauseRequested(id: String): Boolean =
         database.downloadDao().find(id)?.status == "paused"
 
-    /** 暂停时把真实进度写回记录，否则续传会从 0 重新开始 */
-    private suspend fun savePausedProgress(id: String, downloaded: Long, total: Long) {
-        val progress = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
-        database.downloadDao().updateProgress(id, "paused", progress, downloaded, total)
+    /**
+     * 暂停时把真实进度写回记录，否则续传会从 0 重新开始。
+     *
+     * 优先采用目标文件在磁盘上的实际长度：写入缓冲区可能还没刷盘，
+     * 用内存里的 downloaded 会比文件多，重启后发现前半段不够就会被迫重下。
+     */
+    private suspend fun savePausedProgress(id: String, downloaded: Long, total: Long, uri: Uri) {
+        val onDisk = runCatching { if (uri.scheme == "file") File(uri.path.orEmpty()).length() else targetSize(uri) }
+            .getOrDefault(0L)
+        val committed = if (onDisk > 0L) minOf(onDisk, downloaded) else downloaded
+        val progress = if (total > 0) ((committed * 100) / total).toInt().coerceIn(0, 100) else 0
+        database.downloadDao().updateProgress(id, "paused", progress, committed, total)
         database.downloadDao().pause(id)
     }
 
@@ -176,33 +185,37 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             var lastNotifyAt = 0L
             val digest = MessageDigest.getInstance("SHA-256")
             val targetFile = File(uri.path.orEmpty())
-            val append = uri.scheme == "file" && startOffset > 0L && targetFile.length() >= startOffset
+            val isFileTarget = uri.scheme == "file"
+            val existing = if (isFileTarget) targetFile.length() else targetSize(uri)
+            // 只有磁盘上确实已经有 startOffset 这么多数据，追加写才是安全的
+            val appendable = startOffset > 0L && existing >= startOffset
+            if (startOffset > 0L && !appendable) {
+                // 服务端已按 Range 只发了剩余部分，本地却凑不齐前半段，
+                // 无论从头写还是追加都会得到坏文件，只能让用户重新下载
+                error(applicationContext.getString(R.string.dl_err_incomplete))
+            }
             // 续传时已落盘的那部分是文件的前半段，必须先喂给摘要，
             // 否则最终 SHA-256 只算了后半段，校验必定报不匹配。
-            if (append) {
-                targetFile.inputStream().use { existing ->
+            if (appendable) {
+                openTargetInput(uri).use { existingStream ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     var remaining = startOffset
                     while (remaining > 0) {
-                        val read = existing.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                        val read = existingStream.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
                         if (read < 0) break
                         digest.update(buffer, 0, read)
                         remaining -= read
                     }
                 }
-            } else if (uri.scheme == "file" && startOffset > 0L) {
-                // 已有文件比记录短，无法可信追加。此时服务端已按 Range 只发了剩余部分，
-                // 直接从头写会缺掉前半段，只能报错让用户重新下载。
-                error(applicationContext.getString(R.string.dl_err_incomplete))
             }
-            val output: OutputStream = if (uri.scheme == "file") {
-                // 续传时追加写入；从头开始时截断旧数据
-                FileOutputStream(targetFile, append)
+            // 内部 file:// 用追加模式；外部 SAF 用 "wa"（write + append），
+            // 两者都只在有可信偏移时追加，否则截断重写
+            val output: OutputStream = if (isFileTarget) {
+                FileOutputStream(targetFile, appendable)
             } else {
-                // SAF 无法可靠随机写入：若服务端已按 Range 只返回了剩余部分，
-                // 从头写会得到一个缺了前半段的坏文件，所以这种情况下直接报错让用户重新下载。
-                if (startOffset > 0L) error(applicationContext.getString(R.string.dl_err_no_resume))
-                applicationContext.contentResolver.openOutputStream(uri, "wt") ?: error(applicationContext.getString(R.string.dl_err_cannot_write))
+                val mode = if (appendable) "wa" else "wt"
+                applicationContext.contentResolver.openOutputStream(uri, mode)
+                    ?: error(applicationContext.getString(R.string.dl_err_cannot_write))
             }
             input!!.use { streamIn ->
                 output.buffered().use { stream ->
@@ -250,7 +263,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             withContext(NonCancellable) {
                 if (recordIsPauseRequested(id)) {
                     // 先把真实进度写回，否则续传会从 0 开始
-                    savePausedProgress(id, downloadedBytes, totalBytes)
+                    savePausedProgress(id, downloadedBytes, totalBytes, uri)
                 } else {
                     database.downloadDao().finishWithMessage(id, "cancelled", applicationContext.getString(R.string.dl_err_cancelled))
                     deletePartialFile(uri)
@@ -260,7 +273,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
                 if (recordIsPauseRequested(id)) {
-                    savePausedProgress(id, downloadedBytes, totalBytes)
+                    savePausedProgress(id, downloadedBytes, totalBytes, uri)
                 } else {
                     database.downloadDao().finishWithMessage(id, "cancelled", applicationContext.getString(R.string.dl_err_cancelled))
                     deletePartialFile(uri)
@@ -286,13 +299,27 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         }
     }
 
+    /** 目标文件当前实际大小（SAF 通过文件描述符读取），读不到按 0 处理 */
+    private fun targetSize(uri: Uri): Long = runCatching {
+        applicationContext.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+    }.getOrDefault(0L)
+
+    /** 打开目标文件用于计算续传时的 SHA-256；SAF 走 contentResolver */
+    private fun openTargetInput(uri: Uri): java.io.InputStream =
+        if (uri.scheme == "file") {
+            File(uri.path.orEmpty()).inputStream()
+        } else {
+            applicationContext.contentResolver.openInputStream(uri)
+                ?: error(applicationContext.getString(R.string.dl_err_cannot_read))
+        }
+
     /**
      * 立即发出「准备中」通知，不依赖 WorkManager 前台服务的启动时机。
      * 与 setForeground 使用同一通知 ID，升级为前台服务时原地更新，不会出现两条通知。
      */
     private fun postPreparingNotification(id: String, fileName: String) {
         ensureChannel()
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(fileName.ifBlank { applicationContext.getString(R.string.dl_notify_preparing) })
             .setContentText(applicationContext.getString(R.string.dl_notify_connecting))
@@ -300,7 +327,9 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPendingIntent())
             .setProgress(0, 0, true)
-            .build()
+        // 与后续进度通知保持同一形态，避免刚升格为实时活动又退回普通通知造成闪动
+        applyLiveUpdate(builder, 0, indeterminate = true)
+        val notification = builder.build()
         runCatching {
             applicationContext.getSystemService(NotificationManager::class.java)
                 .notify(foregroundNotificationId(id), notification)
@@ -309,19 +338,52 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
 
     private fun createForegroundInfo(id: String, fileName: String, progress: Int, indeterminate: Boolean): ForegroundInfo {
         ensureChannel()
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        val title = fileName.ifBlank { applicationContext.getString(R.string.dl_notify_preparing) }
+        val builder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(fileName.ifBlank { applicationContext.getString(R.string.dl_notify_preparing) })
+            .setContentTitle(title)
             .setContentText(if (indeterminate) applicationContext.getString(R.string.dl_notify_preparing) else "$progress%")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPendingIntent())
             .setProgress(100, progress, indeterminate)
-            .build()
+        applyLiveUpdate(builder, progress, indeterminate)
+        val notification = builder.build()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(foregroundNotificationId(id), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             ForegroundInfo(foregroundNotificationId(id), notification)
+        }
+    }
+
+    /**
+     * 把下载通知升级为 Android 16+ 的实时活动（Live Update）。
+     *
+     * 真实生效的前提（缺一不可，系统会自行逐条校验）：
+     * - 通知必须是 ProgressStyle / BigTextStyle 等受支持样式，且 ongoing、有 contentTitle、
+     *   没有自定义 RemoteViews、渠道重要度不是 IMPORTANCE_MIN（本渠道是 IMPORTANCE_LOW，满足）；
+     * - 必须声明 POST_PROMOTED_NOTIFICATIONS 并在构建时请求升格；
+     * - 用户没有在系统设置里关闭本应用的实时活动（canPostPromotedNotifications 会返回 false）。
+     *
+     * androidx.core 1.17.0 起 NotificationCompat 自身就带 ProgressStyle 与
+     * setRequestPromotedOngoing，低版本系统上这两者自动降级为普通进度条，
+     * 所以不需要按 Build.VERSION 分支写两套。
+     */
+    private fun applyLiveUpdate(builder: NotificationCompat.Builder, progress: Int, indeterminate: Boolean) {
+        runCatching {
+            // indeterminate 时进度相关字段会被系统忽略，只保留「正在准备」的转动状态；
+            // 明确进度时再写入具体百分比，两者不能同时设置，否则进度条会停在 0
+            val style = NotificationCompat.ProgressStyle().setStyledByProgress(true)
+            if (indeterminate) {
+                style.setProgressIndeterminate(true)
+            } else {
+                style.setProgress(progress.coerceIn(0, 100))
+            }
+            builder.setStyle(style)
+            // 用户可在系统设置里关闭本应用的实时活动；此时为 false，通知退回普通样式即可
+            if (NotificationManagerCompat.from(applicationContext).canPostPromotedNotifications()) {
+                builder.setRequestPromotedOngoing(true)
+            }
         }
     }
 

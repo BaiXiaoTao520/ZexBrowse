@@ -6,6 +6,7 @@
 
 package com.zex.zexbrowse.data
 
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Brush
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.zex.zexbrowse.R
 
 /**
  * 网页/网盘类下载的二次说明弹窗内容。
@@ -25,12 +27,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * （例如蓝奏云的提取码）。为 null 表示无需说明，直接交给系统打开。
  */
 data class BrowserNotice(
-    /** 弹窗标题 */
-    val title: String,
-    /** 弹窗正文（换行分隔） */
+    /** 弹窗标题（字符串资源，按当前语言显示） */
+    @StringRes val title: Int,
+    /** 弹窗正文（换行分隔）；为第三方应用的下载说明，保留原文 */
     val content: String,
     /** 确认按钮文案 */
-    val confirmLabel: String
+    @StringRes val confirmLabel: Int
 )
 
 /**
@@ -71,13 +73,13 @@ val appShareRecommendation = RecommendedApp(
     downloadUrl = "https://app.sharess.cn/download",
     icon = Icons.Rounded.Apps,
     browserNotice = BrowserNotice(
-        title = "AppShare 下载说明",
+        title = R.string.notice_appshare_title,
         content = "具体下载步骤：\n\n" +
             "1. 点击页面中的“正式版”。\n" +
             "2. 页面会跳转到蓝奏云。\n" +
             "3. 在蓝奏云页面点击下载即可。\n\n" +
             "建议使用电脑 UA 访问。手机端网页可能会提示开通会员才能下载。",
-        confirmLabel = "打开浏览器"
+        confirmLabel = R.string.dl_open_browser
     ),
     description = """
         AppShare 平台介绍
@@ -185,12 +187,12 @@ val coolMonitorRecommendation = RecommendedApp(
     downloadUrl = "https://wwbaa.lanzoub.com/b01gicpghc",
     icon = Icons.Rounded.MonitorHeart,
     browserNotice = BrowserNotice(
-        title = "CoolMonitor 网盘下载",
+        title = R.string.notice_coolmonitor_title,
         content = "即将跳转至浏览器\n" +
             "网盘商：蓝奏云\n" +
             "提取码：1c37\n" +
             "建议更换为电脑 UA 访问下载文件",
-        confirmLabel = "网盘下载"
+        confirmLabel = R.string.notice_pan_download
     ),
     description = "CoolMonitor 安卓设备健康监控诊断工具，实时监测CPU/电池温度、后台耗电应用、WiFi网络风险，支持App权限审计、垃圾营销通知过滤、电池健康评估，内置AI智能分析设备异常并给出优化建议，纯本地数据处理不上传隐私，无广告免费使用"
 )
@@ -211,6 +213,21 @@ val aEmulatorRecommendation = RecommendedApp(
     downloadUrl = "https://v4.gh-proxy.org/https://github.com/uxazu/AEmulator/releases/download/0.0.0.3/app.aemu.apk",
     icon = Icons.Rounded.Memory,
     description = "AEmulator boots a real Android 2.3–17 system image straight from a firmware file you already have: a recovery ZIP, an Odin archive, a Google factory image or a GSI. Old 32-bit firmware (2.3–4.4) runs through a patched QEMU, Android 5.0–17 runs natively on the phone’s arm64 cores. The kernel’s binder is emulated, graphics use your phone’s GPU and sound goes through Android’s audio stack — everything runs inside a normal app."
+)
+
+/**
+ * cccodroid：在 Android 手机上运行 Claude Code 的第三方启动器。
+ *
+ * 下载走 GitHub Release，套用与其它条目一致的加速代理前缀；
+ * 说明文案是作者原始声明，涉及第三方与 Anthropic 的关系，不做改写。
+ */
+val cccodroidRecommendation = RecommendedApp(
+    name = "cccodroid",
+    version = "0.4.17",
+    summary = "A development launcher that runs Claude Code on Android phones. No root, no custom ROM, no chroot / proot / VM.",
+    downloadUrl = "https://v4.gh-proxy.org/https://github.com/greyoak111/cccodroid/releases/download/v0.4.17/cccodroid-36.apk",
+    icon = Icons.Rounded.Construction,
+    description = "cccodroid is a third-party project and is not affiliated with Anthropic. It runs the official, unmodified Claude Code: downloaded from Anthropic's official channel at install time (or, when that is unreachable, the identical file Anthropic publishes on npm, via a mirror), verified against the official sha256 manifest, never modified."
 )
 
 val astralGameRecommendation = RecommendedApp(
@@ -243,6 +260,7 @@ val recommendedApps = listOf(
     starRingBrowserRecommendation,
     tomatoRecommendation,
     komiStoreRecommendation,
+    cccodroidRecommendation,
     coolMonitorRecommendation,
     twilightToolboxRecommendation,
     aEmulatorRecommendation,

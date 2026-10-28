@@ -88,10 +88,10 @@ class MainActivity : ComponentActivity() {
      * 避免陷入「打开→闪退→打开→闪退」的死循环且什么也看不到。
      */
     private fun showBootCrashScreen() {
-        val log = CrashReporter.readLast(this) ?: "（未捕获到详细栈信息，可能是 native 层崩溃）"
+        val log = CrashReporter.readLast(this) ?: getString(R.string.boot_crash_no_stack)
         val msg = buildString {
-            append("ZexBrowse 上次启动时崩溃了\n\n")
-            append("以下为上次的崩溃信息（可长按选中复制后反馈）：\n\n")
+            append(getString(R.string.boot_crash_title)).append("\n\n")
+            append(getString(R.string.boot_crash_hint)).append("\n\n")
             append(log)
         }
         val textView = android.widget.TextView(this).apply {
@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
             setTextColor(android.graphics.Color.DKGRAY)
         }
         val button = android.widget.Button(this).apply {
-            text = "重试启动"
+            text = getString(R.string.boot_crash_retry)
             setOnClickListener {
                 CrashReporter.clear(this@MainActivity)
                 recreate()
@@ -131,10 +131,10 @@ class MainActivity : ComponentActivity() {
         val stack = java.io.StringWriter().also { t.printStackTrace(java.io.PrintWriter(it)) }.toString()
         val logPath = CrashReporter.crashFile(this).absolutePath
         val msg = buildString {
-            append("ZexBrowse 启动失败\n\n")
-            append("错误信息：\n").append(t.toString()).append("\n\n")
-            append("已自动保存崩溃日志到：\n").append(logPath).append("\n\n")
-            append("请长按选中以下内容复制后反馈：\n\n")
+            append(getString(R.string.startup_crash_title)).append("\n\n")
+            append(getString(R.string.startup_crash_error)).append("\n").append(t.toString()).append("\n\n")
+            append(getString(R.string.startup_crash_saved_to)).append("\n").append(logPath).append("\n\n")
+            append(getString(R.string.startup_crash_hint)).append("\n\n")
             append(stack)
         }
         val textView = android.widget.TextView(this).apply {
@@ -174,10 +174,10 @@ class MainActivity : ComponentActivity() {
 
     private fun showUnsupportedDialog(system: String) {
         android.app.AlertDialog.Builder(this)
-            .setTitle("抱歉")
-            .setMessage("很遗憾，ZexBrowse 已停止对 $system 设备的支持，无法继续为你提供服务。感谢你的理解。")
+            .setTitle(getString(R.string.unsupported_title))
+            .setMessage(getString(R.string.unsupported_message, system))
             .setCancelable(false)
-            .setPositiveButton("退出应用") { _, _ -> finish() }
+            .setPositiveButton(getString(R.string.unsupported_exit)) { _, _ -> finish() }
             .show()
     }
 
@@ -206,14 +206,14 @@ class MainActivity : ComponentActivity() {
     private fun recordDiagnostics(intent: Intent, extracted: String?) {
         val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val builder = StringBuilder()
-        builder.append("时间：").append(time).append('\n')
+        builder.append(getString(R.string.diag_time)).append(time).append('\n')
         builder.append("action：").append(intent.action).append('\n')
         builder.append("data：").append(intent.data).append('\n')
         builder.append("extras：\n")
         intent.extras?.let { extras ->
             for (key in extras.keySet()) builder.append("  ").append(key).append(" = ").append(extras.get(key)).append('\n')
         }
-        builder.append("提取结果：").append(extracted ?: "（未提取到网址）")
+        builder.append(getString(R.string.diag_extracted)).append(extracted ?: getString(R.string.diag_no_url))
         ExternalLinkDiagnostics.last.value = builder.toString()
     }
 

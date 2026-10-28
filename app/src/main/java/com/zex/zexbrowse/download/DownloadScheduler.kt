@@ -86,8 +86,11 @@ class DownloadScheduler(private val context: Context) {
     suspend fun resume(id: String): Boolean = withContext(Dispatchers.IO) {
         val record = database.downloadDao().find(id) ?: return@withContext false
         val target = Uri.parse(record.targetUri)
-        // SAF 无法可靠随机写入，只能从头重下；此时不能把旧字节数当作续传起点
-        val offset = if (target.scheme == "file") record.downloadedBytes.coerceAtLeast(0L) else 0L
+        // 续传起点以「目标文件当前实际长度」为准，而不是数据库里的下载字节数：
+        // 暂停时最后一小段可能还没写回记录，直接用记录值会漏掉那部分数据。
+        // SAF（外部目录）同样能读到已有长度，只是写入方式不同（见 Worker 中的 "wa" 模式）。
+        val onDisk = runCatching { existingSize(target) }.getOrDefault(0L)
+        val offset = if (onDisk > 0L) minOf(onDisk, record.downloadedBytes.takeIf { it > 0L } ?: onDisk) else 0L
         database.downloadDao().resume(id, offset, record.totalBytes, record.etag)
         val input = Data.Builder()
             .putString(BrowserDownloadWorker.KEY_ID, id)
@@ -114,6 +117,15 @@ class DownloadScheduler(private val context: Context) {
     suspend fun delete(id: String, uri: String, deleteFile: Boolean) {
         if (deleteFile) withContext(Dispatchers.IO) { deleteTarget(Uri.parse(uri)) }
         database.downloadDao().delete(id)
+    }
+
+    /** 目标文件当前已写入的字节数；不存在或读不到时返回 0 */
+    private fun existingSize(target: Uri): Long = if (target.scheme == "file") {
+        File(target.path.orEmpty()).length()
+    } else {
+        runCatching {
+            context.contentResolver.openFileDescriptor(target, "r")?.use { it.statSize } ?: 0L
+        }.getOrDefault(0L)
     }
 
     /** 删除已写入的目标文件（内部 file:// 与外部 SAF 均支持） */

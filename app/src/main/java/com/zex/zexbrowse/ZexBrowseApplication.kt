@@ -37,6 +37,9 @@ class ZexBrowseApplication : Application() {
                                 ContentBlocking.AntiTracking.SOCIAL or
                                 ContentBlocking.AntiTracking.CRYPTOMINING
                         )
+                        // 开启拦截数据库：只有它开启，Gecko 才会把拦截事件落盘，
+                        // 「广告拦截」页里的拦截次数才能从里面真实读出来，而不是编个数字。
+                        .contentBlockingDatabase(true)
                         .build()
                 )
                 .build()

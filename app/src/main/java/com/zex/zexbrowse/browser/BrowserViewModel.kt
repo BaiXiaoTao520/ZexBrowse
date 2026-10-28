@@ -44,7 +44,7 @@ import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "新标签页", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
+data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
@@ -632,6 +632,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             ContentBlocking.AntiTracking.NONE
         }
         runCatching { runtime.settings.contentBlocking.setAntiTracking(categories) }
+        // 拦截数据库始终开启：关闭拦截后仍要能读到历史累计值（它只记录拦截事件的汇总，
+        // 不记录访问内容），否则用户一关开关次数就归零，看起来像数据丢了
+        runCatching { runtime.settings.contentBlocking.setContentBlockingDatabaseStatus(true) }
         runCatching { (getApplication<Application>() as ZexBrowseApplication).setAdBlockExtensionEnabled(enabled) }
 
         var changed = false
@@ -646,6 +649,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (changed) {
             _tabs.value.forEach { tab -> runCatching { tab.session.reload() } }
         }
+    }
+
+    /**
+     * 读取累计拦截次数（真实数据）。
+     *
+     * 数据来自 GeckoView 的拦截数据库（contentBlockingDatabase）：每次真正拦下广告/追踪请求，
+     * Gecko 会记一条事件，这里只做汇总读取，不自己计数——否则刷新页面、撤销拦截等
+     * 情形都会让自己维护的计数器失真。
+     */
+    fun loadBlockedCount(onResult: (Long) -> Unit) {
+        runCatching {
+            runtime.contentBlockingController.sumAllTrackingDbEvents()
+                .accept({ total: Int? -> onResult((total ?: 0).toLong()) }, { onResult(0L) })
+        }.onFailure { onResult(0L) }
     }
 
     fun applyCurrentUserAgentToSelected() {
