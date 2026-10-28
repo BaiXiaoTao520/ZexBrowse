@@ -663,7 +663,7 @@
     <string name="ad_block_tip">Blocking may rarely break parts of a site. Turn it off temporarily if something looks wrong.</string>
     <string name="ad_block_count_value">%1$s blocked</string>
     <string name="ad_block_count_loading">Loading…</string>
-    <string name="ad_block_count_hint">Total ad and tracker requests blocked, taken from the engine's blocking records</string>
+    <string name="ad_block_count_hint">Total ad and tracker requests blocked, taken from the engine\'s blocking records</string>
     <string name="ad_block_count_hint_off">Blocking is off; this is the previous total</string>
     <string name="notice_appshare_title">How to download AppShare</string>
     <string name="notice_coolmonitor_title">Download CoolMonitor from a file host</string>
