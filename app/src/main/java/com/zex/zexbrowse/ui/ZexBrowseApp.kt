@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
@@ -115,7 +116,9 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -192,6 +195,7 @@ import com.zex.zexbrowse.data.decodeCustomSearchEngines
 import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.encodeCustomSearchEngines
 import com.zex.zexbrowse.data.LemwoodMirror
+import com.zex.zexbrowse.data.NetworkProbe
 import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.SearchSuggestions
@@ -1378,6 +1382,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
  * - APK 直链 → 走应用内下载（下载目录遵循「下载设置」的配置）；
  * - 网页/网盘类链接 → 交给系统处理，由系统默认浏览器或用户选择的应用打开。
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -1387,6 +1392,31 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     var downloadId by remember { mutableStateOf<String?>(null) }
     // 网页/网盘类条目：确认二次说明弹窗后再跳转浏览器
     var browserNoticeApp by remember { mutableStateOf<RecommendedApp?>(null) }
+    // null = 正在探测连通性，true = 已连通可展示内容，false = 不通
+    var reachable by remember { mutableStateOf<Boolean?>(null) }
+    // 重试计数：每次点重试递增，驱动下面的 LaunchedEffect 重新探测
+    var probeAttempt by remember { mutableStateOf(0) }
+
+    LaunchedEffect(probeAttempt) {
+        reachable = null
+        reachable = NetworkProbe.isReachable()
+    }
+
+    // 探测通过后内容淡入：Crossfade 会在加载页与内容之间做交叉淡入，
+    // 而不是硬切；用 animateFloatAsState 不行——它首次组合时直接取目标值，不会跑动画
+    val contentVisible = reachable == true
+
+    // 警示牌显示 20 秒后自动收起。
+    // 状态用 remember 而非 rememberSaveable：离开页面时组合被销毁，
+    // 重新进入会重建并重新计时，正好符合「每次进入都重新计时」的要求。
+    var noticeVisible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(contentVisible) {
+        if (!contentVisible) return@LaunchedEffect
+        noticeVisible = true
+        kotlinx.coroutines.delay(20_000)
+        noticeVisible = false
+    }
 
     Scaffold(
         topBar = {
@@ -1396,19 +1426,86 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
             )
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                Text(stringResource(R.string.s064), style = MaterialTheme.typography.titleMedium)
-            }
-            item {
-                Text(stringResource(R.string.s065), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            items(recommendedApps) { app ->
-                RecommendationCard(app = app) { detail = app }
+        // Crossfade 的 key 用两态而非三态：加载与失败都属于「未就绪」，
+        // 探到结果才切到内容。这样成功时只有一次淡入，不会先淡入报错页再淡入内容
+        Crossfade(
+            targetState = contentVisible,
+            animationSpec = tween(durationMillis = 320),
+            label = "recommendationsCrossfade"
+        ) { visible ->
+            if (!visible) {
+                when (reachable) {
+                    // 探测中：形变指示器自带官方容器背景（圆形色块），
+                    // 不传 polygons 即使用官方的 7 种默认形状序列
+                    null -> Box(
+                        Modifier.fillMaxSize().padding(padding),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            ContainedLoadingIndicator(modifier = Modifier.size(64.dp))
+                            Spacer(Modifier.height(20.dp))
+                            Text(
+                                stringResource(R.string.recommend_loading),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // 不通：给出提示与重试入口
+                    else -> Box(
+                        Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Rounded.CloudOff,
+                                null,
+                                modifier = Modifier.size(44.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            Text(
+                                stringResource(R.string.recommend_offline),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(18.dp))
+                            FilledTonalButton(onClick = { probeAttempt++ }) {
+                                Text(stringResource(R.string.recommend_retry))
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        Text(stringResource(R.string.s064), style = MaterialTheme.typography.titleMedium)
+                    }
+                    item {
+                        Text(stringResource(R.string.s065), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // 法规与服务调整警示牌：置于列表标题之后、推荐条目之前。
+                    // 收起时同时做淡出与垂直收缩，列表下方内容随之上移。
+                    item {
+                        AnimatedVisibility(
+                            visible = noticeVisible,
+                            enter = fadeIn(animationSpec = tween(240)) +
+                                expandVertically(animationSpec = tween(320)),
+                            exit = fadeOut(animationSpec = tween(240)) +
+                                shrinkVertically(animationSpec = tween(320))
+                        ) {
+                            RecommendationServiceNotice()
+                        }
+                    }
+                    items(recommendedApps) { app ->
+                        RecommendationCard(app = app) { detail = app }
+                    }
+                }
             }
         }
     }
@@ -1606,6 +1703,42 @@ private val KNOWN_BROWSERS = setOf(
     "com.kiwibrowser.browser", "com.explore.web.browser", "com.hsv.freeadblockerbrowser",
     "com.jamal2367.maxthonbrowser", "com.leesc.chrome", "org.chromium.webview_shell"
 )
+
+/**
+ * 法规与服务调整警示牌。
+ *
+ * 用 errorContainer 而非 error，保证在深浅色下都能读且不至于像错误弹窗那样刺眼。
+ */
+@Composable
+private fun RecommendationServiceNotice() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Icon(
+                Icons.Rounded.WarningAmber,
+                null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.recommend_notice_title),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.recommend_notice_body),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
 
 /**
  * 推荐条目卡片。

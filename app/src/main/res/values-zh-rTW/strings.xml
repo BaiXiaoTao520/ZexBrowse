@@ -684,4 +684,9 @@
     <string name="notification_how_it_works">即時通知由系統統一管控，應用程式無法自行開關。開啟後，下載進度會以膠囊、鎖定畫面卡片等系統形式顯示；不同系統的名稱與樣式不同（如即時活動、流體雲）。</string>
     <string name="notification_tip_title">提示</string>
     <string name="notification_tip">此處的狀態直接讀取系統設定，你在系統裡改動後返回本頁即可看到最新結果。</string>
+    <string name="recommend_loading">正在載入推薦內容…</string>
+    <string name="recommend_offline">網路連線失敗，暫時無法載入推薦內容。請檢查網路後重試。</string>
+    <string name="recommend_retry">重試</string>
+    <string name="recommend_notice_title">服務調整說明</string>
+    <string name="recommend_notice_body">根據相關法律法規要求，ZexBrowse 應用推薦中的直鏈檔案下載服務，現已停止對大陸提供服務（此調整僅涉及應用推薦內的直鏈下載，與瀏覽器自身的下載功能無關）。</string>
 </resources>

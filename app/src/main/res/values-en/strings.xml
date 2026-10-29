@@ -684,4 +684,9 @@
     <string name="notification_how_it_works">Live updates are controlled by the system; apps cannot toggle them directly. Once enabled, download progress appears as system surfaces such as a status chip or lock-screen card. Names and styles vary by system.</string>
     <string name="notification_tip_title">Note</string>
     <string name="notification_tip">This status is read directly from system settings. Change it in the system and come back to see the updated result.</string>
+    <string name="recommend_loading">Loading recommendations…</string>
+    <string name="recommend_offline">Network connection failed, so recommendations cannot be loaded right now. Check your connection and try again.</string>
+    <string name="recommend_retry">Retry</string>
+    <string name="recommend_notice_title">Service Notice</string>
+    <string name="recommend_notice_body">In accordance with applicable laws and regulations, direct-link file downloads in ZexBrowse App Recommendations are no longer available in mainland China. This affects only direct links inside App Recommendations, not the browser\'s own downloads.</string>
 </resources>
