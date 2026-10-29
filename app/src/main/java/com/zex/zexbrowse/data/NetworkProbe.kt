@@ -6,6 +6,7 @@
 
 package com.zex.zexbrowse.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -37,12 +38,17 @@ object NetworkProbe {
      * 那是「网络通、服务拒绝」而非「断网」，同样不该拦下推荐内容。
      */
     suspend fun isReachable(): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val request = Request.Builder()
                 .url(PROBE_URL)
                 .head()
                 .build()
             client.newCall(request).execute().use { it.code > 0 }
-        }.getOrDefault(false)
+        } catch (cancelled: CancellationException) {
+            // 取消不是网络失败：若把它当成 false，协程被中止时调用方会误判成「不通」
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
     }
 }

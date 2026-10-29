@@ -97,6 +97,7 @@ import androidx.compose.material.icons.rounded.Cookie
 import androidx.compose.material.icons.rounded.ContactSupport
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ManageSearch
@@ -1376,6 +1377,16 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
 }
 
 /**
+ * 应用推荐页的屏幕状态。
+ *
+ * 用单一枚举而非「可空 Boolean + 布尔派生」的原因：Crossfade 过渡期间会同时
+ * 组合并绘制退出与进入两份内容，若退出那份回头去读一个已经变了的变量，
+ * 就会在过渡中画出错误的状态（表现为加载完成后闪一下报错页）。
+ * 枚举把每个状态固化成独立值，退出内容始终重放它自己的状态。
+ */
+private enum class RecommendScreenState { LOADING, OFFLINE, READY }
+
+/**
  * 应用推荐列表页。
  *
  * 下载行为沿用本应用已有的下载体系：
@@ -1392,27 +1403,32 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     var downloadId by remember { mutableStateOf<String?>(null) }
     // 网页/网盘类条目：确认二次说明弹窗后再跳转浏览器
     var browserNoticeApp by remember { mutableStateOf<RecommendedApp?>(null) }
-    // null = 正在探测连通性，true = 已连通可展示内容，false = 不通
-    var reachable by remember { mutableStateOf<Boolean?>(null) }
+    // 屏幕状态：加载中 / 不通 / 已就绪
+    var screenState by remember { mutableStateOf(RecommendScreenState.LOADING) }
     // 重试计数：每次点重试递增，驱动下面的 LaunchedEffect 重新探测
     var probeAttempt by remember { mutableStateOf(0) }
 
     LaunchedEffect(probeAttempt) {
-        reachable = null
-        reachable = NetworkProbe.isReachable()
+        screenState = RecommendScreenState.LOADING
+        // 瞬时失败很常见（DNS 未就绪、首个连接被重置、弱网丢包）。
+        // 若第一次失败就写 OFFLINE，Crossfade 会真的把报错页画出来，
+        // 等第二次成功再淡入内容，用户看到的就是「瞬间报错页随后正常」。
+        // 因此失败不写状态，先静默重试；两次都失败才确定是不通。
+        var ok = NetworkProbe.isReachable()
+        if (!ok) {
+            kotlinx.coroutines.delay(600)
+            ok = NetworkProbe.isReachable()
+        }
+        screenState = if (ok) RecommendScreenState.READY else RecommendScreenState.OFFLINE
     }
-
-    // 探测通过后内容淡入：Crossfade 会在加载页与内容之间做交叉淡入，
-    // 而不是硬切；用 animateFloatAsState 不行——它首次组合时直接取目标值，不会跑动画
-    val contentVisible = reachable == true
 
     // 警示牌显示 20 秒后自动收起。
     // 状态用 remember 而非 rememberSaveable：离开页面时组合被销毁，
     // 重新进入会重建并重新计时，正好符合「每次进入都重新计时」的要求。
     var noticeVisible by remember { mutableStateOf(true) }
 
-    LaunchedEffect(contentVisible) {
-        if (!contentVisible) return@LaunchedEffect
+    LaunchedEffect(screenState) {
+        if (screenState != RecommendScreenState.READY) return@LaunchedEffect
         noticeVisible = true
         kotlinx.coroutines.delay(20_000)
         noticeVisible = false
@@ -1426,59 +1442,57 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
             )
         }
     ) { padding ->
-        // Crossfade 的 key 用两态而非三态：加载与失败都属于「未就绪」，
-        // 探到结果才切到内容。这样成功时只有一次淡入，不会先淡入报错页再淡入内容
+        // 三态 Crossfade：key 直接是屏幕状态本身，退出内容始终重放它自己的
+        // 状态值，不会再回头读到「已经变成 READY」的变量而画成报错页
         Crossfade(
-            targetState = contentVisible,
+            targetState = screenState,
             animationSpec = tween(durationMillis = 320),
             label = "recommendationsCrossfade"
-        ) { visible ->
-            if (!visible) {
-                when (reachable) {
-                    // 探测中：形变指示器自带官方容器背景（圆形色块），
-                    // 不传 polygons 即使用官方的 7 种默认形状序列
-                    null -> Box(
-                        Modifier.fillMaxSize().padding(padding),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            ContainedLoadingIndicator(modifier = Modifier.size(64.dp))
-                            Spacer(Modifier.height(20.dp))
-                            Text(
-                                stringResource(R.string.recommend_loading),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+        ) { state ->
+            when (state) {
+                // 探测中：形变指示器自带官方容器背景（圆形色块），
+                // 不传 polygons 即使用官方的 7 种默认形状序列
+                RecommendScreenState.LOADING -> Box(
+                    Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        ContainedLoadingIndicator(modifier = Modifier.size(64.dp))
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            stringResource(R.string.recommend_loading),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    // 不通：给出提示与重试入口
-                    else -> Box(
-                        Modifier.fillMaxSize().padding(padding).padding(32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Rounded.CloudOff,
-                                null,
-                                modifier = Modifier.size(44.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(14.dp))
-                            Text(
-                                stringResource(R.string.recommend_offline),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(Modifier.height(18.dp))
-                            FilledTonalButton(onClick = { probeAttempt++ }) {
-                                Text(stringResource(R.string.recommend_retry))
-                            }
+                }
+                // 不通：给出提示与重试入口
+                RecommendScreenState.OFFLINE -> Box(
+                    Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Rounded.CloudOff,
+                            null,
+                            modifier = Modifier.size(44.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            stringResource(R.string.recommend_offline),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(18.dp))
+                        FilledTonalButton(onClick = { probeAttempt++ }) {
+                            Text(stringResource(R.string.recommend_retry))
                         }
                     }
                 }
-            } else {
-                LazyColumn(
+                // 就绪：内容淡入
+                RecommendScreenState.READY -> LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1505,6 +1519,9 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                     items(recommendedApps) { app ->
                         RecommendationCard(app = app) { detail = app }
                     }
+                    // 网络提示置于列表末尾：完整读完推荐内容后才看到，且与上述
+                    // 法规警示牌（errorContainer）区分开，用中性色不抢注意力
+                    item { RecommendationNetworkNotice() }
                 }
             }
         }
@@ -1736,6 +1753,31 @@ private fun RecommendationServiceNotice() {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+    }
+}
+
+/**
+ * 下载稳定性提示。
+ *
+ * 用 surfaceContainerHigh 而非 errorContainer：这只是使用建议，不是警告，
+ * 与上方的法规警示牌在视觉上要能区分开。
+ */
+@Composable
+private fun RecommendationNetworkNotice() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Icon(Icons.Rounded.Info, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                stringResource(R.string.recommend_network_tip),
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }

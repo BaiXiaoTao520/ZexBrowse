@@ -689,4 +689,5 @@
     <string name="recommend_retry">Retry</string>
     <string name="recommend_notice_title">Service Notice</string>
     <string name="recommend_notice_body">In accordance with applicable laws and regulations, direct-link file downloads in ZexBrowse App Recommendations are no longer available in mainland China. This affects only direct links inside App Recommendations, not the browser\'s own downloads.</string>
+    <string name="recommend_network_tip">These download links point directly to overseas servers; download stability in mainland China is not guaranteed. If a transfer is slow or fails to connect, try a different network and retry.</string>
 </resources>
