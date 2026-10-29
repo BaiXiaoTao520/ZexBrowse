@@ -12,8 +12,9 @@ import java.io.File
  * 识别不再受支持的系统。
  *
  * 已停止对以下设备的支持：
- * - vivo / iQOO：Funtouch OS、OriginOS（`ro.vivo.os.name`）
  * - 华为系：EMUI、HarmonyOS（含纯血鸿蒙的卓易通兼容层）、Hi 畅享、Hi nova 与 nova 系列
+ *
+ * vivo / iQOO（Funtouch OS、OriginOS，含国内与海外版）已恢复支持，不再做任何识别与拦截。
  *
  * 判定只认厂商专属属性，避免误伤其它品牌：
  * - 荣耀（HONOR）自 2020 年独立后不再属于华为，其设备一律放行；
@@ -24,16 +25,7 @@ import java.io.File
 object UnsupportedSystem {
 
     /** 返回不受支持的系统名称；受支持时返回 null。 */
-    fun detect(): String? = detectVivo() ?: detectHuawei()
-
-    private fun detectVivo(): String? {
-        val os = readProp("ro.vivo.os.name") ?: return null
-        return when {
-            os.equals("Funtouch", ignoreCase = true) -> "Funtouch OS"
-            os.equals("OriginOS", ignoreCase = true) -> "OriginOS"
-            else -> null
-        }
-    }
+    fun detect(): String? = detectHuawei()
 
     private fun detectHuawei(): String? {
         // 荣耀已独立，其设备（含分家前跑 EMUI 的老机型）不在停止支持范围内
