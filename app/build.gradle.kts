@@ -69,8 +69,8 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 37
-        versionCode = 70
-        versionName = "11.0.1"
+        versionCode = 71
+        versionName = "11.0.5"
         ndk { abiFilters += "arm64-v8a" }
 
         // GeckoView 内核主版本号（如 "158.0"），供 UA 生成与兜底使用

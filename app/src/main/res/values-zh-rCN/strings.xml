@@ -684,4 +684,9 @@
     <string name="notification_how_it_works">实时通知由系统统一管控，应用无法自行开关。开启后，下载进度会以胶囊、锁屏卡片等系统形式展示；不同系统的名称与样式不同（如实时活动、流体云）。</string>
     <string name="notification_tip_title">提示</string>
     <string name="notification_tip">此处的状态直接读取系统设置，你在系统里改动后返回本页即可看到最新结果。</string>
+    <string name="recommend_loading">正在加载推荐内容…</string>
+    <string name="recommend_offline">网络连接失败，暂时无法加载推荐内容。请检查网络后重试。</string>
+    <string name="recommend_retry">重试</string>
+    <string name="recommend_notice_title">服务调整说明</string>
+    <string name="recommend_notice_body">根据相关法律法规要求，ZexBrowse 应用推荐中的直链文件下载服务，现已停止对大陆提供服务（此调整仅涉及应用推荐内的直链下载，与浏览器自身的下载功能无关）。</string>
 </resources>
