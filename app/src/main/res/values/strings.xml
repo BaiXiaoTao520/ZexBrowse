@@ -689,4 +689,5 @@
     <string name="recommend_retry">重试</string>
     <string name="recommend_notice_title">服务调整说明</string>
     <string name="recommend_notice_body">根据相关法律法规要求，ZexBrowse 应用推荐中的直链文件下载服务，现已停止对大陆提供服务（此调整仅涉及应用推荐内的直链下载，与浏览器自身的下载功能无关）。</string>
+    <string name="recommend_network_tip">以上下载地址均为境外直链，不保证在大陆地区的下载稳定性；若速度缓慢或无法连接，请酌情更换网络环境后重试。</string>
 </resources>
