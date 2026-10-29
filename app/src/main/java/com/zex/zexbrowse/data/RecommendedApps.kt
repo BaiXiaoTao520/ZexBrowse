@@ -107,7 +107,7 @@ val reveriePaintRecommendation = RecommendedApp(
     name = "ReveriePaint",
     version = "v1.4.0",
     summary = "基于 Krita 核心引擎打造的 Android 原生数字绘画应用",
-    downloadUrl = "https://v4.gh-proxy.org/https://github.com/LanRhyme/ReveriePaint/releases/download/v1.4.0/ReveriePaint-v1.4.0.apk",
+    downloadUrl = "https://github.com/LanRhyme/ReveriePaint/releases/download/v1.4.0/ReveriePaint-v1.4.0.apk",
     icon = Icons.Rounded.Brush,
     description = """
         基于 Krita 核心引擎打造的 Android 原生现代数字绘画应用
@@ -162,7 +162,7 @@ val tomatoRecommendation = RecommendedApp(
     name = "Tomato",
     version = "v2.0.1",
     summary = "开源简洁的番茄钟软件",
-    downloadUrl = "https://v4.gh-proxy.org/https://github.com/nsh07/Tomato/releases/download/v2.0.1/tomato-v2.0.1-release.apk",
+    downloadUrl = "https://github.com/nsh07/Tomato/releases/download/v2.0.1/tomato-v2.0.1-release.apk",
     icon = Icons.Rounded.Timer,
     description = "开源简洁的番茄钟软件"
 )
@@ -171,7 +171,7 @@ val komiStoreRecommendation = RecommendedApp(
     name = "Komi Store",
     version = "v1.9.2",
     summary = "开源 Github 仓库应用商店",
-    downloadUrl = "https://v4.gh-proxy.org/https://github.com/komi-store/komi-store/releases/download/v1.9.2/Komi-Store-1.9.2.apk",
+    downloadUrl = "https://github.com/komi-store/komi-store/releases/download/v1.9.2/Komi-Store-1.9.2.apk",
     icon = Icons.Rounded.Storefront,
     description = """
         Komi Store only helps you discover and download release assets that are already published on GitHub by third-party developers. The contents, safety, and behavior of those downloads are entirely the responsibility of their respective authors and distributors, not this project.
@@ -210,7 +210,7 @@ val aEmulatorRecommendation = RecommendedApp(
     name = "AEmulator",
     version = "v0.0.0.3",
     summary = "一款能够模拟旧版 Android 系统固件的 Android 模拟器",
-    downloadUrl = "https://v4.gh-proxy.org/https://github.com/uxazu/AEmulator/releases/download/0.0.0.3/app.aemu.apk",
+    downloadUrl = "https://github.com/uxazu/AEmulator/releases/download/0.0.0.3/app.aemu.apk",
     icon = Icons.Rounded.Memory,
     description = "AEmulator boots a real Android 2.3–17 system image straight from a firmware file you already have: a recovery ZIP, an Odin archive, a Google factory image or a GSI. Old 32-bit firmware (2.3–4.4) runs through a patched QEMU, Android 5.0–17 runs natively on the phone’s arm64 cores. The kernel’s binder is emulated, graphics use your phone’s GPU and sound goes through Android’s audio stack — everything runs inside a normal app."
 )
@@ -218,14 +218,14 @@ val aEmulatorRecommendation = RecommendedApp(
 /**
  * cccodroid：在 Android 手机上运行 Claude Code 的第三方启动器。
  *
- * 下载走 GitHub Release，套用与其它条目一致的加速代理前缀；
+ * 下载走 GitHub Release 直链；
  * 说明文案是作者原始声明，涉及第三方与 Anthropic 的关系，不做改写。
  */
 val cccodroidRecommendation = RecommendedApp(
     name = "cccodroid",
     version = "0.4.17",
     summary = "A development launcher that runs Claude Code on Android phones. No root, no custom ROM, no chroot / proot / VM.",
-    downloadUrl = "https://v4.gh-proxy.org/https://github.com/greyoak111/cccodroid/releases/download/v0.4.17/cccodroid-36.apk",
+    downloadUrl = "https://github.com/greyoak111/cccodroid/releases/download/v0.4.17/cccodroid-36.apk",
     icon = Icons.Rounded.Construction,
     description = "cccodroid is a third-party project and is not affiliated with Anthropic. It runs the official, unmodified Claude Code: downloaded from Anthropic's official channel at install time (or, when that is unreachable, the identical file Anthropic publishes on npm, via a mirror), verified against the official sha256 manifest, never modified."
 )
@@ -234,7 +234,7 @@ val astralGameRecommendation = RecommendedApp(
     name = "Astral Game",
     version = "1.6.5",
     summary = "Flutter 游戏联机客户端",
-    downloadUrl = "https://v4.gh-proxy.org/https://github.com/AstralNext/AstralGame/releases/download/v1.6.5/astral-game-1.6.5-android-arm64.apk",
+    downloadUrl = "https://github.com/AstralNext/AstralGame/releases/download/v1.6.5/astral-game-1.6.5-android-arm64.apk",
     icon = Icons.Rounded.SportsEsports,
     description = """
         Astral Game 一款基于 Flutter 构建的游戏联机客户端。
