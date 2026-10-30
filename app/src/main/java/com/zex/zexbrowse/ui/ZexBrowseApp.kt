@@ -120,6 +120,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material3.AlertDialog
@@ -127,6 +128,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -231,7 +233,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, ADVANCED_SETTINGS, DEBUG, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, INCOGNITO, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, ADVANCED_SETTINGS, DEBUG, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -291,6 +293,154 @@ private fun encodeBookmarks(sites: List<QuickSite>): String =
  * 书签反序列化。与旧版快捷站点不同，空数据返回空列表而非默认站点：
  * 书签是用户自己的数据，全部删除后应当显示空态提示，而不是又冒出一批默认项。
  */
+/**
+ * 无痕浏览专属页面。
+ *
+ * 与普通主页、普通标签列表刻意区分：整页用紫色调打底（不跟随主题色），
+ * 让用户一眼看出自己处在无痕环境，不会误以为在看普通标签。
+ *
+ * 版式参照网页报错页：大标题 + 说明条目 + 主按钮，居中排列。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun IncognitoHomeScreen(
+    onSearch: (String) -> Unit,
+    onExit: () -> Unit
+) {
+    // 用 remember 而非 rememberSaveable：无痕页的搜索词不应进 savedInstanceState，
+    // 否则会被系统的 Activity 状态持久化一同写盘，与本模式的承诺相违。
+    var query by remember { mutableStateOf("") }
+    // 无痕专属色：不用主题色，避免用户切换主题后两者混同
+    val accent = Color(0xFF7B4DDB)
+    val deep = Color(0xFF2A1B45)
+
+    Box(Modifier.fillMaxSize().background(deep)) {
+        // 顶部光晕：深紫底色上铺一层同色系渐变，避免整屏纯色显得死板
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(320.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(accent.copy(alpha = 0.55f), accent.copy(alpha = 0.12f), Color.Transparent)
+                    )
+                )
+        )
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(24.dp))
+            Icon(
+                Icons.Rounded.VisibilityOff,
+                null,
+                modifier = Modifier.size(56.dp),
+                tint = Color(0xFFD6C4FF)
+            )
+            Spacer(Modifier.height(20.dp))
+            Text(
+                stringResource(R.string.incognito_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.incognito_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFC9BCE8),
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(28.dp))
+
+            // 说明条目：与报错页一致的点列排版
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                listOf(
+                    R.string.incognito_point_history,
+                    R.string.incognito_point_cookie,
+                    R.string.incognito_point_exit,
+                    R.string.incognito_point_normal
+                ).forEach { res ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Text("•", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFB49BE8))
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            stringResource(res),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFD9CFF2)
+                        )
+                    }
+                }
+            }
+
+            // 能力边界单独排版：上面几条是本模式能保证的，这条是不能保证的，
+            // 混在同一个点列里容易被当成同一类承诺，因此用分隔线 + 更小字号区隔
+            Spacer(Modifier.height(18.dp))
+            HorizontalDivider(color = Color(0x33B49BE8))
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.Rounded.Info,
+                    null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Color(0xFFB49BE8)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.incognito_point_limit),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB7A8D6)
+                )
+            }
+
+            Spacer(Modifier.height(32.dp))
+
+            // 搜索入口：在无痕环境下直接搜，结果落在无痕标签里
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                placeholder = {
+                    Text(stringResource(R.string.incognito_search_hint), color = Color(0xFFA896C8))
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFFB49BE8)) },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSearch = { if (query.isNotBlank()) onSearch(query.trim()) }
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedBorderColor = Color(0xFF5B4A80),
+                    focusedBorderColor = Color(0xFFB49BE8),
+                    unfocusedContainerColor = Color(0xFF352550),
+                    focusedContainerColor = Color(0xFF352550),
+                    cursorColor = Color(0xFFD6C4FF),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            Button(
+                onClick = onExit,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFD6C4FF),
+                    contentColor = Color(0xFF2A1B45)
+                )
+            ) {
+                Text(stringResource(R.string.incognito_exit), fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
 /**
  * 网页加载失败时的错误页：显示目标网址、无法访问的结论，以及若干条可读的失败原因。
  *
@@ -1038,11 +1188,27 @@ private fun PageContent(
             browserViewModel = browserViewModel,
             onBack = goBack
         )
+        Page.INCOGNITO -> IncognitoHomeScreen(
+            onSearch = { address ->
+                // 优先复用已有无痕标签：连续搜索不堆标签，与主流浏览器行为一致；
+                // 只有当前没有无痕标签时才新建。无论哪种走法，结果都不会落到普通标签。
+                if (!browserViewModel.loadInIncognito(address)) {
+                    browserViewModel.newTab(incognito = true, initialUrl = address)
+                }
+                navigate(Page.BROWSER)
+            },
+            onExit = {
+                browserViewModel.exitIncognito()
+                // 退出后直接回首页：把栈重置成只有首页，避免返回到已关掉的无痕页
+                navStack = listOf(Page.HOME)
+            }
+        )
         Page.BROWSER -> BrowserScreen(
             viewModel = browserViewModel,
             settings = settings,
             settingsStore = settingsStore,
             onTabs = { incognito -> onTabsIncognitoChange(incognito); navigate(Page.TABS) },
+            onIncognitoHome = { navigate(Page.INCOGNITO) },
             onDownloads = { navigate(Page.DOWNLOADS) },
             onSettings = { navigate(Page.SETTINGS) }
         )
@@ -2488,7 +2654,7 @@ private fun BookmarkDialog(initial: QuickSite? = null, onSubmit: (QuickSite) -> 
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -2761,7 +2927,14 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             title = { Text(stringResource(R.string.s113)) },
             text = { Text(stringResource(R.string.s122)) },
             confirmButton = { TextButton(onClick = { viewModel.newTab(); showNewTabDialog = false; onTabs(false) }) { Text(stringResource(R.string.s123)) } },
-            dismissButton = { TextButton(onClick = { viewModel.newTab(incognito = true); showNewTabDialog = false; onTabs(true) }) { Text(stringResource(R.string.s124)) } }
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.newTab(incognito = true)
+                    showNewTabDialog = false
+                    // 不再跳标签管理，而是进入独立的无痕浏览页
+                    onIncognitoHome()
+                }) { Text(stringResource(R.string.s124)) }
+            }
         )
     }
     // 护盾说明弹窗

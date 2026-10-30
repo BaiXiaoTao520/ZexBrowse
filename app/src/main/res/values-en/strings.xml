@@ -714,4 +714,13 @@
     <string name="debug_open_hint">Enabled. Tap to open debug tools</string>
     <string name="debug_unlocked">Debug mode unlocked</string>
     <string name="debug_locked">Debug mode turned off</string>
+    <string name="incognito_title">You are browsing privately</string>
+    <string name="incognito_subtitle">Activity in this mode stays off this device</string>
+    <string name="incognito_point_history">Browsing history, searches and form entries are not saved</string>
+    <string name="incognito_point_cookie">Cookies and cache are cleared when all private tabs close</string>
+    <string name="incognito_point_exit">Leaving private browsing closes every private tab and returns to the home page</string>
+    <string name="incognito_point_normal">Normal tabs are unaffected and never mixed with these</string>
+    <string name="incognito_search_hint">Search or type a URL privately</string>
+    <string name="incognito_exit">Leave private browsing</string>
+    <string name="incognito_point_limit">Private mode only clears data on this device; sites may still identify you via IP, sign-in or browser fingerprinting</string>
 </resources>
