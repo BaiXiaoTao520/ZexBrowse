@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import com.zex.zexbrowse.UnsupportedSystem
-import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 
 /**
@@ -24,7 +23,7 @@ object DebugInfo {
     /** 一条「标题 → 内容」的诊断项 */
     data class Item(val label: String, val value: String)
 
-    fun build(context: Context, runtime: GeckoRuntime?, settings: DebugSettingsSnapshot): List<Item> {
+    fun build(context: Context, settings: DebugSettingsSnapshot): List<Item> {
         val items = mutableListOf<Item>()
 
         items += Item("应用版本", "${appVersionName(context)} (${appVersionCode(context)})")
@@ -40,9 +39,8 @@ object DebugInfo {
         items += Item("GeckoView", if (major != null) "Firefox $major" else "未知")
         items += Item("默认 UA", gecko.ifBlank { "读取失败" })
 
-        val uaOverride = runCatching { runtime?.settings?.userAgentOverride }.getOrNull()
-        items += Item("UA 覆盖", uaOverride?.ifBlank { "未覆盖" } ?: "未覆盖")
-
+        // 不为 UA 覆盖单独取值：userAgentOverride 属于 GeckoSession.SessionSettings，
+        // GeckoRuntimeSettings 上没有这个属性。UA 模式已由下方「当前 UA 模式」体现。
         items += Item("当前 UA 模式", settings.userAgentMode)
         items += Item("硬件加速", if (settings.hardwareAcceleration) "开启（SurfaceView）" else "关闭（TextureView）")
         items += Item("HTTPS-Only", if (settings.httpsOnlyEnabled) settings.httpsOnlyMode else "关闭")
@@ -78,7 +76,9 @@ object DebugInfo {
             @Suppress("DEPRECATION")
             pm.getInstallerPackageName(context.packageName)
         }
-        installer?.ifBlank { null } ?: "未知（可能为本地安装）"
+        // 不能写 ifBlank { null }：ifBlank 的 lambda 要求返回非空的 R，
+        // lambda 返回 null 会让类型推导失败（CI 已报过这类错误）。
+        installer?.takeIf { it.isNotBlank() } ?: "未知（可能为本地安装）"
     }.getOrElse { "读取失败" }
 
     fun signatureSummary(context: Context): String = runCatching {
@@ -90,7 +90,9 @@ object DebugInfo {
         val first = certs?.firstOrNull() ?: return@runCatching "不可用"
         java.security.MessageDigest.getInstance("SHA-256")
             .digest(first.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+            // Byte 是有符号的，直接 format 会把 0x80 以上输出成 ffffff80；
+            // 先 and 0xFF 转成 0..255 的无符号值
+            .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
             .take(32)
     }.getOrElse { "读取失败" }
 }
