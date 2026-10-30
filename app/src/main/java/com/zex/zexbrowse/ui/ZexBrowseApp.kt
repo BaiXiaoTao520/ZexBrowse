@@ -188,7 +188,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.res.stringResource
 import com.zex.zexbrowse.AppLocale
 import com.zex.zexbrowse.CrashReporter
-import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.PromotedNotification
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
@@ -2169,10 +2168,12 @@ private fun AddressInput(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            // 紧凑模式用固定 48dp：M3 容器自身约 56dp，只有改成固定高度才真正压得下来；
-            // heightIn(min) 低于自然高度时完全不起作用。48dp 也是触控区域的下限。
+            // 紧凑模式压到 52dp：M3 文本框自然高度是 OutlinedTextFieldDefaults.MinHeight（56dp）。
+            // 这里用固定 height 覆盖（低于 min 的 heightIn 不起作用）。
+            // 不能再矮：value:String 重载没有 contentPadding 参数，默认垂直内边距固定 16dp，
+            // 文字行高约 20dp，16+20+16 恰好 52dp，再压就会把字形裁掉。
             modifier = Modifier.fillMaxWidth()
-                .then(if (compact) Modifier.height(48.dp) else Modifier.heightIn(min = 56.dp))
+                .then(if (compact) Modifier.height(52.dp) else Modifier.heightIn(min = 56.dp))
                 .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
             placeholder = { Text(stringResource(R.string.s091), style = MaterialTheme.typography.bodyMedium) },
             singleLine = true,
@@ -2199,15 +2200,6 @@ private fun AddressInput(
             },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Go),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (value.isNotBlank()) onSubmit() }),
-            // 48dp 容器配上默认垂直内边距（TextFieldPadding = 16dp）会把文字挤在中间，
-            // compact 时收窄到 8dp，保证字形不贴边、上下也对称。
-            // 本输入框用 placeholder、没有 label，因此取 WithoutLabel 变体
-            // （contentPadding 已在 material3 1.5.0-beta02 废弃）。
-            contentPadding = if (compact) {
-                PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-            } else {
-                OutlinedTextFieldDefaults.contentPaddingWithoutLabel()
-            },
             colors = OutlinedTextFieldDefaults.colors(
                 // 线框风：常态细描边、聚焦时换主色
                 unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
@@ -4385,7 +4377,6 @@ private fun DebugScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as ZexBrowseApplication
 
     val snapshot = remember(
         settings.userAgentMode, settings.hardwareAcceleration, settings.httpsOnlyEnabled,
@@ -4402,9 +4393,9 @@ private fun DebugScreen(
         )
     }
 
-    // 内核信息只在进入时读一次：GeckoRuntime.settings 是原生对象，每次重组访问都会跨 JNI
+    // 诊断信息只在进入时读一次：UA 读取会跨 JNI，每次重组都读没有意义
     val items = remember(snapshot) {
-        DebugInfo.build(context, runCatching { app.runtime }.getOrNull(), snapshot)
+        DebugInfo.build(context, snapshot)
     }
     val installer = remember { DebugInfo.installerSummary(context) }
     val signature = remember { DebugInfo.signatureSummary(context) }
