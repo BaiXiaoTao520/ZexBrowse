@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -182,6 +183,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -322,6 +325,11 @@ private fun IncognitoHomeScreen(
     // 无痕专属色：只在本页使用，不跟随用户的颜色主题
     val accent = IncognitoAccentColor
     val deep = Color(0xFF2A1B45)
+    // 滚动状态提到 Column 外：verticalScroll 与聚焦时的自动滚动必须共用同一实例，
+    // 否则 animateScrollTo 操作的是另一个 ScrollState，页面不会动
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    var searchTop by remember { mutableStateOf(0) }
 
     Box(Modifier.fillMaxSize().background(deep)) {
         // 顶部光晕：深紫底色上铺一层同色系渐变，避免整屏纯色显得死板
@@ -336,7 +344,10 @@ private fun IncognitoHomeScreen(
                 )
         )
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())
+            // imePadding 让整页在键盘弹出时缩小而不是被遮挡，
+            // 配合 verticalScroll 与聚焦时的自动滚动，输入框能滚到键盘上方
+            Modifier.fillMaxSize().statusBarsPadding().imePadding()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 28.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -410,7 +421,18 @@ private fun IncognitoHomeScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    .onGloballyPositioned { coords ->
+                        searchTop = coords.positionInParent().y.toInt()
+                    }
+                    .onFocusChanged { focus ->
+                        // 聚焦时主动把输入框滚到可视区：键盘弹出后页面高度会缩，
+                        // 不滚上去的话输入框会被压在键盘下方。
+                        // 仅在已测量出位置时滚动，避免首帧 searchTop=0 把页面跳回顶部
+                        if (focus.isFocused && searchTop > 0) {
+                            scope.launch { scrollState.animateScrollTo(searchTop) }
+                        }
+                    },
                 placeholder = {
                     Text(stringResource(R.string.incognito_search_hint), color = Color(0xFFA896C8))
                 },
@@ -1224,7 +1246,12 @@ private fun PageContent(
             onDownloads = { navigate(Page.DOWNLOADS) },
             onSettings = { navigate(Page.SETTINGS) }
         )
-        Page.TABS -> TabOverview(viewModel = browserViewModel, initialIncognito = tabsIncognito, onBack = goBack)
+        Page.TABS -> TabOverview(
+            viewModel = browserViewModel,
+            initialIncognito = tabsIncognito,
+            onBack = goBack,
+            onExitIncognito = resetToHome
+        )
         Page.SETTINGS -> SettingsScreen(
             settings = settings,
             isDefaultBrowser = isDefaultBrowser,
@@ -2845,6 +2872,18 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 IconButton(onClick = { onTabs(selectedTab?.incognito == true) }) {
                     BadgedBox(badge = { Badge { Text(visibleTabs.size.toString()) } }) { Icon(Icons.Default.Tab, stringResource(R.string.s114)) }
                 }
+                // 无痕标签标识：标签栏里无痕与普通两个 chip 外观一致，
+                // 不标一下用户分不清当前在看哪种标签。不跨标签切换时永远显示，
+                // 颜色走主题色（tertiary）而不是专属紫，不干扰用户的配色设置
+                if (selectedTab?.incognito == true) {
+                    Icon(
+                        Icons.Rounded.VisibilityOff,
+                        stringResource(R.string.s124),
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Box {
                     IconButton(onClick = { showBrowserMenu = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.s115)) }
                     DropdownMenu(expanded = showBrowserMenu, onDismissRequest = { showBrowserMenu = false }, offset = androidx.compose.ui.unit.DpOffset(0.dp, 48.dp)) {
@@ -3023,7 +3062,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     var incognitoOnly by remember { mutableStateOf(initialIncognito) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
@@ -3032,7 +3071,18 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
             TopAppBar(
                 title = { Text(stringResource(R.string.s132)) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } },
-                actions = { TextButton(onClick = { if (incognitoOnly) viewModel.closeAllIncognito() else viewModel.closeAllNormal() }) { Text(stringResource(if (incognitoOnly) R.string.s133 else R.string.s134)) } }
+                actions = {
+                    TextButton(onClick = {
+                        if (incognitoOnly) {
+                            // 退出无痕：关闭全部无痕标签并清 Cookie/缓存，然后直接回首页
+                            // （不能只走 onBack，无痕标签已全部消失，停在标签页没有意义）
+                            viewModel.exitIncognito()
+                            onExitIncognito()
+                        } else {
+                            viewModel.closeAllNormal()
+                        }
+                    }) { Text(stringResource(if (incognitoOnly) R.string.incognito_exit_all else R.string.s134)) }
+                }
             )
         }
     ) { padding ->

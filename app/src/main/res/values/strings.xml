@@ -131,7 +131,6 @@
     <string name="s130">允许读取剪贴板？</string>
     <string name="s131">%1$s 请求读取你的剪贴板内容。</string>
     <string name="s132">全部标签</string>
-    <string name="s133">关闭无痕</string>
     <string name="s134">关闭普通</string>
     <string name="s135">暂无无痕标签</string>
     <string name="s136">暂无普通标签</string>
@@ -721,4 +720,5 @@
     <string name="incognito_search_hint">在无痕环境搜索或输入网址</string>
     <string name="incognito_exit">退出无痕浏览</string>
     <string name="incognito_point_limit">无痕模式只清除本机数据，网站仍可能通过 IP、账号登录或浏览器指纹识别到你</string>
+    <string name="incognito_exit_all">退出无痕</string>
 </resources>

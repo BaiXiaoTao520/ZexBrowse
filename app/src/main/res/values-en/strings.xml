@@ -131,7 +131,6 @@
     <string name="s130">Allow clipboard access?</string>
     <string name="s131">%1$s wants to read your clipboard.</string>
     <string name="s132">All tabs</string>
-    <string name="s133">Close incognito</string>
     <string name="s134">Close normal</string>
     <string name="s135">No incognito tabs</string>
     <string name="s136">No normal tabs</string>
@@ -721,4 +720,5 @@
     <string name="incognito_search_hint">Search or type a URL privately</string>
     <string name="incognito_exit">Leave private browsing</string>
     <string name="incognito_point_limit">Private mode only clears data on this device; sites may still identify you via IP, sign-in or browser fingerprinting</string>
+    <string name="incognito_exit_all">Exit private</string>
 </resources>

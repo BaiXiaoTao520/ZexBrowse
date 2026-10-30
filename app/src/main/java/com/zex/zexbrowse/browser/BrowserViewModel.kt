@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -623,17 +624,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     /**
      * 清除无痕存储上下文里的全部数据。
      *
-     * clearDataForSessionContext 本身返回 void（异步投递给 Gecko），因此不能在调用后
-     * 立即把 incognitoContextId 置空就完事——若调用本身抛异常，句柄已丢，残留数据再也清不掉。
-     * 这里先把句柄取出交给应用级协程，异常时写崩溃日志留痕；
-     * 协程跑在 applicationScope（SupervisorJob + IO）上，不随 ViewModel 销毁而取消。
+     * 必须在主线程调用：GeckoRuntime.getStorageController() 带 @UiThread 断言，
+     * 从 IO 线程访问会直接抛 IllegalThreadStateException 闪退（已有线上崩溃记录）。
+     * 这里先切到 Main 拿到 controller 并发出清除请求，再回到应用级协程记录失败，
+     * 保证即使 ViewModel 被销毁也能记下异常。
      */
     private fun purgeIncognitoContext() {
         val contextId = incognitoContextId ?: return
         incognitoContextId = null
         applicationScope.launch {
             runCatching {
-                runtime.storageController.clearDataForSessionContext(contextId)
+                withContext(Dispatchers.Main) {
+                    runtime.storageController.clearDataForSessionContext(contextId)
+                }
             }.onFailure {
                 // 清除失败时记入崩溃日志，便于排查残留数据问题；不向用户弹窗避免干扰
                 // 不能用 application：AndroidViewModel 的 application 属性是 private，
@@ -890,7 +893,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         var flags = 0L
         if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES
         if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
-        if (flags != 0L) runCatching { runtime.storageController.clearData(flags) }
+        if (flags != 0L) {
+            // storageController 带 @UiThread 断言，必须在主线程取用，否则抛 IllegalThreadStateException
+            val clearFlags = flags
+            applicationScope.launch {
+                runCatching {
+                    withContext(Dispatchers.Main) { runtime.storageController.clearData(clearFlags) }
+                }.onFailure { CrashReporter.record(getApplication(), it) }
+            }
+        }
         if (history) applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
     }
     // 退出清理需要不随 ViewModel 销毁而取消的协程，否则进程结束时历史可能未清完
