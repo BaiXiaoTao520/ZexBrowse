@@ -120,8 +120,6 @@
     <string name="s117">下载记录</string>
     <string name="s118">浏览器设置</string>
     <string name="s119">关闭标签</string>
-    <string name="s120">无痕浏览：退出后将关闭全部无痕标签并清除 Cookie 与缓存，普通标签不受影响。</string>
-    <string name="s121">退出无痕</string>
     <string name="s122">无痕标签不会保存浏览历史、Cookie 或缓存。</string>
     <string name="s123">普通标签</string>
     <string name="s124">无痕标签</string>

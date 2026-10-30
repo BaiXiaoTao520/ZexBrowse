@@ -120,8 +120,6 @@
     <string name="s117">下載紀錄</string>
     <string name="s118">瀏覽器設定</string>
     <string name="s119">關閉分頁</string>
-    <string name="s120">無痕瀏覽：結束後將關閉全部無痕分頁並清除 Cookie 與快取，一般分頁不受影響。</string>
-    <string name="s121">結束無痕</string>
     <string name="s122">無痕分頁不會儲存瀏覽紀錄、Cookie 或快取。</string>
     <string name="s123">一般分頁</string>
     <string name="s124">無痕分頁</string>

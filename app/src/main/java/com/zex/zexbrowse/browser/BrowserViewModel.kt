@@ -636,7 +636,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 runtime.storageController.clearDataForSessionContext(contextId)
             }.onFailure {
                 // 清除失败时记入崩溃日志，便于排查残留数据问题；不向用户弹窗避免干扰
-                CrashReporter.record(application, it)
+                // 不能用 application：AndroidViewModel 的 application 属性是 private，
+                // 构造函数参数同名也不在方法作用域内，统一走 getApplication()
+                CrashReporter.record(getApplication(), it)
             }
         }
     }
