@@ -91,6 +91,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Bookmarks
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Cookie
@@ -145,6 +146,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -186,6 +188,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.res.stringResource
 import com.zex.zexbrowse.AppLocale
 import com.zex.zexbrowse.CrashReporter
+import com.zex.zexbrowse.ZexBrowseApplication
 import com.zex.zexbrowse.PromotedNotification
 import com.zex.zexbrowse.browser.BrowserViewModel
 import com.zex.zexbrowse.data.BrowserNotice
@@ -204,6 +207,9 @@ import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.data.recommendedApps
 import com.zex.zexbrowse.download.DownloadFileName
+import com.zex.zexbrowse.util.DebugInfo
+import com.zex.zexbrowse.util.DebugSettingsSnapshot
+import com.zex.zexbrowse.util.DebugUnlock
 import com.zex.zexbrowse.download.DownloadManager
 import com.zex.zexbrowse.data.SecurityScanner
 import com.zex.zexbrowse.download.UpdateDownloadResult
@@ -226,7 +232,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, ADVANCED_SETTINGS, DEBUG, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -253,6 +259,8 @@ private enum class SearchGroup(val labelRes: Int, val icon: androidx.compose.ui.
     SECURITY(R.string.s240, Icons.Rounded.GppGood),
     AD_BLOCK(R.string.ad_block_title, Icons.Rounded.Block),
     NOTIFICATION(R.string.notification_title, Icons.Rounded.Notifications),
+    ADVANCED(R.string.debug_section_advanced, Icons.Rounded.Tune),
+    DEBUG(R.string.debug_title, Icons.Rounded.BugReport),
     HISTORY(R.string.s058, Icons.Default.History),
     BOOKMARKS(R.string.s098, Icons.Rounded.Bookmarks),
     DEFAULT_BROWSER(R.string.s042, Icons.Rounded.Public),
@@ -594,10 +602,16 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
 
     browserViewModel.browserSettings = settings
     // 语言镜像同步：DataStore 是唯一事实源，SharedPreferences 只是给 attachBaseContext 的同步读缓存。
-    // 两者可能因异常退出/备份恢复而不一致，这里以 DataStore 为准修正一次。
-    LaunchedEffect(settings.language) {
-        if (AppLocale.current(context) != settings.language) {
-            AppLocale.remember(context, settings.language)
+    // 两者可能因异常退出/备份恢复而不一致，启动时以 DataStore 为准修正一次。
+    //
+    // 必须只跑一次（Unit）而不是跟随 settings.language：
+    // 用户刚在设置里选了新语言时 DataStore 已变、但当前界面仍是旧语言，
+    // 若这里跟着改写缓存，本次运行中任何 Activity 重建都会念到新语言，
+    // 与「重启后生效」的约定矛盾，还会把界面弄成半新半旧。
+    LaunchedEffect(Unit) {
+        val stored = settings.language
+        if (AppLocale.current(context) != stored) {
+            AppLocale.remember(context, stored)
         }
     }
     // 网页请求麦克风 → 按「网页权限管理 → 麦克风权限」策略处理：
@@ -1052,6 +1066,7 @@ private fun PageContent(
             onSecurity = { navigate(Page.SECURITY) },
             onAdBlock = { navigate(Page.ADBLOCK) },
             onNotification = { navigate(Page.NOTIFICATION) },
+            onAdvancedSettings = { navigate(Page.ADVANCED_SETTINGS) },
             onAbout = { navigate(Page.ABOUT) },
             onContactUs = { openInBrowser(context, CONTACT_URL) },
             onBack = goBack
@@ -1070,17 +1085,22 @@ private fun PageContent(
         Page.LANGUAGE -> LanguageScreen(
             language = settings.language,
             setLanguage = { tag ->
-                // 先同步镜像一份，再写 DataStore：这样无论何时重建/重启，attachBaseContext 都能读到新语言
-                AppLocale.remember(context, tag)
-                scope.launch {
-                    settingsStore.language(tag)
-                    // 语言只在 Activity 创建时通过 attachBaseContext 生效，
-                    // 已经组合好的界面不会自动重读资源，必须重建才能全局刷新。
-                    withContext(Dispatchers.Main) {
-                        context.findActivity()?.recreate()
-                    }
+                // 只写 DataStore，不重建 Activity：语言在下次启动时由 attachBaseContext 读取生效。
+                // 同步镜像一份 SharedPreferences，供下次启动同步读到（DataStore 读取是异步的）。
+                if (tag != settings.language) {
+                    AppLocale.remember(context, tag)
+                    scope.launch { settingsStore.language(tag) }
+                    Toast.makeText(context, context.getString(R.string.toast_language_restart), Toast.LENGTH_LONG).show()
                 }
             },
+            onBack = goBack
+        )
+        Page.ADVANCED_SETTINGS -> AdvancedSettingsScreen(
+            onDebug = { navigate(Page.DEBUG) },
+            onBack = goBack
+        )
+        Page.DEBUG -> DebugScreen(
+            settings = settings,
             onBack = goBack
         )
         Page.SITE_SETTINGS -> WebSiteSettingsScreen(
@@ -2011,7 +2031,8 @@ private fun AppRecommendationEntry(onClick: () -> Unit) {
 @Composable
 private fun ShieldBadge(
     assessment: SecurityScanner.RiskAssessment,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    compact: Boolean = false
 ) {
     val context = LocalContext.current
     val (icon, tint) = when (assessment.level) {
@@ -2026,8 +2047,9 @@ private fun ShieldBadge(
         SecurityScanner.RiskLevel.SUSPICIOUS -> assessment.reason(context).ifBlank { context.getString(R.string.risk_suspicious) }
         SecurityScanner.RiskLevel.DANGEROUS -> assessment.reason(context).ifBlank { context.getString(R.string.risk_dangerous) }
     }
-    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+    // compact 时一并缩交互区：IconButton 默认最小 48dp，在 48dp 容器里会顶满甚至溢出
+    IconButton(onClick = onClick, modifier = Modifier.size(if (compact) 36.dp else 40.dp)) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(if (compact) 20.dp else 22.dp))
     }
 }
 
@@ -2115,7 +2137,9 @@ private fun AddressInput(
     showSuggestionsPanel: Boolean = true,
     // 当前页面的安全结论；为 null 时不显示护盾（首页/空标签）
     security: SecurityScanner.RiskAssessment? = null,
-    onSecurityClick: () -> Unit = {}
+    onSecurityClick: () -> Unit = {},
+    // 紧凑模式：浏览器页地址栏用更矮的输入框，把竖向空间留给网页内容与加载条
+    compact: Boolean = false
 ) {
     var focused by remember { mutableStateOf(false) }
     // 远程联想结果；每次输入变化后由防抖效应刷新
@@ -2145,7 +2169,10 @@ private fun AddressInput(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+            // 紧凑模式用固定 48dp：M3 容器自身约 56dp，只有改成固定高度才真正压得下来；
+            // heightIn(min) 低于自然高度时完全不起作用。48dp 也是触控区域的下限。
+            modifier = Modifier.fillMaxWidth()
+                .then(if (compact) Modifier.height(48.dp) else Modifier.heightIn(min = 56.dp))
                 .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
             placeholder = { Text(stringResource(R.string.s091), style = MaterialTheme.typography.bodyMedium) },
             singleLine = true,
@@ -2153,22 +2180,35 @@ private fun AddressInput(
             textStyle = MaterialTheme.typography.bodyMedium,
             leadingIcon = if (security != null) {
                 {
-                    ShieldBadge(assessment = security, onClick = onSecurityClick)
+                    ShieldBadge(assessment = security, onClick = onSecurityClick, compact = compact)
                 }
             } else {
                 // 无护盾时用放大镜占位，保持左侧图标位置稳定，避免输入前后文字左右跳动
-                { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                { Icon(Icons.Default.Search, null, modifier = Modifier.size(if (compact) 20.dp else 24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             trailingIcon = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (value.isNotBlank()) {
-                        IconButton(onClick = { onValueChange("") }) { Icon(Icons.Default.Close, stringResource(R.string.s092)) }
+                        // 不加 size 的 IconButton 最小交互区是 48dp，会与 48dp 容器顶满；
+                        // 显式限制为 36dp，避免撑高与视觉拥挤
+                        IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Close, stringResource(R.string.s092), modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
             },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Go),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (value.isNotBlank()) onSubmit() }),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            // 48dp 容器配上默认垂直内边距（TextFieldPadding = 16dp）会把文字挤在中间，
+            // compact 时收窄到 8dp，保证字形不贴边、上下也对称。
+            // 本输入框用 placeholder、没有 label，因此取 WithoutLabel 变体
+            // （contentPadding 已在 material3 1.5.0-beta02 废弃）。
+            contentPadding = if (compact) {
+                PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            } else {
+                OutlinedTextFieldDefaults.contentPaddingWithoutLabel()
+            },
+            colors = OutlinedTextFieldDefaults.colors(
                 // 线框风：常态细描边、聚焦时换主色
                 unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -2597,13 +2637,16 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 2.dp)) {
+            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 0.dp)) {
                 AddressInput(
                     value = input,
                     onValueChange = { input = it },
                     onSubmit = { viewModel.load(input) },
                     onFocusChange = { inputFocused = it },
                     showSuggestionsPanel = false,
+                    // 浏览器地址栏比较缩：顶部紧贴状态栏，把高度让给网页与加载条；
+                    // 无痕提示条、进度条、网页内容都能多出一行可视区域
+                    compact = true,
                     // 仅在已加载的 http(s) 页面上显示护盾，空白页/内部页不显示
                     security = selectedTab?.risk?.takeIf {
                         val u = selectedTab.url
@@ -3013,6 +3056,7 @@ private fun SettingsScreen(
     onSecurity: () -> Unit,
     onAdBlock: () -> Unit,
     onNotification: () -> Unit,
+    onAdvancedSettings: () -> Unit,
     onAbout: () -> Unit,
     onContactUs: () -> Unit,
     onBack: () -> Unit
@@ -3042,6 +3086,8 @@ private fun SettingsScreen(
         SettingSearchItem(stringResource(R.string.s240), SearchGroup.SECURITY, listOf("安全", "防护", "拦截", "诈骗", "木马", "护盾", "钓鱼", "风险", "银狐", "security", "protection", "block", "phishing", "malware", "risk"), onSecurity),
         SettingSearchItem(stringResource(R.string.ad_block_title), SearchGroup.AD_BLOCK, listOf("广告", "拦截", "广告拦截", "追踪", "跟踪", "弹窗", "推广", "adblock", "ad", "ads", "去广告", "block", "tracker", "popup"), onAdBlock),
         SettingSearchItem(stringResource(R.string.notification_title), SearchGroup.NOTIFICATION, listOf("通知", "实时", "流体云", "灵动岛", "实时活动", "状态栏", "notification", "live update", "live activity", "promoted"), onNotification),
+        SettingSearchItem(stringResource(R.string.debug_section_advanced), SearchGroup.ADVANCED, listOf("高级", "高级设置", "实验", "开发者", "advanced", "experiment", "developer"), onAdvancedSettings),
+        SettingSearchItem(stringResource(R.string.debug_title), SearchGroup.DEBUG, listOf("调试", "开发者", "诊断", "日志", "崩溃", "内核", "签名", "debug", "developer", "diagnostic", "log", "crash", "engine", "signature"), onAdvancedSettings),
         SettingSearchItem(stringResource(R.string.s249), SearchGroup.WEB_PERMISSIONS, listOf("剪贴板", "复制", "粘贴", "权限", "读取", "clipboard", "copy", "paste", "permission"), onWebPermissions),
         SettingSearchItem(stringResource(R.string.s053), SearchGroup.WEB_PERMISSIONS, listOf("外部", "跳转", "APP", "应用", "Intent", "权限", "external", "app", "link", "permission"), onWebPermissions),
         SettingSearchItem(stringResource(R.string.s259), SearchGroup.WEB_PERMISSIONS, listOf("麦克风", "录音", "权限", "语音", "音频", "microphone", "mic", "record", "audio", "permission"), onWebPermissions),
@@ -3080,8 +3126,12 @@ private fun SettingsScreen(
     val entryAdBlock = stringResource(R.string.ad_block_title)
     val entryNotification = stringResource(R.string.notification_title)
     val entryNotificationSub = stringResource(R.string.notification_sub)
-    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled, entryNotification, entryNotificationSub) {
-        listOf(
+    val entryAdvanced = stringResource(R.string.debug_section_advanced)
+    val entryAdvancedSub = stringResource(R.string.advanced_sub)
+    // 调试入口只在内存解锁后才追加到列表末尾；未解锁时完全不出现
+    val debugUnlocked = DebugUnlock.unlocked
+    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, debugUnlocked, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled, entryNotification, entryNotificationSub, entryAdvanced, entryAdvancedSub) {
+        listOfNotNull(
             SettingsEntryItem(entryGeneral, entryGeneralSub, Icons.Rounded.Tune, onGeneralSettings),
             SettingsEntryItem(entryLanguage, entryLanguageSub, Icons.Rounded.Language, onLanguage),
             SettingsEntryItem(entrySite, entryWebsiteSub, Icons.Rounded.Language, onSiteSettings),
@@ -3095,15 +3145,18 @@ private fun SettingsScreen(
             SettingsEntryItem(entryDefaultBrowser, entryDefaultBrowserSub, Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
             SettingsEntryItem(entryLinkDiag, entryLinkDiagSub, Icons.Default.Language, { showLinkDiagnostics = true }),
             SettingsEntryItem(entryAbout, entryAboutSub, Icons.Default.Info, onAbout),
-            SettingsEntryItem(entryContact, entryContactSub, Icons.Rounded.ContactSupport, onContactUs)
-        ).filter { !it.accent || !isDefaultBrowser }
+            SettingsEntryItem(entryContact, entryContactSub, Icons.Rounded.ContactSupport, onContactUs),
+            if (debugUnlocked) SettingsEntryItem(entryAdvanced, entryAdvancedSub, Icons.Rounded.Tune, onAdvancedSettings) else null
+        ).filterNotNull().filter { !it.accent || !isDefaultBrowser }
     }
     // 搜索命中结果（仅在搜索框有输入时使用）
-    val filtered = remember(searchQuery, isDefaultBrowser) {
+    // 调试相关条目只在内存解锁后才参与搜索，避免从搜索绕过连点解锁
+    val filtered = remember(searchQuery, isDefaultBrowser, debugUnlocked) {
         val q = searchQuery.trim()
         if (q.isEmpty()) emptyList()
         else searchIndex.filter { item ->
-            (!item.accent || !isDefaultBrowser) &&
+            (debugUnlocked || (item.group != SearchGroup.DEBUG && item.group != SearchGroup.ADVANCED)) &&
+                (!item.accent || !isDefaultBrowser) &&
                 (item.title.contains(q, ignoreCase = true) || item.keywords.any { it.contains(q, ignoreCase = true) })
         }
     }
@@ -4246,8 +4299,8 @@ private fun ChoiceItem(title: String, selected: Boolean, onClick: () -> Unit) {
 /**
  * 语言选择页。
  *
- * 语言是全局设置：选定后会同步镜像一份到 SharedPreferences，
- * Activity 下次创建时在 attachBaseContext 里立即生效。
+ * 选定后只写入存储，不重建当前界面：语言在下次启动时由 attachBaseContext 读取生效。
+ * 这与系统级语言设置的直觉一致，也避免重建时丢失当前浏览状态。
  */
 @Composable
 private fun LanguageScreen(language: String, setLanguage: (String) -> Unit, onBack: () -> Unit) {
@@ -4271,6 +4324,200 @@ private fun LanguageScreen(language: String, setLanguage: (String) -> Unit, onBa
             )
         }
     }
+}
+
+/**
+ * 高级设置页。
+ *
+ * 目前只提供「调试模式」一个卡片选项。本页只在已连点解锁时才可达，
+ * 因此卡片本身就是入口，不再需要额外开关。
+ */
+@Composable
+private fun AdvancedSettingsScreen(onDebug: () -> Unit, onBack: () -> Unit) {
+    SelectionScreen(stringResource(R.string.debug_section_advanced), onBack) {
+        item {
+            Card(
+                onClick = onDebug,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                shape = MaterialTheme.shapes.large
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.BugReport, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.debug_title), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            stringResource(R.string.debug_sub),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 调试模式页。
+ *
+ * 所有条目均基于真实装置与运行环境数据，不做任何模拟：
+ * - 设备与内核信息：报告、内核、UA、渲染后端等实际参数；
+ * - 运行环境自检：逐项核对开关与内核状态是否能对上；
+ * - 安装来源与签名：确认装的是自建包还是被重签的包；
+ * - 崩溃日志：读取真实捕获到的上一次崩溃栈。
+ */
+@Composable
+private fun DebugScreen(
+    settings: BrowserSettings,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val app = context.applicationContext as ZexBrowseApplication
+
+    val snapshot = remember(
+        settings.userAgentMode, settings.hardwareAcceleration, settings.httpsOnlyEnabled,
+        settings.httpsOnlyMode, settings.securityMode, settings.adBlockEnabled, settings.darkMode
+    ) {
+        DebugSettingsSnapshot(
+            userAgentMode = settings.userAgentMode,
+            hardwareAcceleration = settings.hardwareAcceleration,
+            httpsOnlyEnabled = settings.httpsOnlyEnabled,
+            httpsOnlyMode = settings.httpsOnlyMode,
+            securityMode = settings.securityMode,
+            adBlockEnabled = settings.adBlockEnabled,
+            darkMode = settings.darkMode
+        )
+    }
+
+    // 内核信息只在进入时读一次：GeckoRuntime.settings 是原生对象，每次重组访问都会跨 JNI
+    val items = remember(snapshot) {
+        DebugInfo.build(context, runCatching { app.runtime }.getOrNull(), snapshot)
+    }
+    val installer = remember { DebugInfo.installerSummary(context) }
+    val signature = remember { DebugInfo.signatureSummary(context) }
+    val crashLog = remember { CrashReporter.readLast(context) }
+
+    var showCrashLog by remember { mutableStateOf(false) }
+
+    SelectionScreen(stringResource(R.string.debug_title), onBack) {
+        item { DebugSectionHeader(stringResource(R.string.debug_info_title)) }
+        items.forEach { item ->
+            item {
+                ListItem(
+                    headlineContent = { Text(item.label, style = MaterialTheme.typography.bodyMedium) },
+                    supportingContent = {
+                        Text(
+                            item.value,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
+            }
+        }
+
+        item { DebugSectionHeader(stringResource(R.string.debug_signature_title)) }
+        item {
+            ListItem(
+                headlineContent = { Text("安装来源", style = MaterialTheme.typography.bodyMedium) },
+                supportingContent = { Text(installer, style = MaterialTheme.typography.bodySmall) }
+            )
+        }
+        item {
+            ListItem(
+                headlineContent = { Text("签名摘要 (SHA-256)", style = MaterialTheme.typography.bodyMedium) },
+                supportingContent = { Text(signature, style = MaterialTheme.typography.bodySmall) }
+            )
+        }
+
+        item { HorizontalDivider() }
+
+        // 崩溃日志：只在真实存在崩溃记录时可展开，不做示例数据
+        item {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.debug_crash_title)) },
+                supportingContent = {
+                    Text(
+                        if (crashLog == null) stringResource(R.string.debug_crash_empty) else "点击查看上次崩溃栈",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                },
+                leadingContent = { Icon(Icons.Rounded.BugReport, null) },
+                trailingContent = {
+                    if (crashLog != null) {
+                        TextButton(onClick = { showCrashLog = true }) { Text(stringResource(R.string.s079)) }
+                    }
+                }
+            )
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                TextButton(onClick = { CrashReporter.clear(context); showCrashLog = false }) {
+                    Text(stringResource(R.string.debug_crash_clear))
+                }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = {
+                    val text = items.joinToString("\n") { "${it.label}: ${it.value}" }
+                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("debug", text))
+                    Toast.makeText(context, context.getString(R.string.debug_copied), Toast.LENGTH_SHORT).show()
+                }) { Text(stringResource(R.string.debug_copy)) }
+            }
+        }
+
+        item { HorizontalDivider() }
+        item {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.debug_exit_title)) },
+                supportingContent = { Text(stringResource(R.string.debug_sub), style = MaterialTheme.typography.bodySmall) },
+                leadingContent = { Icon(Icons.Rounded.BugReport, null) },
+                modifier = Modifier.clickable {
+                    // 锁定只清内存标志：设置页入口立即消失，重新打开需再连点
+                    DebugUnlock.lock()
+                    Toast.makeText(context, context.getString(R.string.debug_locked), Toast.LENGTH_SHORT).show()
+                    onBack()
+                }
+            )
+        }
+    }
+
+    if (showCrashLog && crashLog != null) {
+        AlertDialog(
+            onDismissRequest = { showCrashLog = false },
+            title = { Text(stringResource(R.string.debug_crash_title)) },
+            text = {
+                Text(
+                    crashLog,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())
+                )
+            },
+            confirmButton = { TextButton(onClick = { showCrashLog = false }) { Text(stringResource(R.string.s079)) } }
+        )
+    }
+}
+
+@Composable
+private fun DebugSectionHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+    )
 }
 
 @Composable
@@ -4417,7 +4664,17 @@ private fun AboutScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.s401, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE))
+            // 连点版本号 7 次解锁调试入口（每次点击间隔需在 1.5 秒内）。
+            // 解锁只存在内存：进程结束或重装后自动失效，需重新连点。
+            Text(
+                stringResource(R.string.s401, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
+                modifier = Modifier.clickable {
+                    val remaining = DebugUnlock.tap()
+                    if (remaining == 0 && DebugUnlock.unlocked) {
+                        Toast.makeText(context, context.getString(R.string.debug_unlocked), Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
             Text(stringResource(R.string.s402))
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
                 Icon(Icons.Default.OpenInNew, null)
