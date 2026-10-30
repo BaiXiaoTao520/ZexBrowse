@@ -714,4 +714,13 @@
     <string name="debug_open_hint">已开启，点击进入调试工具</string>
     <string name="debug_unlocked">调试模式已解锁</string>
     <string name="debug_locked">已退出调试模式</string>
+    <string name="incognito_title">您已进入无痕浏览</string>
+    <string name="incognito_subtitle">本模式下的浏览记录不会留在这台设备上</string>
+    <string name="incognito_point_history">不会保存浏览历史、搜索记录与表单内容</string>
+    <string name="incognito_point_cookie">关闭全部无痕标签时自动清除 Cookie 与缓存</string>
+    <string name="incognito_point_exit">退出无痕浏览会立即关闭全部无痕标签并返回首页</string>
+    <string name="incognito_point_normal">普通标签不受影响，两者互不混合</string>
+    <string name="incognito_search_hint">在无痕环境搜索或输入网址</string>
+    <string name="incognito_exit">退出无痕浏览</string>
+    <string name="incognito_point_limit">无痕模式只清除本机数据，网站仍可能通过 IP、账号登录或浏览器指纹识别到你</string>
 </resources>

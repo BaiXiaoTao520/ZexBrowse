@@ -143,6 +143,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var mediaPermissionHandler: ((String, Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
     var browserSettings = BrowserSettings()
     private var incognitoContextId: String? = null
+    // 不随 ViewModel 销毁而取消的协程：退出清理、写历史等必须在进程结束前跑完。
+    private val applicationScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+    )
     private var lastColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
     // 记录强制暗化扩展当前是否启用，用于在开关变化时触发页面重载使样式生效/失效
     private var lastForceDark: Boolean? = null
@@ -238,6 +242,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 复用新标签的首次加载链路：视图可能尚未就绪，交由 pendingInitialLoads 重试确保生效
         pendingInitialLoads[tab.id] = normalize(url)
         mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+        return true
+    }
+
+    /**
+     * 在无痕环境里加载地址：复用最后一个无痕标签，没有则返回 false 由调用方新建。
+     *
+     * 与 [loadExternalUrl] 的区别：这里不看当前页是否空白——无痕页的搜索框
+     * 就是一个新入口，用户希望在同一无痕标签里连续跳转，而不是每次堆一个新标签。
+     * 全程只碰 incognito 标签，绝不影响普通标签。
+     */
+    fun loadInIncognito(input: String): Boolean {
+        val tab = _tabs.value.lastOrNull { it.incognito } ?: return false
+        _selectedId.value = tab.id
+        val target = normalize(input)
+        cancelPendingFailure(tab.id)
+        if (attachedSessions.contains(tab.id)) {
+            runCatching { tab.session.loadUri(target) }
+        } else {
+            pendingInitialLoads[tab.id] = target
+            pendingLoadAttempts.remove(tab.id)
+            mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+        }
         return true
     }
 
@@ -578,19 +604,41 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             runCatching { tab.session.close() }
         }
         _tabs.value = _tabs.value.filterNot { it.incognito }
-        incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
-        incognitoContextId = null
+        purgeIncognitoContext()
         _selectedId.value = _tabs.value.lastOrNull()?.id ?: run { newTab(); _selectedId.value }
     }
     // 退出无痕浏览：彻底关闭全部无痕标签并清除其 Cookie/缓存，普通标签不受影响
     fun exitIncognito() {
         val incognitoTabs = _tabs.value.filter { it.incognito }
         if (incognitoTabs.isEmpty()) return
-        incognitoTabs.forEach { tab -> runCatching { tab.session.close() } }
+        incognitoTabs.forEach { tab ->
+            attachedSessions.remove(tab.id)
+            runCatching { tab.session.close() }
+        }
         _tabs.value = _tabs.value.filterNot { it.incognito }
-        incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
-        incognitoContextId = null
+        purgeIncognitoContext()
         if (_tabs.value.isEmpty()) newTab() else _selectedId.value = _tabs.value.last().id
+    }
+
+    /**
+     * 清除无痕存储上下文里的全部数据。
+     *
+     * clearDataForSessionContext 本身返回 void（异步投递给 Gecko），因此不能在调用后
+     * 立即把 incognitoContextId 置空就完事——若调用本身抛异常，句柄已丢，残留数据再也清不掉。
+     * 这里先把句柄取出交给应用级协程，异常时写崩溃日志留痕；
+     * 协程跑在 applicationScope（SupervisorJob + IO）上，不随 ViewModel 销毁而取消。
+     */
+    private fun purgeIncognitoContext() {
+        val contextId = incognitoContextId ?: return
+        incognitoContextId = null
+        applicationScope.launch {
+            runCatching {
+                runtime.storageController.clearDataForSessionContext(contextId)
+            }.onFailure {
+                // 清除失败时记入崩溃日志，便于排查残留数据问题；不向用户弹窗避免干扰
+                CrashReporter.record(application, it)
+            }
+        }
     }
     fun toggleDesktopUserAgent() {
         val desktopUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -844,13 +892,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (history) applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
     }
     // 退出清理需要不随 ViewModel 销毁而取消的协程，否则进程结束时历史可能未清完
-    private val applicationScope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
-    )
     private fun clearIncognitoContextIfEmpty() {
         if (_tabs.value.none { it.incognito }) {
-            incognitoContextId?.let(runtime.storageController::clearDataForSessionContext)
-            incognitoContextId = null
+            purgeIncognitoContext()
         }
     }
     private companion object {

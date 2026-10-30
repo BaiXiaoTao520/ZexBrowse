@@ -714,4 +714,13 @@
     <string name="debug_open_hint">已開啟，點擊進入偵錯工具</string>
     <string name="debug_unlocked">偵錯模式已解鎖</string>
     <string name="debug_locked">已離開偵錯模式</string>
+    <string name="incognito_title">您已進入無痕瀏覽</string>
+    <string name="incognito_subtitle">本模式下的瀏覽記錄不會留在這台裝置上</string>
+    <string name="incognito_point_history">不會儲存瀏覽記錄、搜尋記錄與表單內容</string>
+    <string name="incognito_point_cookie">關閉全部無痕分頁時自動清除 Cookie 與快取</string>
+    <string name="incognito_point_exit">離開無痕瀏覽會立即關閉全部無痕分頁並返回首頁</string>
+    <string name="incognito_point_normal">一般分頁不受影響，兩者互不混合</string>
+    <string name="incognito_search_hint">在無痕環境搜尋或輸入網址</string>
+    <string name="incognito_exit">離開無痕瀏覽</string>
+    <string name="incognito_point_limit">無痕模式只清除本機資料，網站仍可能透過 IP、帳號登入或瀏覽器指紋識別到你</string>
 </resources>
