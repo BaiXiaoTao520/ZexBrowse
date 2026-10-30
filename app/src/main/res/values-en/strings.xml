@@ -120,8 +120,6 @@
     <string name="s117">Downloads</string>
     <string name="s118">Browser settings</string>
     <string name="s119">Close tab</string>
-    <string name="s120">Incognito: exiting closes all incognito tabs and clears cookies and cache. Normal tabs are unaffected.</string>
-    <string name="s121">Exit incognito</string>
     <string name="s122">Incognito tabs do not save history, cookies or cache.</string>
     <string name="s123">Normal tab</string>
     <string name="s124">Incognito tab</string>

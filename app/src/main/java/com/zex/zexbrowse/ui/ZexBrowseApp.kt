@@ -282,6 +282,15 @@ private data class SettingsEntryItem(
 /** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
 private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
 
+/**
+ * 无痕页专用主色。
+ *
+ * 仅限 [IncognitoHomeScreen] 使用：其余所有页面一律跟随用户在「颜色主题」里的选择，
+ * 不得引用本常量。用固定色而非主题色，是为了让无痕环境始终有一致的视觉特征，
+ * 不受用户主题变化影响。
+ */
+private val IncognitoAccentColor = Color(0xFF7B4DDB)
+
 /** 联系我们的跳转地址 */
 private const val CONTACT_URL = "https://knocket.ai/u/zex"
 
@@ -310,8 +319,8 @@ private fun IncognitoHomeScreen(
     // 用 remember 而非 rememberSaveable：无痕页的搜索词不应进 savedInstanceState，
     // 否则会被系统的 Activity 状态持久化一同写盘，与本模式的承诺相违。
     var query by remember { mutableStateOf("") }
-    // 无痕专属色：不用主题色，避免用户切换主题后两者混同
-    val accent = Color(0xFF7B4DDB)
+    // 无痕专属色：只在本页使用，不跟随用户的颜色主题
+    val accent = IncognitoAccentColor
     val deep = Color(0xFF2A1B45)
 
     Box(Modifier.fillMaxSize().background(deep)) {
@@ -975,6 +984,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 tabsIncognito = tabsIncognito,
                                 onTabsIncognitoChange = { tabsIncognito = it },
                                 navigate = navigate,
+                                resetToHome = { navForward = false; navStack = listOf(Page.HOME) },
                                 goBack = goBack,
                                 onSponsor = { sponsorInfo = true }
                             )
@@ -1047,6 +1057,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 tabsIncognito = tabsIncognito,
                                 onTabsIncognitoChange = { tabsIncognito = it },
                                 navigate = navigate,
+                                resetToHome = { navForward = false; navStack = listOf(Page.HOME) },
                                 goBack = goBack,
                                 onSponsor = { sponsorInfo = true }
                             )
@@ -1166,6 +1177,7 @@ private fun PageContent(
     tabsIncognito: Boolean,
     onTabsIncognitoChange: (Boolean) -> Unit,
     navigate: (Page) -> Unit,
+    resetToHome: () -> Unit,
     goBack: () -> Unit,
     onSponsor: () -> Unit
 ) {
@@ -1200,7 +1212,7 @@ private fun PageContent(
             onExit = {
                 browserViewModel.exitIncognito()
                 // 退出后直接回首页：把栈重置成只有首页，避免返回到已关掉的无痕页
-                navStack = listOf(Page.HOME)
+                resetToHome()
             }
         )
         Page.BROWSER -> BrowserScreen(
@@ -2865,14 +2877,6 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 }
             }
             if (selectedTab != null) {
-                if (selectedTab.incognito) {
-                    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.inverseSurface, shape = MaterialTheme.shapes.small) {
-                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.s120), Modifier.weight(1f), color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { viewModel.exitIncognito() }) { Text(stringResource(R.string.s121), color = MaterialTheme.colorScheme.inversePrimary) }
-                        }
-                    }
-                }
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                     WavyProgressBar(progress = selectedTab.progress / 100f, modifier = Modifier.fillMaxWidth())
                 }
