@@ -131,7 +131,6 @@
     <string name="s130">允許讀取剪貼簿？</string>
     <string name="s131">%1$s 要求讀取你的剪貼簿內容。</string>
     <string name="s132">全部分頁</string>
-    <string name="s133">關閉無痕</string>
     <string name="s134">關閉一般</string>
     <string name="s135">尚無無痕分頁</string>
     <string name="s136">尚無一般分頁</string>
@@ -721,4 +720,5 @@
     <string name="incognito_search_hint">在無痕環境搜尋或輸入網址</string>
     <string name="incognito_exit">離開無痕瀏覽</string>
     <string name="incognito_point_limit">無痕模式只清除本機資料，網站仍可能透過 IP、帳號登入或瀏覽器指紋識別到你</string>
+    <string name="incognito_exit_all">離開無痕</string>
 </resources>
