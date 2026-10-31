@@ -59,6 +59,35 @@ ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack
 
 发布所需的签名与可选服务配置由维护者在构建环境中自行提供，不随仓库分发。
 
+## 引用的开源项目
+
+本项目基于以下开源项目构建，感谢它们的作者与贡献者：
+
+| 项目 | 用途 | 许可证 |
+| --- | --- | --- |
+| [GeckoView](https://gitlab.com/oseifert/geckoview) / [Mozilla Firefox](https://github.com/mozilla/gecko-dev) | 网页渲染内核 | MPL 2.0 |
+| [Jetpack Compose](https://github.com/androidx/androidx) | 声明式 UI 框架 | Apache 2.0 |
+| [Material Design 3](https://github.com/material-components/material-components-android) | 界面设计规范与组件 | Apache 2.0 |
+| [OkHttp](https://github.com/square/okhttp) | 网络请求 | Apache 2.0 |
+| [Coil](https://github.com/coil-kt/coil) | 图片加载 | Apache 2.0 |
+| [Room](https://github.com/androidx/androidx) | 本地数据库 | Apache 2.0 |
+| [DataStore](https://github.com/androidx/androidx) | 偏好存储 | Apache 2.0 |
+| [WorkManager](https://github.com/androidx/androidx) | 后台下载任务 | Apache 2.0 |
+| [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) | 异步与并发 | Apache 2.0 |
+
+## 附加条款
+
+在 [Mozilla Public License 2.0](LICENSE) 的基础上，分发本程序的修改版本时，**不得**：
+
+1. **移除或篡改版权声明、许可证文本与作者署名**，包括本 README、应用内「关于」页与本仓库历史记录中的相关信息。
+2. **隐瞒修改事实**：不得将修改后的版本表述为未经修改的原版，也不得使用与原版相同或近似的名称、图标、包名导致用户混淆。
+3. **添加任何形式的付费解锁机制**，包括但不限于内购、会员、卡密、激活码。本程序及其衍生版本必须保持完全免费。
+4. **移除或绕过安全与隐私相关功能**，包括网址安全扫描、HTTPS-Only、广告拦截与无痕浏览的数据清除逻辑。
+5. **植入广告、追踪代码或未经用户同意的数据收集**，包括但不限于遥测、统计 SDK 与剪贴板/通讯录等权限的滥用。
+6. **以本项目名义发布**，暗示其为你本人或本项目的官方发布。
+
+修改版本必须保留上述限制，并且任何再分发者有义务将这些条款一并传递给下游接收者。
+
 ## 赞助与支持
 
 如果我的分享对你有一点点帮助，一杯奶茶钱就是对我最大的鼓励 ☕

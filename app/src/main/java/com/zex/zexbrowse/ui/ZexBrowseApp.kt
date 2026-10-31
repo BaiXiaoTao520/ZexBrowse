@@ -190,6 +190,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.zex.zexbrowse.AppLocale
 import com.zex.zexbrowse.CrashReporter
@@ -4895,7 +4896,7 @@ private fun AboutScreen(
             )
             Text(stringResource(R.string.s402))
             FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
-                Icon(Icons.Default.OpenInNew, null)
+                Icon(painterResource(R.drawable.ic_github), null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.s403))
             }
