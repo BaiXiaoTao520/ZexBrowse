@@ -13,7 +13,6 @@ import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MonitorHeart
-import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.Timer
@@ -149,13 +148,15 @@ val reveriePaintRecommendation = RecommendedApp(
     """.trimIndent()
 )
 
-val starRingBrowserRecommendation = RecommendedApp(
-    name = "星环浏览器-标准版",
+val zalithLauncherRecommendation = RecommendedApp(
+    name = "Zalith Launcher 2",
     version = "",
-    summary = "新一代星环，不止是浏览器，更是你的生活伴侣。",
-    downloadUrl = "https://roamexplore.rth1.xyz/",
-    icon = Icons.Rounded.Public,
-    description = "新一代星环，不止是浏览器，更是你的生活伴侣。"
+    summary = "A Minecraft: Java Edition Launcher for Android",
+    downloadUrl = "https://docs.zalithlauncher.cn/",
+    icon = Icons.Rounded.SportsEsports,
+    description = """
+Zalith Launcher 2 是一个全新设计、面向 Android 设备 的 Minecraft: Java Edition 启动器。项目使用 PojavLauncher 作为启动核心，采用 Jetpack Compose 与 Material Design 3 构建现代化 UI 体验。
+    """.trimIndent()
 )
 
 val tomatoRecommendation = RecommendedApp(
@@ -257,7 +258,7 @@ val astralGameRecommendation = RecommendedApp(
 val recommendedApps = listOf(
     appShareRecommendation,
     reveriePaintRecommendation,
-    starRingBrowserRecommendation,
+    zalithLauncherRecommendation,
     tomatoRecommendation,
     komiStoreRecommendation,
     cccodroidRecommendation,
