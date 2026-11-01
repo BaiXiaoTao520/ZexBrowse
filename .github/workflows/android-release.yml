@@ -85,6 +85,14 @@ jobs:
           # 避免产出「入口静默消失」的残废包。
           LEMWOOD_API_BASE: ${{ secrets.LEMWOOD_API_BASE }}
           LEMWOOD_LAUNCHER_ID: ${{ secrets.LEMWOOD_LAUNCHER_ID }}
+          # Mirror酱 CDK：同样用 Secrets 注入，不进仓库。
+          # 仅用于构建期的版本号与更新日志查询，不做下载分发（高速下载走网页）。
+          # 缺失不会阻断构建，只是取不到 Mirror酱 的版本信息，
+          # 更新检查与 GitHub 下载都照常工作。
+          MIRRORCHYAN_CDK: ${{ secrets.MIRRORCHYAN_CDK }}
+          # Mirror酱资源 ID：与 CDK 同级保密，用于项目页链接与 API 路径，
+          # 缺失时相关入口整体不激活
+          MIRRORCHYAN_RID: ${{ secrets.MIRRORCHYAN_RID }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: 生成 APK SHA-256 校验文件

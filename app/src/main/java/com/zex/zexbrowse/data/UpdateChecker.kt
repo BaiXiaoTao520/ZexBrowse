@@ -33,26 +33,55 @@ class UpdateChecker(
     /**
      * 检查是否有新版本。本地已是最新或所有来源都不可用时返回 null。
      *
-     * 版本号优先取镜像站的轻量接口（国内连通性好），不可用时回退 GitHub。
-     * GitHub 侧同时走 Releases API 与 Atom 订阅源两条通道：未认证请求有频控限制，
-     * 两条通道任一成功即可，避免单点被限流时完全查不到更新。
+     * 三个来源同时参与，各自贡献自己擅长的部分：
+     * - Mirror酱：国内连通性最好，负责确认版本号与更新日志；
+     * - GitHub：唯一能拿到 assets 直链的源，应用内下载依赖它；
+     * - 柠枺镜像站：已同步该版本时标记可走浏览器高速通道。
+     *
+     * 三者并存而非短路：任一渠道出问题时另外两个还能用，
+     * 弹窗里也会同时展示可用的下载入口，由用户自己选。
      */
     suspend fun latest(): ReleaseInfo? {
+        val remote = MirrorChyan.latest(BuildConfig.VERSION_NAME)
+        val mirrorVersion = remote.version?.takeIf { remote.succeeded && isNewer(it) }
+
         val github = githubLatest()
 
         val lemwoodVersion = LemwoodMirror.latestVersion(client)
-        val lemwood = if (lemwoodVersion != null && isNewer(lemwoodVersion)) {
-            lemwoodRelease(lemwoodVersion)
-        } else null
+            ?.takeIf { isNewer(it) }
+        val lemwood = lemwoodVersion?.let { lemwoodRelease(it) }
 
-        return when {
-            // 镜像站不可用：回退 GitHub
-            lemwood == null -> github?.takeIf { isNewer(it.version) }
-            // GitHub 版本更高：以 GitHub 为准，避免镜像同步滞后掩盖新版本
-            github != null && isNewer(github.version, lemwood.version) -> github
-            // 走镜像站下载，更新说明仍用 GitHub 的（镜像站不提供）
-            else -> lemwood.copy(notes = github?.notes.orEmpty())
-        }
+        // 三方取最高版本，避免任何单一来源滞后掩盖真实的新版本。
+        // 不能用拼接数字的方式比大小（段数不同的版本会得出错误结果），
+        // 直接复用 isNewer 的逐段比较。
+        val candidates = listOfNotNull(
+            mirrorVersion?.let { ReleaseInfo(it, remote.releaseNote, "") },
+            github,
+            lemwood
+        ).filter { isNewer(it.version) }
+
+        if (candidates.isEmpty()) return null
+
+        val best = candidates.reduce { a, b -> if (isNewer(b.version, a.version)) b else a }
+
+        // 说明优先用 GitHub：它是唯一带完整 Markdown 正文的源；
+        // Mirror酱 的 release_note 作次选，两者都空时用 best 自带的
+        val notes = listOfNotNull(
+            github?.notes?.takeIf { it.isNotBlank() },
+            remote.releaseNote.takeIf { it.isNotBlank() && mirrorVersion != null },
+            best.notes.takeIf { it.isNotBlank() }
+        ).firstOrNull() ?: ""
+
+        return best.copy(
+            notes = notes,
+            // 应用内下载只用 GitHub assets 直链：它是永久地址。
+            // Mirror酱 的高速下载必须经网页完成，柠枺 的直链还要过 PoW 验证，
+            // 两者都不能当作应用内下载地址。
+            // 因此拿不到 GitHub 直链时留空，弹窗会把「下载」置灰，引导用户走浏览器通道。
+            downloadUrl = github?.downloadUrl.orEmpty(),
+            // 柠枺只要同步了该版本就标记，与最终选哪个来源无关
+            lemwoodAvailable = lemwoodVersion != null
+        )
     }
 
     /**
@@ -217,8 +246,18 @@ class UpdateChecker(
         return false
     }
 
+    /**
+     * 把版本号拆成数字段。
+     *
+     * 必须先去 v 前缀：Mirror酱 返回的 version_name 形如 "v1.1.0"，
+     * GitHub 的 tag 也可能带 v。若不去，"v11".toIntOrNull() 为 null → 该段变成 0，
+     * 导致 v11.1.7 被当成 0.1.7，永远比本地 11.x 小，新版本检测直接失效。
+     */
     private fun versionParts(version: String): List<Int> =
-        version.substringBefore('+')
+        version.trim()
+            .removePrefix("v")
+            .removePrefix("V")
+            .substringBefore('+')
             .substringBefore('-')
             .split('.')
             .map { part -> part.toIntOrNull() ?: 0 }
