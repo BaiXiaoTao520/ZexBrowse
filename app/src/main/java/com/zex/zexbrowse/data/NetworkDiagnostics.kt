@@ -43,7 +43,7 @@ object NetworkDiagnostics {
         val state: CheckState
     )
 
-    enum class CheckState { OK, WARN, FAIL, RUNNING, SKIPPED }
+    enum class CheckState { OK, WARN, FAIL, SKIPPED }
 
     /** 一次完整诊断的结果集合 */
     data class Report(val results: List<CheckResult>)

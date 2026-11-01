@@ -4931,6 +4931,7 @@ private fun NetworkDiagnosticsScreen(onBack: () -> Unit) {
 }
 
 /** 总体健康度：根据四项结论算百分比，并按结果换色 */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun NetworkDiagnosticsSummary(report: NetworkDiagnostics.Report?, running: Boolean) {
     val results = report?.results.orEmpty()
@@ -5004,7 +5005,6 @@ private fun NetworkDiagnosticsRow(result: NetworkDiagnostics.CheckResult) {
         NetworkDiagnostics.CheckState.WARN -> Icons.Rounded.WarningAmber to MaterialTheme.colorScheme.tertiary
         NetworkDiagnostics.CheckState.FAIL -> Icons.Rounded.GppBad to MaterialTheme.colorScheme.error
         NetworkDiagnostics.CheckState.SKIPPED -> Icons.Rounded.RadioButtonUnchecked to MaterialTheme.colorScheme.outline
-        NetworkDiagnostics.CheckState.RUNNING -> Icons.Rounded.RadioButtonUnchecked to MaterialTheme.colorScheme.outline
     }
 
     Surface(
