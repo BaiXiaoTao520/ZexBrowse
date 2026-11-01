@@ -10,6 +10,7 @@ import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Brush
+import androidx.compose.material.icons.rounded.Chat
 import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MonitorHeart
@@ -35,6 +36,25 @@ data class BrowserNotice(
 )
 
 /**
+ * 推荐分类。
+ *
+ * 条目不多时分类仍值得做：用户找工具和应用商店类需求差异很大，
+ * 混在一列里只能凭图标搏记忆。分类页各自独立，点击后才进入，不改变下载行为。
+ */
+enum class RecommendCategory {
+    /** 工具与效率 */
+    TOOLS,
+    /** 应用商店 */
+    STORE,
+    /** 游戏与游戏相关工具 */
+    GAME,
+    /** 创作与设计 */
+    CREATE,
+    /** 内容分享与社区 */
+    SHARE
+}
+
+/**
  * 应用推荐条目。
  *
  * 字段与本应用的下载流程保持一致：
@@ -49,6 +69,8 @@ data class RecommendedApp(
     val description: String,
     val downloadUrl: String,
     val icon: ImageVector,
+    /** 所属分类，用于推荐页的分组展示 */
+    val category: RecommendCategory,
     /** 网页/网盘类下载的二次说明弹窗；为 null 表示直接打开浏览器 */
     val browserNotice: BrowserNotice? = null
 ) {
@@ -71,6 +93,7 @@ val appShareRecommendation = RecommendedApp(
     summary = "App 多版本讨论、评分与资源分享平台",
     downloadUrl = "https://app.sharess.cn/download",
     icon = Icons.Rounded.Apps,
+    category = RecommendCategory.STORE,
     browserNotice = BrowserNotice(
         title = R.string.notice_appshare_title,
         content = "具体下载步骤：\n\n" +
@@ -102,12 +125,23 @@ val appShareRecommendation = RecommendedApp(
     """.trimIndent()
 )
 
+val fluffychatRecommendation = RecommendedApp(
+    name = "FluffyChat",
+    version = "2.11.3",
+    summary = "The cutest instant messenger in the [matrix]",
+    downloadUrl = "https://github.com/krille-chan/fluffychat/releases/download/v2.11.3/fluffychat.apk",
+    icon = Icons.Rounded.Chat,
+    category = RecommendCategory.SHARE,
+    description = "FluffyChat is an open source, nonprofit and cute [matrix] client written in Flutter. The goal of the app is to create an easy to use instant messenger which is open source and accessible for everyone."
+)
+
 val reveriePaintRecommendation = RecommendedApp(
     name = "ReveriePaint",
     version = "v1.4.0",
     summary = "基于 Krita 核心引擎打造的 Android 原生数字绘画应用",
     downloadUrl = "https://github.com/LanRhyme/ReveriePaint/releases/download/v1.4.0/ReveriePaint-v1.4.0.apk",
     icon = Icons.Rounded.Brush,
+    category = RecommendCategory.CREATE,
     description = """
         基于 Krita 核心引擎打造的 Android 原生现代数字绘画应用
 
@@ -154,6 +188,7 @@ val zalithLauncherRecommendation = RecommendedApp(
     summary = "A Minecraft: Java Edition Launcher for Android",
     downloadUrl = "https://docs.zalithlauncher.cn/",
     icon = Icons.Rounded.SportsEsports,
+    category = RecommendCategory.GAME,
     description = """
 Zalith Launcher 2 是一个全新设计、面向 Android 设备 的 Minecraft: Java Edition 启动器。项目使用 PojavLauncher 作为启动核心，采用 Jetpack Compose 与 Material Design 3 构建现代化 UI 体验。
     """.trimIndent()
@@ -165,6 +200,7 @@ val tomatoRecommendation = RecommendedApp(
     summary = "开源简洁的番茄钟软件",
     downloadUrl = "https://github.com/nsh07/Tomato/releases/download/v2.0.1/tomato-v2.0.1-release.apk",
     icon = Icons.Rounded.Timer,
+    category = RecommendCategory.TOOLS,
     description = "开源简洁的番茄钟软件"
 )
 
@@ -174,6 +210,7 @@ val komiStoreRecommendation = RecommendedApp(
     summary = "开源 Github 仓库应用商店",
     downloadUrl = "https://github.com/komi-store/komi-store/releases/download/v1.9.2/Komi-Store-1.9.2.apk",
     icon = Icons.Rounded.Storefront,
+    category = RecommendCategory.STORE,
     description = """
         Komi Store only helps you discover and download release assets that are already published on GitHub by third-party developers. The contents, safety, and behavior of those downloads are entirely the responsibility of their respective authors and distributors, not this project.
 
@@ -187,6 +224,7 @@ val coolMonitorRecommendation = RecommendedApp(
     summary = "开源设备健康监控诊断工具",
     downloadUrl = "https://wwbaa.lanzoub.com/b01gicpghc",
     icon = Icons.Rounded.MonitorHeart,
+    category = RecommendCategory.TOOLS,
     browserNotice = BrowserNotice(
         title = R.string.notice_coolmonitor_title,
         content = "即将跳转至浏览器\n" +
@@ -204,6 +242,7 @@ val twilightToolboxRecommendation = RecommendedApp(
     summary = "以 Material Design 3 打造的开源多功能工具箱",
     downloadUrl = "https://qisuhe.pages.dev/",
     icon = Icons.Rounded.Construction,
+    category = RecommendCategory.TOOLS,
     description = "一款秉承互联网分享精神以 Material Design 3 风格进行设计开发的多功能工具聚合工具箱"
 )
 
@@ -213,6 +252,7 @@ val aEmulatorRecommendation = RecommendedApp(
     summary = "一款能够模拟旧版 Android 系统固件的 Android 模拟器",
     downloadUrl = "https://github.com/uxazu/AEmulator/releases/download/0.0.0.3/app.aemu.apk",
     icon = Icons.Rounded.Memory,
+    category = RecommendCategory.GAME,
     description = "AEmulator boots a real Android 2.3–17 system image straight from a firmware file you already have: a recovery ZIP, an Odin archive, a Google factory image or a GSI. Old 32-bit firmware (2.3–4.4) runs through a patched QEMU, Android 5.0–17 runs natively on the phone’s arm64 cores. The kernel’s binder is emulated, graphics use your phone’s GPU and sound goes through Android’s audio stack — everything runs inside a normal app."
 )
 
@@ -228,6 +268,7 @@ val cccodroidRecommendation = RecommendedApp(
     summary = "A development launcher that runs Claude Code on Android phones. No root, no custom ROM, no chroot / proot / VM.",
     downloadUrl = "https://github.com/greyoak111/cccodroid/releases/download/v0.4.17/cccodroid-36.apk",
     icon = Icons.Rounded.Construction,
+    category = RecommendCategory.TOOLS,
     description = "cccodroid is a third-party project and is not affiliated with Anthropic. It runs the official, unmodified Claude Code: downloaded from Anthropic's official channel at install time (or, when that is unreachable, the identical file Anthropic publishes on npm, via a mirror), verified against the official sha256 manifest, never modified."
 )
 
@@ -237,6 +278,7 @@ val astralGameRecommendation = RecommendedApp(
     summary = "Flutter 游戏联机客户端",
     downloadUrl = "https://github.com/AstralNext/AstralGame/releases/download/v1.6.5/astral-game-1.6.5-android-arm64.apk",
     icon = Icons.Rounded.SportsEsports,
+    category = RecommendCategory.GAME,
     description = """
         Astral Game 一款基于 Flutter 构建的游戏联机客户端。
 
@@ -257,6 +299,7 @@ val astralGameRecommendation = RecommendedApp(
 /** 与 ZexNote 一致的推荐顺序 */
 val recommendedApps = listOf(
     appShareRecommendation,
+    fluffychatRecommendation,
     reveriePaintRecommendation,
     zalithLauncherRecommendation,
     tomatoRecommendation,
@@ -267,3 +310,31 @@ val recommendedApps = listOf(
     aEmulatorRecommendation,
     astralGameRecommendation
 )
+
+/**
+ * 分类的展示元信息：分类值 + 标题字符串资源 + 图标。
+ *
+ * 顺序即推荐页上的排列顺序：工具与商店在前（日常需求最高），
+ * 创作、游戏、社区在后。
+ */
+data class RecommendCategoryMeta(
+    val category: RecommendCategory,
+    @StringRes val titleRes: Int,
+    val icon: ImageVector
+)
+
+val recommendCategoryMeta: List<RecommendCategoryMeta> = listOf(
+    RecommendCategoryMeta(RecommendCategory.TOOLS, R.string.recommend_cat_tools, Icons.Rounded.Construction),
+    RecommendCategoryMeta(RecommendCategory.STORE, R.string.recommend_cat_store, Icons.Rounded.Storefront),
+    RecommendCategoryMeta(RecommendCategory.GAME, R.string.recommend_cat_game, Icons.Rounded.SportsEsports),
+    RecommendCategoryMeta(RecommendCategory.CREATE, R.string.recommend_cat_create, Icons.Rounded.Brush),
+    RecommendCategoryMeta(RecommendCategory.SHARE, R.string.recommend_cat_share, Icons.Rounded.Apps)
+)
+
+/** 按分类分组，保持 recommendedApps 内部的原始顺序 */
+fun appsInCategory(category: RecommendCategory): List<RecommendedApp> =
+    recommendedApps.filter { it.category == category }
+
+/** 分类下的条目数量，用于卡片副标题 */
+fun countInCategory(category: RecommendCategory): Int =
+    recommendedApps.count { it.category == category }

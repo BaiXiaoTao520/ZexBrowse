@@ -721,4 +721,22 @@
     <string name="incognito_exit">Leave private browsing</string>
     <string name="incognito_point_limit">Private mode only clears data on this device; sites may still identify you via IP, sign-in or browser fingerprinting</string>
     <string name="incognito_exit_all">Exit private</string>
+    <string name="recommend_cat_tools">Tools &amp; productivity</string>
+    <string name="recommend_cat_store">App stores</string>
+    <string name="recommend_cat_game">Games &amp; emulation</string>
+    <string name="recommend_cat_create">Creation &amp; design</string>
+    <string name="recommend_cat_share">Sharing &amp; community</string>
+    <string name="recommend_cat_count">%1$d apps</string>
+    <string name="recommend_cat_empty">Nothing in this category yet</string>
+    <string name="netdiag_title">Network diagnostics</string>
+    <string name="netdiag_sub">Check link, DNS, latency and site reachability</string>
+    <string name="netdiag_run">Start</string>
+    <string name="netdiag_rerun">Run again</string>
+    <string name="netdiag_running">Diagnosing…</string>
+    <string name="netdiag_all_ok">All checks passed</string>
+    <string name="netdiag_has_fail">Problems found</string>
+    <string name="netdiag_has_warn">Partially degraded</string>
+    <string name="netdiag_section">Checks</string>
+    <string name="netdiag_tip">Per-item results point at the failing stage instead of a generic network error</string>
+    <string name="netdiag_score">Health</string>
 </resources>

@@ -104,6 +104,7 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PrivacyTip
@@ -204,13 +205,18 @@ import com.zex.zexbrowse.data.decodeCustomSearchEngines
 import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.encodeCustomSearchEngines
 import com.zex.zexbrowse.data.LemwoodMirror
+import com.zex.zexbrowse.data.NetworkDiagnostics
 import com.zex.zexbrowse.data.NetworkProbe
+import com.zex.zexbrowse.data.RecommendCategory
+import com.zex.zexbrowse.data.RecommendCategoryMeta
+import com.zex.zexbrowse.data.appsInCategory
+import com.zex.zexbrowse.data.countInCategory
+import com.zex.zexbrowse.data.recommendCategoryMeta
 import com.zex.zexbrowse.data.RecommendedApp
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.SearchSuggestions
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
-import com.zex.zexbrowse.data.recommendedApps
 import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.util.DebugInfo
 import com.zex.zexbrowse.util.DebugSettingsSnapshot
@@ -237,7 +243,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, INCOGNITO, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, ADVANCED_SETTINGS, DEBUG, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
+enum class Page { HOME, APP_RECOMMENDATIONS, BROWSER, INCOGNITO, TABS, SETTINGS, BOOKMARKS, DOWNLOADS, HISTORY, DOWNLOAD_DIRECTORY, GENERAL_SETTINGS, LANGUAGE, SITE_SETTINGS, COOKIE_SETTINGS, HTTPS_ONLY, WEB_PERMISSIONS, SECURITY, ADBLOCK, NOTIFICATION, ADVANCED_SETTINGS, DEBUG, NETWORK_DIAGNOSTICS, SEARCH_ENGINE, USER_AGENT, CUSTOM_USER_AGENT, CLIPBOARD_PERMISSION, MIC_PERMISSION, EXTERNAL_APP_PERMISSION, ABOUT }
 
 data class QuickSite(val title: String, val url: String, val icon: String)
 
@@ -269,6 +275,7 @@ private enum class SearchGroup(val labelRes: Int, val icon: androidx.compose.ui.
     HISTORY(R.string.s058, Icons.Default.History),
     BOOKMARKS(R.string.s098, Icons.Rounded.Bookmarks),
     DEFAULT_BROWSER(R.string.s042, Icons.Rounded.Public),
+    NETWORK(R.string.netdiag_title, Icons.Rounded.NetworkCheck),
     LINK_DIAGNOSTICS(R.string.s277, Icons.Default.Language),
     ABOUT(R.string.s281, Icons.Default.Info),
     CONTACT(R.string.s288, Icons.Rounded.ContactSupport)
@@ -1272,6 +1279,7 @@ private fun PageContent(
             onAdBlock = { navigate(Page.ADBLOCK) },
             onNotification = { navigate(Page.NOTIFICATION) },
             onAdvancedSettings = { navigate(Page.ADVANCED_SETTINGS) },
+            onNetworkDiagnostics = { navigate(Page.NETWORK_DIAGNOSTICS) },
             onAbout = { navigate(Page.ABOUT) },
             onContactUs = { openInBrowser(context, CONTACT_URL) },
             onBack = goBack
@@ -1308,6 +1316,7 @@ private fun PageContent(
             settings = settings,
             onBack = goBack
         )
+        Page.NETWORK_DIAGNOSTICS -> NetworkDiagnosticsScreen(onBack = goBack)
         Page.SITE_SETTINGS -> WebSiteSettingsScreen(
             settings = settings,
             setForceDarkWeb = { scope.launch { settingsStore.forceDarkWeb(it) } },
@@ -1621,17 +1630,23 @@ private enum class RecommendScreenState { LOADING, OFFLINE, READY }
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack: () -> Unit) {
-    val context = LocalContext.current
-    var detail by remember { mutableStateOf<RecommendedApp?>(null) }
-    // 已触发下载的条目 → 其在下载记录中的 id，用于完成后直接安装
-    var downloadingApp by remember { mutableStateOf<RecommendedApp?>(null) }
-    var downloadId by remember { mutableStateOf<String?>(null) }
-    // 网页/网盘类条目：确认二次说明弹窗后再跳转浏览器
-    var browserNoticeApp by remember { mutableStateOf<RecommendedApp?>(null) }
+    // 当前打开的分类；为 null 时展示分类卡片列表
+    var openCategory by remember { mutableStateOf<RecommendCategory?>(null) }
     // 屏幕状态：加载中 / 不通 / 已就绪
     var screenState by remember { mutableStateOf(RecommendScreenState.LOADING) }
     // 重试计数：每次点重试递增，驱动下面的 LaunchedEffect 重新探测
     var probeAttempt by remember { mutableStateOf(0) }
+
+    // 已进入分类页：直接交给分类页，本页不再渲染任何内容
+    val category = openCategory
+    if (category != null) {
+        RecommendCategoryScreen(
+            category = category,
+            browserViewModel = browserViewModel,
+            onBack = { openCategory = null }
+        )
+        return
+    }
 
     LaunchedEffect(probeAttempt) {
         screenState = RecommendScreenState.LOADING
@@ -1716,7 +1731,7 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                         }
                     }
                 }
-                // 就绪：内容淡入
+                // 就绪：分类卡片列表，点击进入各分类详情页
                 RecommendScreenState.READY -> LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(16.dp),
@@ -1728,7 +1743,7 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                     item {
                         Text(stringResource(R.string.s065), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    // 法规与服务调整警示牌：置于列表标题之后、推荐条目之前。
+                    // 法规与服务调整警示牌：置于列表标题之后、分类卡片之前。
                     // 收起时同时做淡出与垂直收缩，列表下方内容随之上移。
                     item {
                         AnimatedVisibility(
@@ -1741,12 +1756,72 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                             RecommendationServiceNotice()
                         }
                     }
-                    items(recommendedApps) { app ->
-                        RecommendationCard(app = app) { detail = app }
+                    items(recommendCategoryMeta) { meta ->
+                        val count = countInCategory(meta.category)
+                        if (count > 0) {
+                            RecommendationCategoryCard(
+                                meta = meta,
+                                count = count,
+                                onClick = { openCategory = meta.category }
+                            )
+                        }
                     }
                     // 网络提示置于列表末尾：完整读完推荐内容后才看到，且与上述
                     // 法规警示牌（errorContainer）区分开，用中性色不抢注意力
                     item { RecommendationNetworkNotice() }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 分类详情页：展示单一分类下的推荐条目。
+ *
+ * 下载/弹窗逻辑与原先的推荐页一致，只是作用范围缩到该分类：
+ * - APK 直链 → 应用内下载；
+ * - 网页/网盘 → 二次说明后交给系统浏览器；
+ * - 弹窗状态全部留在本页，返回分类列表时自然丢弃。
+ */
+@Composable
+private fun RecommendCategoryScreen(
+    category: RecommendCategory,
+    browserViewModel: BrowserViewModel,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var detail by remember { mutableStateOf<RecommendedApp?>(null) }
+    var downloadingApp by remember { mutableStateOf<RecommendedApp?>(null) }
+    var downloadId by remember { mutableStateOf<String?>(null) }
+    var browserNoticeApp by remember { mutableStateOf<RecommendedApp?>(null) }
+
+    val meta = recommendCategoryMeta.firstOrNull { it.category == category }
+    val apps = remember(category) { appsInCategory(category) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(meta?.titleRes ?: R.string.s062)) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }
+            )
+        }
+    ) { padding ->
+        if (apps.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Text(
+                    stringResource(R.string.recommend_cat_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(apps) { app ->
+                    RecommendationCard(app = app) { detail = app }
                 }
             }
         }
@@ -1773,7 +1848,7 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
 
     downloadingApp?.let { app ->
         // 下载列表的订阅只发生在弹窗内部：下载过程中进度每秒会更新多次，
-        // 若在页面层订阅，每次更新都会让上面整个推荐卡片列表重组，产生卡顿。
+        // 若在页面层订阅，每次更新都会让下面整个推荐卡片列表重组，产生卡顿。
         RecommendationDownloadDialogHost(
             app = app,
             downloads = browserViewModel.downloads,
@@ -1945,6 +2020,50 @@ private val KNOWN_BROWSERS = setOf(
     "com.kiwibrowser.browser", "com.explore.web.browser", "com.hsv.freeadblockerbrowser",
     "com.jamal2367.maxthonbrowser", "com.leesc.chrome", "org.chromium.webview_shell"
 )
+
+/**
+ * 推荐分类卡片：图标 + 分类名 + 条目数 + 进入箭头。
+ *
+ * 与条目卡片同一套视觉语言（同圆角、同内边距），但用 secondaryContainer
+ * 图标底板区分层级，一眼能看出它不是单个应用。
+ */
+@Composable
+private fun RecommendationCategoryCard(
+    meta: RecommendCategoryMeta,
+    count: Int,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(meta.icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(meta.titleRes), fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(
+                    stringResource(R.string.recommend_cat_count, count),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 /**
  * 法规与服务调整警示牌。
@@ -3277,6 +3396,7 @@ private fun SettingsScreen(
     onAdBlock: () -> Unit,
     onNotification: () -> Unit,
     onAdvancedSettings: () -> Unit,
+    onNetworkDiagnostics: () -> Unit,
     onAbout: () -> Unit,
     onContactUs: () -> Unit,
     onBack: () -> Unit
@@ -3314,6 +3434,7 @@ private fun SettingsScreen(
         SettingSearchItem(stringResource(R.string.s058), SearchGroup.HISTORY, listOf("历史", "访问", "记录", "足迹", "历史记录", "history", "visit", "visited"), onHistory),
         SettingSearchItem(stringResource(R.string.s098), SearchGroup.BOOKMARKS, listOf("书签", "收藏", "收藏夹", "书签管理", "首页", "bookmark", "bookmarks", "favorite", "home"), onBookmarks),
         SettingSearchItem(stringResource(R.string.s042), SearchGroup.DEFAULT_BROWSER, listOf("默认", "浏览器", "角色", "默认应用", "默认浏览器", "default", "browser", "role"), onSetDefaultBrowser, accent = true, subtitle = stringResource(R.string.set_default_sub)),
+        SettingSearchItem(stringResource(R.string.netdiag_title), SearchGroup.NETWORK, listOf("网络", "诊断", "检测", "延迟", "DNS", "连通", "测速", "network", "diagnostics", "ping", "latency", "dns", "connectivity"), onNetworkDiagnostics),
         SettingSearchItem(stringResource(R.string.s277), SearchGroup.LINK_DIAGNOSTICS, listOf("外链", "诊断", "Intent", "跳转", "链接", "link", "diagnostics", "external"), { showLinkDiagnostics = true }),
         SettingSearchItem(stringResource(R.string.s281), SearchGroup.ABOUT, listOf("关于", "版本", "许可", "贡献者", "赞助", "更新", "about", "version", "license", "contributor", "sponsor", "update"), onAbout),
         SettingSearchItem(stringResource(R.string.s288), SearchGroup.CONTACT, listOf("联系", "反馈", "建议", "问题", "contact", "feedback", "suggestion", "issue"), onContactUs)
@@ -3337,6 +3458,8 @@ private fun SettingsScreen(
     val entryDefaultBrowserSub = stringResource(R.string.s276)
     val entryLinkDiag = stringResource(R.string.s277)
     val entryLinkDiagSub = stringResource(R.string.s299)
+    val entryNetDiag = stringResource(R.string.netdiag_title)
+    val entryNetDiagSub = stringResource(R.string.netdiag_sub)
     val entryAbout = stringResource(R.string.s281)
     val entryAboutSub = stringResource(R.string.s300)
     val entryContact = stringResource(R.string.s288)
@@ -3350,7 +3473,7 @@ private fun SettingsScreen(
     val entryAdvancedSub = stringResource(R.string.advanced_sub)
     // 调试入口只在内存解锁后才追加到列表末尾；未解锁时完全不出现
     val debugUnlocked = DebugUnlock.unlocked
-    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, debugUnlocked, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled, entryNotification, entryNotificationSub, entryAdvanced, entryAdvancedSub) {
+    val entries = remember(isDefaultBrowser, settings.cookiesEnabled, settings.clearOnExit, debugUnlocked, entryGeneral, entryLanguage, entryLanguageSub, entrySite, entryWebsiteSub, entryWebPerm, entryWebPermSub, entrySecurity, entryHistory, entryHistorySub, entryBookmarks, entryBookmarksSub, entryDefaultBrowser, entryDefaultBrowserSub, entryLinkDiag, entryLinkDiagSub, entryNetDiag, entryNetDiagSub, entryAbout, entryAboutSub, entryContact, entryContactSub, entryGeneralSub, entryPrivacy, entryAdBlock, settings.adBlockEnabled, entryNotification, entryNotificationSub, entryAdvanced, entryAdvancedSub) {
         listOfNotNull(
             SettingsEntryItem(entryGeneral, entryGeneralSub, Icons.Rounded.Tune, onGeneralSettings),
             SettingsEntryItem(entryLanguage, entryLanguageSub, Icons.Rounded.Language, onLanguage),
@@ -3363,6 +3486,7 @@ private fun SettingsScreen(
             SettingsEntryItem(entryHistory, entryHistorySub, Icons.Default.History, onHistory),
             SettingsEntryItem(entryBookmarks, entryBookmarksSub, Icons.Rounded.Bookmarks, onBookmarks),
             SettingsEntryItem(entryDefaultBrowser, entryDefaultBrowserSub, Icons.Rounded.Public, onSetDefaultBrowser, accent = true),
+            SettingsEntryItem(entryNetDiag, entryNetDiagSub, Icons.Rounded.NetworkCheck, onNetworkDiagnostics),
             SettingsEntryItem(entryLinkDiag, entryLinkDiagSub, Icons.Default.Language, { showLinkDiagnostics = true }),
             SettingsEntryItem(entryAbout, entryAboutSub, Icons.Default.Info, onAbout),
             SettingsEntryItem(entryContact, entryContactSub, Icons.Rounded.ContactSupport, onContactUs),
@@ -4726,6 +4850,185 @@ private fun DebugScreen(
             },
             confirmButton = { TextButton(onClick = { showCrashLog = false }) { Text(stringResource(R.string.s079)) } }
         )
+    }
+}
+
+/**
+ * 网络诊断页。
+ *
+ * 每项结果都来自真实测量（ConnectivityManager / DNS 解析 / TCP 握手 / HTTP 请求），
+ * 页面只负责把结果排得能看懂：先给一个总体健康度，再逐项展开细节。
+ */
+@Composable
+private fun NetworkDiagnosticsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var running by remember { mutableStateOf(false) }
+    var report by remember { mutableStateOf<NetworkDiagnostics.Report?>(null) }
+
+    val start: () -> Unit = {
+        if (!running) {
+            running = true
+            report = null
+            scope.launch {
+                // runAll 内部已切到 IO 并在失败时抛 CancellationException，
+                // 这里只负责把结果回填并复位 running
+                report = NetworkDiagnostics.runAll(context)
+                running = false
+            }
+        }
+    }
+
+    // 进页自动跑一次：用户点进来就是想知道现在通不通
+    LaunchedEffect(Unit) { start() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.netdiag_title)) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } },
+                actions = {
+                    if (!running) {
+                        TextButton(onClick = { start() }) { Text(stringResource(R.string.netdiag_rerun)) }
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 顶部总览卡片：健康度 + 结论，一眼看完
+            item {
+                NetworkDiagnosticsSummary(report = report, running = running)
+            }
+
+            if (report != null) {
+                item {
+                    Text(
+                        stringResource(R.string.netdiag_section),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+                    )
+                }
+                items(report!!.results) { result ->
+                    NetworkDiagnosticsRow(result)
+                }
+                item {
+                    Text(
+                        stringResource(R.string.netdiag_tip),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, end = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 总体健康度：根据四项结论算百分比，并按结果换色 */
+@Composable
+private fun NetworkDiagnosticsSummary(report: NetworkDiagnostics.Report?, running: Boolean) {
+    val results = report?.results.orEmpty()
+    val total = results.count { it.state != NetworkDiagnostics.CheckState.SKIPPED }
+    val passed = results.count { it.state == NetworkDiagnostics.CheckState.OK }
+    val failed = results.count { it.state == NetworkDiagnostics.CheckState.FAIL }
+    val warned = results.count { it.state == NetworkDiagnostics.CheckState.WARN }
+    val score = if (total == 0) 0 else passed * 100 / total
+
+    val (container, onContainer) = when {
+        running -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.onSurfaceVariant
+        failed > 0 -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        warned > 0 -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = container,
+        contentColor = onContainer,
+        shape = MaterialTheme.shapes.extraLarge
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            if (running) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ContainedLoadingIndicator(modifier = Modifier.size(36.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Text(stringResource(R.string.netdiag_running), style = MaterialTheme.typography.titleMedium)
+                }
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        "$score",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "%",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        stringResource(
+                            when {
+                                report == null -> R.string.netdiag_running
+                                failed > 0 -> R.string.netdiag_has_fail
+                                warned > 0 -> R.string.netdiag_has_warn
+                                else -> R.string.netdiag_all_ok
+                            }
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.netdiag_score),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+/** 单项结果行：左侧状态图标，右侧标题 + 结论 + 细节 */
+@Composable
+private fun NetworkDiagnosticsRow(result: NetworkDiagnostics.CheckResult) {
+    val (icon, tint) = when (result.state) {
+        NetworkDiagnostics.CheckState.OK -> Icons.Rounded.CheckCircle to MaterialTheme.colorScheme.primary
+        NetworkDiagnostics.CheckState.WARN -> Icons.Rounded.WarningAmber to MaterialTheme.colorScheme.tertiary
+        NetworkDiagnostics.CheckState.FAIL -> Icons.Rounded.GppBad to MaterialTheme.colorScheme.error
+        NetworkDiagnostics.CheckState.SKIPPED -> Icons.Rounded.RadioButtonUnchecked to MaterialTheme.colorScheme.outline
+        NetworkDiagnostics.CheckState.RUNNING -> Icons.Rounded.RadioButtonUnchecked to MaterialTheme.colorScheme.outline
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Icon(icon, null, modifier = Modifier.size(22.dp), tint = tint)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(result.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(result.summary, style = MaterialTheme.typography.bodyMedium)
+                if (result.detail.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        result.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 

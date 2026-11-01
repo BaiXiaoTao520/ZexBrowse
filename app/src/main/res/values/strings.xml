@@ -721,4 +721,22 @@
     <string name="incognito_exit">退出无痕浏览</string>
     <string name="incognito_point_limit">无痕模式只清除本机数据，网站仍可能通过 IP、账号登录或浏览器指纹识别到你</string>
     <string name="incognito_exit_all">退出无痕</string>
+    <string name="recommend_cat_tools">工具与效率</string>
+    <string name="recommend_cat_store">应用商店</string>
+    <string name="recommend_cat_game">游戏与模拟</string>
+    <string name="recommend_cat_create">创作与设计</string>
+    <string name="recommend_cat_share">分享与社区</string>
+    <string name="recommend_cat_count">共 %1$d 款</string>
+    <string name="recommend_cat_empty">该分类下暂无内容</string>
+    <string name="netdiag_title">网络诊断</string>
+    <string name="netdiag_sub">检测链路、DNS、延迟与站点可达性</string>
+    <string name="netdiag_run">开始诊断</string>
+    <string name="netdiag_rerun">重新诊断</string>
+    <string name="netdiag_running">正在诊断…</string>
+    <string name="netdiag_all_ok">全部通过</string>
+    <string name="netdiag_has_fail">发现问题</string>
+    <string name="netdiag_has_warn">部分异常</string>
+    <string name="netdiag_section">检测项目</string>
+    <string name="netdiag_tip">逐项排查可定位到具体环节，比只看「网络异常」更有用</string>
+    <string name="netdiag_score">健康度</string>
 </resources>
