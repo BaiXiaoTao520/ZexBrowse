@@ -5422,7 +5422,7 @@ private fun BrowserDownloadChannelCard(onClick: () -> Unit) {
     ChannelCard(
         title = stringResource(R.string.browser_download),
         subtitle = stringResource(R.string.browser_download_sub),
-        icon = Icons.Default.Public,
+        icon = Icons.Rounded.Public,
         tintContainer = MaterialTheme.colorScheme.secondaryContainer,
         tintContent = MaterialTheme.colorScheme.onSecondaryContainer,
         onClick = onClick
