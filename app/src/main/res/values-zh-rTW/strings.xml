@@ -721,4 +721,22 @@
     <string name="incognito_exit">離開無痕瀏覽</string>
     <string name="incognito_point_limit">無痕模式只清除本機資料，網站仍可能透過 IP、帳號登入或瀏覽器指紋識別到你</string>
     <string name="incognito_exit_all">離開無痕</string>
+    <string name="recommend_cat_tools">工具與效率</string>
+    <string name="recommend_cat_store">應用程式商店</string>
+    <string name="recommend_cat_game">遊戲與模擬</string>
+    <string name="recommend_cat_create">創作與設計</string>
+    <string name="recommend_cat_share">分享與社群</string>
+    <string name="recommend_cat_count">共 %1$d 款</string>
+    <string name="recommend_cat_empty">該分類下目前沒有內容</string>
+    <string name="netdiag_title">網路診斷</string>
+    <string name="netdiag_sub">檢測鏈路、DNS、延遲與站點可達性</string>
+    <string name="netdiag_run">開始診斷</string>
+    <string name="netdiag_rerun">重新診斷</string>
+    <string name="netdiag_running">正在診斷…</string>
+    <string name="netdiag_all_ok">全部通過</string>
+    <string name="netdiag_has_fail">發現問題</string>
+    <string name="netdiag_has_warn">部分異常</string>
+    <string name="netdiag_section">檢測項目</string>
+    <string name="netdiag_tip">逐項排查可定位到具體環節，比只看「網路異常」更有用</string>
+    <string name="netdiag_score">健康度</string>
 </resources>
