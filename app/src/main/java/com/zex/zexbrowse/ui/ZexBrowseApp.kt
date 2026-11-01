@@ -205,6 +205,7 @@ import com.zex.zexbrowse.data.decodeCustomSearchEngines
 import com.zex.zexbrowse.data.DownloadEntity
 import com.zex.zexbrowse.data.encodeCustomSearchEngines
 import com.zex.zexbrowse.data.LemwoodMirror
+import com.zex.zexbrowse.data.MirrorChyan
 import com.zex.zexbrowse.data.NetworkDiagnostics
 import com.zex.zexbrowse.data.NetworkProbe
 import com.zex.zexbrowse.data.RecommendCategory
@@ -5203,6 +5204,12 @@ private fun AboutScreen(
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.s403))
             }
+            // Mirror酱高速下载：放在 GitHub 入口之后，属于同一类「获取安装包」的辅助入口，
+            // 点击跳转网页，应用内不参与分发。
+            // rid 未注入时整体不展示，避免跳到 ?rid= 空参数页
+            if (MirrorChyan.isAvailable) {
+                MirrorChyanChannelCard(onClick = { openInBrowser(context, MirrorChyan.projectUrl()) })
+            }
             OutlinedButton(onClick = {
                 val request = ++contributorsRequest
                 contributors = null
@@ -5391,6 +5398,79 @@ private fun LemwoodChannelCard(onClick: () -> Unit) {
     }
 }
 
+/**
+ * Mirror酱高速下载卡片（关于页与发现新版本弹窗共用）。
+ *
+ * Mirror酱不支持应用内下载，点击直接跳转浏览器项目页。
+ * CDK 只用于构建期的版本与日志查询，不参与下载：分发由网页侧完成。
+ */
+@Composable
+private fun MirrorChyanChannelCard(onClick: () -> Unit) {
+    ChannelCard(
+        title = stringResource(R.string.mirrorchyan_download),
+        subtitle = stringResource(R.string.mirrorchyan_download_sub),
+        icon = Icons.Rounded.Speed,
+        tintContainer = MaterialTheme.colorScheme.primaryContainer,
+        tintContent = MaterialTheme.colorScheme.onPrimaryContainer,
+        onClick = onClick
+    )
+}
+
+/** GitHub 直链浏览器下载卡片：与「下载」同源，只是改由浏览器接管 */
+@Composable
+private fun BrowserDownloadChannelCard(onClick: () -> Unit) {
+    ChannelCard(
+        title = stringResource(R.string.browser_download),
+        subtitle = stringResource(R.string.browser_download_sub),
+        icon = Icons.Default.Public,
+        tintContainer = MaterialTheme.colorScheme.secondaryContainer,
+        tintContent = MaterialTheme.colorScheme.onSecondaryContainer,
+        onClick = onClick
+    )
+}
+
+/** 弹窗内的通道卡片：图标 + 标题 + 副标题 + 箭头，三者视觉一致 */
+@Composable
+private fun ChannelCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tintContainer: androidx.compose.ui.graphics.Color,
+    tintContent: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                color = tintContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = tintContent, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 /** 发现新版本的简介窗口：只负责展示更新说明并提供下载入口 */
 @Composable
 private fun UpdateIntroDialog(
@@ -5419,8 +5499,8 @@ private fun UpdateIntroDialog(
                 ) {
                     Text(release.notes.ifBlank { stringResource(R.string.s427) })
                 }
-                // 无 GitHub 直链但可走镜像站时，不当作错误提示
-                if (effectiveUrl.isBlank() && !release.lemwoodAvailable) {
+                // 无任何可下载地址且无镜像渠道时才提示错误
+                if (effectiveUrl.isBlank() && !release.lemwoodAvailable && !MirrorChyan.isAvailable) {
                     Text(stringResource(R.string.s428), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
                 // 镜像站高速通道：站点已同步该版本时才渲染，
@@ -5433,11 +5513,34 @@ private fun UpdateIntroDialog(
                         }
                     )
                 }
+                // Mirror酱高速下载：不支持应用内下载，点击直接跳转项目页，
+                // 由网页侧完成分发。与柠枺卡片并列展示，两者互不影响。
+                // rid 未注入时整体不展示：否则会跳到 ?rid= 空参数页，等于死链
+                if (MirrorChyan.isAvailable) {
+                    MirrorChyanChannelCard(
+                        onClick = {
+                            openInBrowser(context, MirrorChyan.projectUrl())
+                            onDismiss()
+                        }
+                    )
+                }
+                // GitHub 直链浏览器下载：与上面的应用内下载同一源，
+                // 只是把系统下载管理器让给浏览器，适合想手动指定保存位置或使用下载工具的用户
+                if (effectiveUrl.isNotBlank()) {
+                    BrowserDownloadChannelCard(
+                        onClick = {
+                            openInBrowser(context, effectiveUrl)
+                            onDismiss()
+                        }
+                    )
+                }
             }
         },
         confirmButton = {
+            // 应用内下载需要可直接请求的直链：只有 GitHub assets 满足；
+            // Mirror酱 与 柠枺 都要经浏览器完成，不能作为应用内下载地址
             Button(
-                enabled = effectiveUrl.isNotBlank() || release.lemwoodAvailable,
+                enabled = effectiveUrl.isNotBlank(),
                 onClick = onStartDownload
             ) {
                 Icon(Icons.Default.Download, null)

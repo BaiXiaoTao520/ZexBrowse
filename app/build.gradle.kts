@@ -19,6 +19,19 @@ val lemwoodLauncherId: String = (System.getenv("LEMWOOD_LAUNCHER_ID")
     ?: project.findProperty("lemwood.launcherId")?.toString()
     ?: "").trim()
 
+// Mirror酱 CDK：同样不写入源码。密钥一旦进仓库，任何人克隆即得，
+// 官方文档也明确要求避免 CDK 泄漏。CI 用 Secrets 注入，本地可用 gradle.properties。
+// 与柠枺不同，这里缺失不阻断构建：不带 CDK 仍能检查更新（只是少一项来源）。
+val mirrorChyanCdk: String = (System.getenv("MIRRORCHYAN_CDK")
+    ?: project.findProperty("mirrorchyan.cdk")?.toString()
+    ?: "").trim()
+
+// Mirror酱资源 ID：与 CDK 同级保密，同样由 secret 注入。
+// 为空时 MirrorChyan.isAvailable 为 false，相关入口不展示且不发请求。
+val mirrorChyanRid: String = (System.getenv("MIRRORCHYAN_RID")
+    ?: project.findProperty("mirrorchyan.rid")?.toString()
+    ?: "").trim()
+
 /**
  * 发布构建必须带柠枺镜像配置。
  *
@@ -69,8 +82,8 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 37
-        versionCode = 77
-        versionName = "11.1.5"
+        versionCode = 78
+        versionName = "11.1.6"
         ndk { abiFilters += "arm64-v8a" }
 
         // GeckoView 内核主版本号（如 "158.0"），供 UA 生成与兜底使用
@@ -84,6 +97,15 @@ android {
 
         val escapedLauncherId = lemwoodLauncherId.replace("\\", "\\\\").replace("\"", "\\\"")
         buildConfigField("String", "LEMWOOD_LAUNCHER_ID", "\"$escapedLauncherId\"")
+
+        // Mirror酱 CDK：只作为构建期注入的字符串，不入库、不打印。
+        // 为空时应用退化为「仅用它检查版本号」，不影响从 GitHub 下载。
+        val escapedCdk = mirrorChyanCdk.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "MIRRORCHYAN_CDK", "\"$escapedCdk\"")
+
+        // Mirror酱资源 ID：与 CDK 同级保密，为空时相关功能整体不激活
+        val escapedRid = mirrorChyanRid.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "MIRRORCHYAN_RID", "\"$escapedRid\"")
     }
 
     splits {

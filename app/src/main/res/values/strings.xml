@@ -739,4 +739,8 @@
     <string name="netdiag_section">检测项目</string>
     <string name="netdiag_tip">逐项排查可定位到具体环节，比只看「网络异常」更有用</string>
     <string name="netdiag_score">健康度</string>
+    <string name="mirrorchyan_download">Mirror酱高速下载</string>
+    <string name="mirrorchyan_download_sub">国内 CDN 加速，跳转网页完成下载</string>
+    <string name="browser_download">浏览器下载</string>
+    <string name="browser_download_sub">用浏览器下载 GitHub 直链安装包</string>
 </resources>

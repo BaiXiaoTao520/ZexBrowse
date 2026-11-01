@@ -739,4 +739,8 @@
     <string name="netdiag_section">Checks</string>
     <string name="netdiag_tip">Per-item results point at the failing stage instead of a generic network error</string>
     <string name="netdiag_score">Health</string>
+    <string name="mirrorchyan_download">MirrorChyan fast download</string>
+    <string name="mirrorchyan_download_sub">Mainland CDN acceleration; completes in the browser</string>
+    <string name="browser_download">Browser download</string>
+    <string name="browser_download_sub">Download the GitHub direct-link APK in a browser</string>
 </resources>
