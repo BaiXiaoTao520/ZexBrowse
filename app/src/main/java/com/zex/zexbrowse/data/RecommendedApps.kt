@@ -125,6 +125,16 @@ val appShareRecommendation = RecommendedApp(
     """.trimIndent()
 )
 
+val reShareRecommendation = RecommendedApp(
+    name = "ReShare",
+    version = "",
+    summary = "一个纯净的应用分享平台，为用户提供优质的应用下载服务",
+    downloadUrl = "https://resourceshare.top",
+    icon = Icons.Rounded.Storefront,
+    category = RecommendCategory.STORE,
+    description = "RESHARE是一个纯净的应用下载平台， 为您提供海量精选应用，支持静默安装， 让下载更简单，使用更安心。"
+)
+
 val fluffychatRecommendation = RecommendedApp(
     name = "FluffyChat",
     version = "2.11.3",
@@ -303,12 +313,14 @@ val recommendedApps = listOf(
     reveriePaintRecommendation,
     zalithLauncherRecommendation,
     tomatoRecommendation,
-    komiStoreRecommendation,
     cccodroidRecommendation,
     coolMonitorRecommendation,
     twilightToolboxRecommendation,
     aEmulatorRecommendation,
-    astralGameRecommendation
+    astralGameRecommendation,
+    // 商店类：ReShare 位于列表中部，Komi Store 固定排在最后一位
+    reShareRecommendation,
+    komiStoreRecommendation
 )
 
 /**
