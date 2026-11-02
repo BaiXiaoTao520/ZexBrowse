@@ -179,6 +179,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1638,6 +1639,13 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
     // 重试计数：每次点重试递增，驱动下面的 LaunchedEffect 重新探测
     var probeAttempt by remember { mutableStateOf(0) }
 
+    // 分类页是应用推荐内部的二级页面：返回键与侧滑返回应先退回分类列表。
+    // 本回调注册在页面层，晚于外层整页返回的回调注册，因此优先级更高；
+    // 若不加这一层，系统返回会直接弹出导航栈里的本页，表现为「跳回首页」。
+    BackHandler(enabled = openCategory != null) {
+        openCategory = null
+    }
+
     // 已进入分类页：直接交给分类页，本页不再渲染任何内容
     val category = openCategory
     if (category != null) {
@@ -1663,17 +1671,10 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
         screenState = if (ok) RecommendScreenState.READY else RecommendScreenState.OFFLINE
     }
 
-    // 警示牌显示 20 秒后自动收起。
+    // 警示牌默认展开，由用户手动收起。
     // 状态用 remember 而非 rememberSaveable：离开页面时组合被销毁，
-    // 重新进入会重建并重新计时，正好符合「每次进入都重新计时」的要求。
-    var noticeVisible by remember { mutableStateOf(true) }
-
-    LaunchedEffect(screenState) {
-        if (screenState != RecommendScreenState.READY) return@LaunchedEffect
-        noticeVisible = true
-        kotlinx.coroutines.delay(20_000)
-        noticeVisible = false
-    }
+    // 重新进入会重建并回到展开状态，避免上次的收起状态粘住。
+    var noticeExpanded by remember { mutableStateOf(true) }
 
     Scaffold(
         topBar = {
@@ -1745,17 +1746,12 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                         Text(stringResource(R.string.s065), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     // 法规与服务调整警示牌：置于列表标题之后、分类卡片之前。
-                    // 收起时同时做淡出与垂直收缩，列表下方内容随之上移。
+                    // 收起/展开由警示牌自己在内部处理，列表下方内容随之伸缩。
                     item {
-                        AnimatedVisibility(
-                            visible = noticeVisible,
-                            enter = fadeIn(animationSpec = tween(240)) +
-                                expandVertically(animationSpec = tween(320)),
-                            exit = fadeOut(animationSpec = tween(240)) +
-                                shrinkVertically(animationSpec = tween(320))
-                        ) {
-                            RecommendationServiceNotice()
-                        }
+                        RecommendationServiceNotice(
+                            expanded = noticeExpanded,
+                            onToggle = { noticeExpanded = !noticeExpanded }
+                        )
                     }
                     items(recommendCategoryMeta) { meta ->
                         val count = countInCategory(meta.category)
@@ -2070,32 +2066,74 @@ private fun RecommendationCategoryCard(
  * 法规与服务调整警示牌。
  *
  * 用 errorContainer 而非 error，保证在深浅色下都能读且不至于像错误弹窗那样刺眼。
+ * 可收起：收起后只保留图标与标题，正文则随动效伸缩。
+ *
+ * @param expanded 正文是否展开
+ * @param onToggle 点击标题行或右侧按钮时切换展开状态
  */
 @Composable
-private fun RecommendationServiceNotice() {
+private fun RecommendationServiceNotice(expanded: Boolean, onToggle: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
         shape = MaterialTheme.shapes.large
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Icon(
-                Icons.Rounded.WarningAmber,
-                null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.error
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+        Column(Modifier.fillMaxWidth()) {
+            // 标题行始终可点：图标 + 标题 + 「展开/收起」+ 旋转箭头
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Rounded.WarningAmber,
+                    null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.width(10.dp))
                 Text(
                     stringResource(R.string.recommend_notice_title),
-                    style = MaterialTheme.typography.titleSmall
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(
+                        if (expanded) R.string.notice_collapse else R.string.notice_expand
+                    ),
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Spacer(Modifier.width(4.dp))
+                // 箭头随展开状态旋转，给出与文字一致的视觉反馈
+                val arrowRotation by animateFloatAsState(
+                    targetValue = if (expanded) 90f else 0f,
+                    animationSpec = tween(220),
+                    label = "noticeArrowRotation"
+                )
+                Icon(
+                    Icons.Default.ArrowForward,
+                    null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .rotate(arrowRotation)
+                )
+            }
+            // 正文：展开/收起同时做淡入淡出与垂直伸缩，收起后不留空隙
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn(animationSpec = tween(180)) +
+                    expandVertically(animationSpec = tween(260)),
+                exit = fadeOut(animationSpec = tween(140)) +
+                    shrinkVertically(animationSpec = tween(220))
+            ) {
                 Text(
                     stringResource(R.string.recommend_notice_body),
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(start = 44.dp, end = 14.dp, bottom = 12.dp)
                 )
             }
         }

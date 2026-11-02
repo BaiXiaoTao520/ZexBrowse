@@ -687,6 +687,8 @@
     <string name="recommend_notice_title">服務調整說明</string>
     <string name="recommend_notice_body">根據相關法律法規要求，ZexBrowse 應用推薦中的直鏈檔案下載服務，現已停止對大陸提供服務（此調整僅涉及應用推薦內的直鏈下載，與瀏覽器自身的下載功能無關）。</string>
     <string name="recommend_network_tip">以上下載位址均為境外直鏈，不保證在大陸地區的下載穩定性；若速度緩慢或無法連線，請酌情更換網路環境後重試。</string>
+    <string name="notice_expand">展開</string>
+    <string name="notice_collapse">收起</string>
     <string name="debug_title">偵錯模式</string>
     <string name="debug_sub">開發者診斷與實驗工具</string>
     <string name="debug_section_tools">可用工具</string>
