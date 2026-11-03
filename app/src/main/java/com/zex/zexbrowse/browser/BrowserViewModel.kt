@@ -371,6 +371,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build())
         val id = UUID.randomUUID().toString()
+        val connectionSecurity = ConnectionSecurityState()
         // 媒体播放委托：播放时启动前台服务 + 申请音频焦点，停止时释放（修复后台/锁屏音频断续）
         mediaPlayback.attach(session)
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
@@ -396,8 +397,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 update(id) { tab ->
                     // 加载失败后 Gecko 会导航到 about:blank 之类的内部页；
                     // 此时必须保留 failed 与失败网址，否则错误页会被冲掉、变成空白页。
-                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true)
-                    else tab.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
+                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true, risk = connectionSecurity.onPageStart(tab.url))
+                    else tab.copy(url = url, risk = connectionSecurity.onPageStart(url), loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
                 }
             }
             override fun onPageStop(session: GeckoSession, success: Boolean) {
@@ -425,8 +426,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val secure = securityInfo.isSecure && !securityInfo.isException
                 update(id) { tab ->
                     tab.copy(
-                        risk = SecurityScanner.assess(
-                            url = tab.url,
+                        risk = connectionSecurity.onSecurityChange(
+                            securityOrigin = securityInfo.origin,
                             isSecure = secure,
                             mixedActive = mixedActive,
                             mixedPassive = mixedPassive,
@@ -513,10 +514,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
                 if (url != null) {
                     android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url")
-                    val risk = SecurityScanner.assessUrl(url)
                     update(id) { tab ->
                         if (url.startsWith("about:") && tab.failed) tab
-                        else tab.copy(url = url, risk = risk)
+                        else tab.copy(url = url, risk = connectionSecurity.onLocationChange(url))
                     }
                 }
             }
