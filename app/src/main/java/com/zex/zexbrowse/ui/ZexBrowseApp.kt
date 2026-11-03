@@ -1235,9 +1235,12 @@ private fun PageContent(
             onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
             onOpen = { address ->
-                // 记录搜索历史（网址也一并记下，便于重复访问）
-                scope.launch { settingsStore.addSearchHistory(address) }
-                browserViewModel.load(address); navigate(Page.BROWSER)
+                val tab = browserViewModel.selected
+                // 只为目标普通标签记录搜索历史（网址也一并记下，便于重复访问）
+                if (tab != null && !tab.incognito) {
+                    scope.launch { settingsStore.addSearchHistory(address) }
+                }
+                browserViewModel.load(address, tab); navigate(Page.BROWSER)
             },
             onHistory = { navigate(Page.HISTORY) },
             onSettings = { navigate(Page.SETTINGS) },
@@ -1515,7 +1518,8 @@ private fun ClockText() {
 
 @Composable
 private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
+    // 首页可能复用无痕标签；输入内容不能写入 Activity 的 savedInstanceState。
+    var query by remember { mutableStateOf("") }
     val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
     var editingBookmark by remember { mutableStateOf<QuickSite?>(null) }
