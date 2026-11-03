@@ -809,7 +809,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 放行前必须持有系统录音权限：未授权时先走系统询问，用户允许后才回传引擎。
     browserViewModel.mediaPermissionHandler = { uri, audio, callback ->
         val microphoneId = audio.firstOrNull()?.id
-        val site = siteHost(uri)
+        val site = microphoneOrigin(uri)
         val grantOrRequestSystem = {
             if (hasRecordAudioPermission(context)) callback.grant(null, microphoneId)
             else {
@@ -823,9 +823,10 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             when (stored.micPolicy) {
                 "allow" -> grantOrRequestSystem()
                 "deny" -> callback.reject()
-                else -> when (stored.siteMicPermissions[site]) {
-                    "allow" -> grantOrRequestSystem()
-                    "deny" -> callback.reject()
+                else -> when {
+                    site == null -> callback.reject()
+                    stored.siteMicPermissions[site] == "allow" -> grantOrRequestSystem()
+                    stored.siteMicPermissions[site] == "deny" -> callback.reject()
                     else -> {
                         pendingMicCallback.value = callback
                         pendingMicId.value = microphoneId
