@@ -9,6 +9,7 @@ package com.zex.zexbrowse.data
 import android.content.Context
 import androidx.annotation.StringRes
 import com.zex.zexbrowse.R
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * 网页安全扫描。
@@ -138,13 +139,16 @@ object SecurityScanner {
      * 判定顺序即优先级：越具体的伪造手法越先命中。
      */
     fun assessUrl(rawUrl: String): RiskAssessment {
-        val url = rawUrl.trim()
+        // Gecko filters these characters before parsing an HTTP URL.
+        val url = rawUrl.trim().filterNot { it == '\t' || it == '\r' || it == '\n' }
         if (url.isEmpty()) return RiskAssessment()
-        if (!url.startsWith("http", ignoreCase = true)) return RiskAssessment()
+        if (!url.startsWith("http:", ignoreCase = true) && !url.startsWith("https:", ignoreCase = true)) return RiskAssessment()
 
-        val authority = extractAuthority(url) ?: return RiskAssessment()
-        val host = authority.substringAfterLast('@').substringBefore(':').lowercase()
-        if (host.isBlank()) return RiskAssessment()
+        // Both Gecko and OkHttp treat backslashes as authority/path separators.
+        val authority = url.substringAfter(':').trimStart('/', '\\')
+            .takeWhile { it != '/' && it != '\\' && it != '?' && it != '#' }
+        val parsed = url.toHttpUrlOrNull()
+        val host = parsed?.host.orEmpty()
 
         // 1. 用 @ 掩盖真实主机：http://www.bank.com@evil.cn/
         if (authority.contains('@')) {
@@ -152,6 +156,18 @@ object SecurityScanner {
                 level = RiskLevel.DANGEROUS,
                 reasonRes = R.string.risk_reason_deceptive_url,
                 detailRes = R.string.risk_detail_deceptive_url, detailArgs = listOf(host)
+            )
+        }
+
+        // IDN and escaped hostnames can be interpreted differently by URL parsers.
+        // Do not grant an exemption or skip host rules when their destination is uncertain.
+        val rawHost = if (authority.startsWith('[')) authority.substringBefore(']') + "]"
+            else authority.substringBefore(':')
+        if (parsed == null || rawHost.isEmpty() || rawHost.any { it !in 'a'..'z' && it !in 'A'..'Z' && it !in '0'..'9' && it !in ".-_[]:" }) {
+            return RiskAssessment(
+                level = RiskLevel.DANGEROUS,
+                reasonRes = R.string.risk_reason_ambiguous_url,
+                detailRes = R.string.risk_detail_ambiguous_url
             )
         }
 
@@ -209,13 +225,6 @@ object SecurityScanner {
         }
 
         return RiskAssessment()
-    }
-
-    /** 取出 // 之后、/ ? # 之前的部分（含可能的 user@host:port） */
-    private fun extractAuthority(url: String): String? {
-        val afterScheme = url.substringAfter("://", "")
-        if (afterScheme.isBlank()) return null
-        return afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
     }
 
     private fun isIpAddress(host: String): Boolean =

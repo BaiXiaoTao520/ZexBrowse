@@ -148,6 +148,7 @@
     <string name="s148">Clear browsing history?</string>
     <string name="s149">This cannot be undone.</string>
     <string name="s150">Cleared</string>
+    <string name="clear_data_failed">Could not clear data. Please try again.</string>
     <string name="s151">No system installer found</string>
     <string name="s152">Open file</string>
     <string name="s153">No app can open this file</string>
@@ -447,6 +448,7 @@
     <string name="dl_notify_failed">Download failed</string>
     <string name="dl_channel_name">Browser downloads</string>
     <string name="dl_channel_done">Download complete</string>
+    <string name="dl_err_invalid_name">Enter a file name without path separators. . and .. are not allowed.</string>
     <string name="dl_err_cancelled">Download cancelled</string>
     <string name="dl_err_unknown">Unknown error</string>
     <string name="dl_err_empty_body">The download response was empty</string>
@@ -630,6 +632,8 @@
     <string name="risk_reason_mixed_passive">Some content is unencrypted</string>
     <string name="risk_detail_mixed_passive">Images and similar resources load over plain HTTP. Sign-in is unaffected, but content could be swapped.</string>
     <string name="risk_reason_deceptive_url">Deceptive URL</string>
+    <string name="risk_reason_ambiguous_url">Unclear URL destination</string>
+    <string name="risk_detail_ambiguous_url">The destination of this URL cannot be determined reliably. Check it before continuing.</string>
     <string name="risk_detail_deceptive_url">This link hides the real site behind an "@": you would actually visit %1$s. This is a common phishing trick.</string>
     <string name="risk_reason_known_bad">Known risky site</string>
     <string name="risk_reason_trojan">Suspected trojan or fraud</string>
