@@ -1512,6 +1512,23 @@ private fun ClockText() {
     Text(SimpleDateFormat(pattern, Locale.getDefault()).format(now), style = MaterialTheme.typography.labelSmall)
 }
 
+/**
+ * 首页：品牌标题头、搜索框、应用推荐入口与常用站点。
+ *
+ * 视觉上由整屏竖向氛围色打底，内容层叠在其上滚动。
+ * 交互上负责两件页面级的事：
+ * 1. 搜索框获得焦点时，接管「点击页面空白处」以收起输入态（光晕与键盘一并熄灭）；
+ * 2. 提交搜索后交由 [onOpen] 跳转，历史记录由调用方决定是否写入。
+ *
+ * @param settings 浏览器设置（当前用于读取常用站点列表）
+ * @param searchHistory 历史搜索词，用于输入框下拉建议
+ * @param onRemoveSearchHistory 删除单条历史
+ * @param setQuickSites 保存常用站点（书签）列表
+ * @param onOpen 提交搜索或打开网址
+ * @param onHistory 进入历史页
+ * @param onSettings 进入设置页
+ * @param onAppRecommendations 进入应用推荐页
+ */
 @Composable
 private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -2554,6 +2571,25 @@ private fun RiskySiteDialog(
     )
 }
 
+/**
+ * 地址/搜索输入框，首页与浏览器地址栏共用。
+ *
+ * 外壳是毛玻璃风格：半透明白底、细描边，聚焦时叠三道主色发光环；
+ * 内层 [OutlinedTextField] 的边框与容器全部透明，由外层统一绘制，避免双层描边错位。
+ *
+ * @param value 当前输入内容
+ * @param onValueChange 输入变化
+ * @param onSubmit 按下键盘「前往」时触发
+ * @param modifier 外层布局修饰符
+ * @param onFocusChange 焦点变化（浏览器页用于缩放工具栏等）
+ * @param searchHistory 历史词，输入为空时展示
+ * @param onRemoveHistory 删除单条历史词
+ * @param showSuggestionsPanel 是否启用联想与历史下拉；浏览器页关闭以免遮挡网页
+ * @param security 当前页安全结论；为 null 时不显示护盾
+ * @param onSecurityClick 点击护盾查看详情
+ * @param compact 紧凑模式：浏览器页用更矮的高度
+ * @param onSearchFocusChange 输入态变化，供页面层接管「点空白处收起」
+ */
 @Composable
 private fun AddressInput(
     value: String,
