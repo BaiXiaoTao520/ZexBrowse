@@ -679,9 +679,11 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         // 首帧组合成功：清除「启动进行中」标记，表示本次启动已完成（未崩溃）
         CrashReporter.markStarted(context)
     }
-    val settings by settingsStore.settings.collectAsState(initial = BrowserSettings())
+    val loadedSettings by settingsStore.settings.collectAsState(initial = null)
+    val settings = loadedSettings ?: return
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
+    browserViewModel.securityMode = settings.securityMode
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     // 默认浏览器角色请求：结果由 ON_RESUME 时的 isAppDefaultBrowser 重新检测，这里无需处理返回值
     val defaultBrowserRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
@@ -3012,10 +3014,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     var selectedFileName by remember { mutableStateOf("") }
     var showNewTabDialog by remember { mutableStateOf(false) }
     var showBrowserMenu by remember { mutableStateOf(false) }
-    // 风险站点拦截：目标地址、扫描结论、用户选择继续后的回调
-    var riskySiteTarget by remember { mutableStateOf<String?>(null) }
-    var riskySiteAssessment by remember { mutableStateOf<SecurityScanner.RiskAssessment?>(null) }
-    var riskySiteProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val riskySiteWarnings by viewModel.riskySiteWarnings.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -3090,13 +3089,6 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 
     viewModel.onExternalDownload = { url -> scope.launch { downloadUrl = url } }
 
-    // 安全防护：把模式同步给 ViewModel，并接管风险站点的拦截弹窗
-    LaunchedEffect(settings.securityMode) { viewModel.securityMode = settings.securityMode }
-    viewModel.riskySiteHandler = { url, assessment, proceed ->
-        riskySiteTarget = url
-        riskySiteAssessment = assessment
-        riskySiteProceed = proceed
-    }
     // 正在展示的护盾说明
     var securityDetail by remember { mutableStateOf<Pair<String, SecurityScanner.RiskAssessment>?>(null) }
     // 网页请求选择文件 → 拉起系统文件选择器（原生文件应用），选完回传网页
@@ -3294,24 +3286,14 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         )
     }
     // 风险站点拦截弹窗：默认「返回」，避免误触进入风险页
-    val riskyTarget = riskySiteTarget
-    val riskyAssessment = riskySiteAssessment
-    if (riskyTarget != null && riskyAssessment != null) {
+    val warningTabId = selectedId
+    val riskyWarning = warningTabId?.let { riskySiteWarnings[it] }
+    if (warningTabId != null && riskyWarning != null) {
         RiskySiteDialog(
-            host = Uri.parse(riskyTarget).host.orEmpty(),
-            assessment = riskyAssessment,
-            onProceed = {
-                val proceed = riskySiteProceed
-                riskySiteTarget = null
-                riskySiteAssessment = null
-                riskySiteProceed = null
-                proceed?.invoke()
-            },
-            onBack = {
-                riskySiteTarget = null
-                riskySiteAssessment = null
-                riskySiteProceed = null
-            }
+            host = Uri.parse(riskyWarning.uri).host.orEmpty(),
+            assessment = riskyWarning.assessment,
+            onProceed = { viewModel.proceedRiskySite(warningTabId, riskyWarning) },
+            onBack = { viewModel.dismissRiskySite(warningTabId, riskyWarning) }
         )
     }
     if (downloadUrl != null) {
