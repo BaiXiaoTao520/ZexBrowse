@@ -11,7 +11,7 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Dao
@@ -30,11 +30,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
-// DataStore 文件损坏兜底：异常退出/断电可能把偏好文件写坏，默认会抛 CorruptionException，
-// 若直接读取会让应用每次启动都闪退。这里改为遇到损坏直接重建为空偏好，保证应用可启动。
+// If settings cannot be recovered, keep cookie storage disabled until the user enables it.
+private val cookiesKey = booleanPreferencesKey("cookies")
+private fun safeFallbackPreferences() = mutablePreferencesOf(cookiesKey to false)
+
 private val Context.dataStore by preferencesDataStore(
     name = "zexbrowse_settings",
-    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+    corruptionHandler = ReplaceFileCorruptionHandler { safeFallbackPreferences() }
 )
 
 @Entity(tableName = "history")
@@ -258,7 +260,6 @@ fun resolveCustomSearchTemplate(settings: BrowserSettings): String {
 class SettingsStore(private val context: Context) {
     private val modeKey = stringPreferencesKey("theme_mode")
     private val forceDarkWebKey = booleanPreferencesKey("force_dark_web")
-    private val cookiesKey = booleanPreferencesKey("cookies")
     private val apkHashKey = booleanPreferencesKey("apk_hash")
     private val userAgentModeKey = stringPreferencesKey("user_agent_mode")
     private val customUserAgentTitleKey = stringPreferencesKey("custom_user_agent_title")
@@ -296,7 +297,7 @@ class SettingsStore(private val context: Context) {
     private val colorThemeKey = stringPreferencesKey("color_theme")
     private val customColorKey = stringPreferencesKey("custom_color")
 
-    val settings = context.dataStore.data.catch { emit(emptyPreferences()) }.map { preferences ->
+    val settings = context.dataStore.data.catch { emit(safeFallbackPreferences()) }.map { preferences ->
         BrowserSettings(
             darkMode = preferences[modeKey] ?: "system",
             forceDarkWeb = preferences[forceDarkWebKey] ?: true,

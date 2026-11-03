@@ -680,11 +680,13 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         // 首帧组合成功：清除「启动进行中」标记，表示本次启动已完成（未崩溃）
         CrashReporter.markStarted(context)
     }
-    val loadedSettings by settingsStore.settings.collectAsState(initial = null)
-    val settings = loadedSettings ?: return
+    // Wait for persisted settings before opening the first session or handling an incoming URL.
+    val storedSettings: BrowserSettings? by settingsStore.settings.collectAsState(initial = null)
+    val settings = storedSettings ?: return
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
     browserViewModel.securityMode = settings.securityMode
+    browserViewModel.syncSettings(settings)
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     // 默认浏览器角色请求：结果由 ON_RESUME 时的 isAppDefaultBrowser 重新检测，这里无需处理返回值
     val defaultBrowserRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
@@ -807,7 +809,6 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         settingsStore.customSearch("", "")
     }
 
-    browserViewModel.browserSettings = settings
     // 语言镜像同步：DataStore 是唯一事实源，SharedPreferences 只是给 attachBaseContext 的同步读缓存。
     // 两者可能因异常退出/备份恢复而不一致，启动时以 DataStore 为准修正一次。
     //
