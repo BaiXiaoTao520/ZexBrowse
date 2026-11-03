@@ -15,6 +15,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Dao
+import androidx.room.ColumnInfo
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Insert
@@ -66,6 +67,7 @@ data class DownloadEntity(
     val errorMessage: String = "",
     /** 服务器返回的 ETag：续传时用 If-Range 校验文件是否还是同一份 */
     val etag: String = "",
+    @ColumnInfo(defaultValue = "0") val ownsTarget: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -128,7 +130,7 @@ interface BrowserDao {
     suspend fun clearHistory()
 }
 
-@Database(entities = [HistoryEntity::class, BookmarkEntity::class, DownloadEntity::class], version = 3, exportSchema = false)
+@Database(entities = [HistoryEntity::class, BookmarkEntity::class, DownloadEntity::class], version = 4, exportSchema = false)
 abstract class BrowserDatabase : RoomDatabase() {
     abstract fun dao(): BrowserDao
     abstract fun downloadDao(): DownloadDao
@@ -148,11 +150,18 @@ abstract class BrowserDatabase : RoomDatabase() {
             }
         }
 
+        // Older downloads may have reused a user's file; their ownership is unknown.
+        private val migration3To4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE downloads ADD COLUMN ownsTarget INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var instance: BrowserDatabase? = null
 
         fun create(context: Context): BrowserDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, BrowserDatabase::class.java, "zexbrowse.db")
-                .addMigrations(migration1To2, migration2To3)
+                .addMigrations(migration1To2, migration2To3, migration3To4)
                 .build()
                 .also { instance = it }
         }

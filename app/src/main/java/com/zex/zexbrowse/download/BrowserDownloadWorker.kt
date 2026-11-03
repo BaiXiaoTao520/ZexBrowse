@@ -87,6 +87,11 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val id = inputData.getString(KEY_ID) ?: return@withContext Result.failure()
         val url = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
+        val record = database.downloadDao().find(id) ?: return@withContext Result.failure()
+        if (!record.ownsTarget || record.targetUri != uri.toString()) {
+            database.downloadDao().finishWithMessage(id, "failed", applicationContext.getString(R.string.dl_err_no_resume))
+            return@withContext Result.failure()
+        }
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
         // 下载过程中可能被响应头纠正为真实文件名，后续通知与记录都用这个变量
         var displayName = fileName
@@ -113,9 +118,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             // 续传起点：上次暂停/中断时已经落盘的字节数。
             // 只有服务端明确支持 Range 并返回 206 时才会从这里开始，
             // 否则（返回 200）必须从头写，否则会拼出损坏文件。
-            val record = database.downloadDao().find(id)
-            var startOffset = record?.downloadedBytes?.coerceAtLeast(0L) ?: 0L
-            val ifRange = record?.etag.orEmpty()
+            var startOffset = record.downloadedBytes.coerceAtLeast(0L)
+            val ifRange = record.etag
             if (localBin != null) {
                 // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完。
                 // fail 一出现就直接跳出，不再把剩下的超时时间白等完（否则界面会停在「正在下载」不动）。
@@ -155,7 +159,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 if (!response.isSuccessful) { response.close(); error(applicationContext.getString(R.string.dl_err_http, response.code)) }
                 // 兜底：若入队时仍未拿到真实文件名，用本次下载的响应头纠正，
                 // 保证「显示的文件名」与「实际落盘文件名」一致。
-                if (DownloadFileName.isGeneric(displayName)) {
+                if (DownloadFileName.isGeneric(inputData.getString(KEY_ORIGINAL_NAME) ?: displayName)) {
                     val fromHeader = DownloadFileName.fromContentDisposition(response.header("Content-Disposition"))
                     if (fromHeader != null && !DownloadFileName.isGeneric(fromHeader)) {
                         displayName = fromHeader
@@ -174,7 +178,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 totalBytes = total
                 // 存下 ETag，下次续传时用 If-Range 校验，避免服务器换了文件还硬拼
                 val etag = response.header("ETag").orEmpty()
-                if (etag.isNotBlank() && etag != record?.etag) {
+                if (etag.isNotBlank() && etag != record.etag) {
                     database.downloadDao().updateEtag(id, etag)
                 }
             }
@@ -457,6 +461,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         const val KEY_URL = "url"
         const val KEY_URI = "uri"
         const val KEY_FILE_NAME = "file_name"
+        const val KEY_ORIGINAL_NAME = "original_name"
         const val KEY_EXPECTED_HASH = "expected_hash"
         const val KEY_PROGRESS = "progress"
         // 本地已捕获的响应体临时文件路径（onExternalResponse 当场读下来的那份数据）
