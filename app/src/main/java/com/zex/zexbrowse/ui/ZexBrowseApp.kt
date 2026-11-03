@@ -49,7 +49,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -190,6 +189,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1519,54 +1519,65 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     var showQuickSiteDialog by remember { mutableStateOf(false) }
     var editingBookmark by remember { mutableStateOf<QuickSite?>(null) }
 
-    // 头图高度按可用高度取比例：固定 300dp 在矮屏上（或分屏、横屏）会占掉大半屏，
-    // 这里跟屏幕高度挂钩，保证短屏也留得下搜索框与常用站点。
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val headerHeight = maxHeight * 0.42f
-        // 顶部渐变头图：作为整页的视觉基底。
-        // 用无限循环的相位驱动主色与第三色、第二色之间的颜色插值，让色相缓慢往复，
-        // 颜色每次组合都从主题重新推导，切换主题或深浅色后立即跟着变。
-        val gradientTransition = rememberInfiniteTransition(label = "homeHeaderGradient")
-        val gradientPhase by gradientTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 14_000, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "homeHeaderGradientPhase"
-        )
-        // 相位参与颜色插值：两个端点颜色随相位互相靠近再拉开，
-        // 这样即使渐变几何固定，色相也在持续变化。
-        // 浅色深色两套主题都能用：全部从 colorScheme 推导，不写死具体色值。
-        val primaryContainer = MaterialTheme.colorScheme.primaryContainer
-        val tertiaryContainer = MaterialTheme.colorScheme.tertiaryContainer
-        val secondaryContainer = MaterialTheme.colorScheme.secondaryContainer
-        val shiftedPrimary = androidx.compose.ui.graphics.lerp(primaryContainer, tertiaryContainer, gradientPhase * 0.6f)
-        val shiftedTertiary = androidx.compose.ui.graphics.lerp(tertiaryContainer, secondaryContainer, gradientPhase * 0.6f)
-        val headerColors = listOf(
-            shiftedPrimary.copy(alpha = 0.85f),
-            shiftedTertiary.copy(alpha = 0.55f),
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.40f),
-            shiftedPrimary.copy(alpha = 0.12f),
-            Color.Transparent
-        )
-        // 相位 0 时渐变刚好从可见区域顶部开始，相位 1 时整体向上滑出 400px，
-        // 色带因此持续流动。偏移取负值：起点始终位于可见区域之外，
-        // 画面里既不会出现零点之前那段实色，也不会把渐变整块推出画面以外。
-        // 端点用 Float.POSITIVE_INFINITY 而非像素值：Brush 的 start/end 是相对
-        // 绘制区域计算的，给 1f 会让渐变塌到 1px 以内、退化成近似纯色。
-        // 注意：verticalGradient 没有 startX/endX 参数，横向偏移只能用 linearGradient。
-        val sweep = -gradientPhase * 400f
+    val focusManager = LocalFocusManager.current
+    // 搜索框是否处于输入态：用于决定要不要在页面级别接管“点空白处”
+    var searchFocused by remember { mutableStateOf(false) }
+
+    // 无限循环的相位：驱动顶部色的色相缓慢往复（14 秒一趟）
+    val gradientTransition = rememberInfiniteTransition(label = "homeHeaderGradient")
+    val gradientPhase by gradientTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 14_000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "homeHeaderGradientPhase"
+    )
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            // 输入态下点页面其他位置即退出输入。必须挂在页面根节点：
+            // 挂在输入框自己身上时，框外区域的点击根本不会派发到它。
+            // 用 Main 阶段判定：输入框、卡片、按钮这些子节点会先把本次按下标记为已消费，
+            // 剩下未消费的按下才算“点了空白处”，不会误伤控件。
+            .pointerInput(searchFocused) {
+                if (!searchFocused) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Main)
+                        if (event.type != PointerEventType.Press) continue
+                        if (event.changes.any { it.isConsumed }) continue
+                        focusManager.clearFocus()
+                    }
+                }
+            }
+    ) {
+        // 首页氛围色：整屏竖向渐变，起于主色、终于页面背景色。
+        // 三个关键点：
+        // 1) 铺满整屏而不是只铺顶部一条，否则中途会出现一条突兀的颜色边界（直线）；
+        // 2) 收尾色用 surface 而不是 Color.Transparent：透明是「透明黑」，
+        //    插值中途会泛灰，看上去像脏了一条；收尾到实色才能真正羽化进背景；
+        // 3) 用分段 colorStops 让衰减更缓，顶部柔和、底部彻底并入背景。
+        val surfaceColor = MaterialTheme.colorScheme.surface
+        val primaryTone = MaterialTheme.colorScheme.primaryContainer
+        val tertiaryTone = MaterialTheme.colorScheme.tertiaryContainer
+        val secondaryTone = MaterialTheme.colorScheme.secondaryContainer
+        // 相位参与色相插值：两两颜色随相位缓慢靠拢再拉开，色相持续微变
+        val topTone = androidx.compose.ui.graphics.lerp(primaryTone, tertiaryTone, gradientPhase * 0.5f)
+        val midTone = androidx.compose.ui.graphics.lerp(tertiaryTone, secondaryTone, gradientPhase * 0.5f)
+        val lowTone = androidx.compose.ui.graphics.lerp(secondaryTone, primaryTone, gradientPhase)
         Box(
             Modifier
-                .fillMaxWidth()
-                .height(headerHeight)
+                .fillMaxSize()
                 .background(
-                    Brush.linearGradient(
-                        colors = headerColors,
-                        start = Offset(sweep, 0f),
-                        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                    Brush.verticalGradient(
+                        0.00f to topTone.copy(alpha = 0.80f),
+                        0.22f to midTone.copy(alpha = 0.45f),
+                        0.45f to lowTone.copy(alpha = 0.22f),
+                        0.72f to lowTone.copy(alpha = 0.06f),
+                        1.00f to surfaceColor
                     )
                 )
         )
@@ -1590,6 +1601,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
                 onSubmit = { onOpen(query) },
                 searchHistory = searchHistory,
                 onRemoveHistory = onRemoveSearchHistory,
+                onSearchFocusChange = { searchFocused = it },
                 modifier = Modifier.padding(top = 18.dp)
             )
 
@@ -2557,11 +2569,11 @@ private fun AddressInput(
     security: SecurityScanner.RiskAssessment? = null,
     onSecurityClick: () -> Unit = {},
     // 紧凑模式：浏览器页地址栏用更矮的输入框，把竖向空间留给网页内容与加载条
-    compact: Boolean = false
+    compact: Boolean = false,
+    // 输入态变化通知：首页用它决定是否在页面根节点接管“点空白处收起输入”
+    onSearchFocusChange: (Boolean) -> Unit = {}
 ) {
     var focused by remember { mutableStateOf(false) }
-    // 焦点管理器：输入态下点击页面其他位置时主动清掉焦点，键盘与光晕一起熄灭
-    val focusManager = LocalFocusManager.current
     // 交互源只为了在点击输入框内部时不把这次点击当成「点外面」
     val interactionSource = remember { MutableInteractionSource() }
     val inputShape = RoundedCornerShape(26.dp)
@@ -2600,25 +2612,7 @@ private fun AddressInput(
     val fallbackHistory = value.isNotBlank() && suggestions.isEmpty() && matchedHistory.isNotEmpty()
     val expanded = showSuggestionsPanel && focused && (showHistory || showSuggestions || fallbackHistory)
 
-    Column(
-        modifier.fillMaxWidth().pointerInput(focused) {
-            // 仅在输入态下拦截：点击输入框之外的任意位置就退出输入态。
-            // 用 Main 阶段判断：输入框、清空按钮、联想项这些子节点会在同一个事件上
-            // 把 isConsumed 置为 true，因此点它们不会误伤输入态；剩余未消费的按下
-            // 才算点了页面其他位置。循环常驻，多次点击都能生效。
-            if (!focused) return@pointerInput
-            awaitPointerEventScope {
-                while (true) {
-                    val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Main)
-                    if (event.type != PointerEventType.Press) continue
-                    if (event.changes.any { it.isConsumed }) continue
-                    focusManager.clearFocus()
-                    focused = false
-                    onFocusChange(false)
-                }
-            }
-        }
-    ) {
+    Column(modifier.fillMaxWidth()) {
         // 毛玻璃外层：半透明底 + 细描边，聚焦时叠一层主色发光环。
         // 必须在输入框之前绘制：OutlinedTextField 自身会有不透明的容器色，
         // 若把毛玻璃画在它上面，会盖掉文字。
@@ -2630,6 +2624,9 @@ private fun AddressInput(
                 .drawBehind {
                     val radius = inputShapeRadius.toPx()
                     val corner = CornerRadius(radius, radius)
+                    // 描边默认以路径为中心向两侧各占一半，直接画在边界上会有半个线宽
+                    // 溢出色块之外（看起来“比输入框大一圈”）。下面所有描边都把绘制盒
+                    // 缩小一个线宽、起点偏移半个线宽，让线条完整落在圆角矩形内部。
                     // 半透明底：比不透明容器轻一些，透出背后的动态渐变头图
                     drawRoundRect(
                         color = Color.White.copy(alpha = 0.08f),
@@ -2642,33 +2639,28 @@ private fun AddressInput(
                         cornerRadius = corner
                     )
                     // 描边：常态细而淡，聚焦时交给下面的发光环表达
+                    val borderWidth = 1.dp.toPx()
                     drawRoundRect(
                         color = borderColor.copy(alpha = 0.22f + 0.18f * ringAlpha),
-                        size = size,
-                        cornerRadius = corner,
-                        style = Stroke(width = 1.dp.toPx())
+                        topLeft = Offset(borderWidth / 2f, borderWidth / 2f),
+                        size = Size(size.width - borderWidth, size.height - borderWidth),
+                        cornerRadius = CornerRadius(radius - borderWidth / 2f, radius - borderWidth / 2f),
+                        style = Stroke(width = borderWidth)
                     )
-                    // 发光环：由内向外三道主色描边，透明度递减，形成柔和的光晕
+                    // 发光环：由外向内三道主色描边，透明度递减，形成柔和的光晕
                     if (ringAlpha > 0.01f) {
                         val base = focusColor
-                        drawRoundRect(
-                            color = base.copy(alpha = 0.30f * ringAlpha),
-                            size = size,
-                            cornerRadius = corner,
-                            style = Stroke(width = 5.dp.toPx())
-                        )
-                        drawRoundRect(
-                            color = base.copy(alpha = 0.55f * ringAlpha),
-                            size = size,
-                            cornerRadius = corner,
-                            style = Stroke(width = 2.dp.toPx())
-                        )
-                        drawRoundRect(
-                            color = base.copy(alpha = 0.90f * ringAlpha),
-                            size = size,
-                            cornerRadius = corner,
-                            style = Stroke(width = 1.dp.toPx())
-                        )
+                        listOf(5.dp, 3.dp, 1.5.dp).forEachIndexed { index, strokeDp ->
+                            val strokePx = strokeDp.toPx()
+                            val half = strokePx / 2f
+                            drawRoundRect(
+                                color = base.copy(alpha = (0.16f + 0.22f * index) * ringAlpha),
+                                topLeft = Offset(half, half),
+                                size = Size(size.width - strokePx, size.height - strokePx),
+                                cornerRadius = CornerRadius(radius - half, radius - half),
+                                style = Stroke(width = strokePx)
+                            )
+                        }
                     }
                 }
         ) {
@@ -2681,7 +2673,11 @@ private fun AddressInput(
             // 文字行高约 20dp，16+20+16 恰好 52dp，再压就会把字形裁掉。
             modifier = Modifier.fillMaxWidth()
                 .then(if (compact) Modifier.height(52.dp) else Modifier.heightIn(min = 56.dp))
-                .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
+                .onFocusChanged {
+                    focused = it.isFocused
+                    onFocusChange(it.isFocused)
+                    onSearchFocusChange(it.isFocused)
+                },
             placeholder = { Text(stringResource(R.string.s091), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
             shape = inputShape,
