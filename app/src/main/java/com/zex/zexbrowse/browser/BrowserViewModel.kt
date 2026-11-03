@@ -23,6 +23,7 @@ import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.LemwoodMirror
 import com.zex.zexbrowse.data.SecurityScanner
+import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.resolveCustomSearchTemplate
 import com.zex.zexbrowse.media.MediaPlaybackController
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,9 @@ import java.io.File
 import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
@@ -54,6 +58,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 网页媒体播放期间的前台服务与音频焦点管理（避免后台/锁屏时音频断续）
     private val mediaPlayback = MediaPlaybackController(getApplication())
     private val database = BrowserDatabase.create(application)
+    private val settingsStore = SettingsStore(application)
     private val downloadScheduler = DownloadScheduler(application)
     val downloads = database.downloadDao().observeAll()
     val history = database.dao().history()
@@ -870,21 +875,42 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
     fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
-    fun clearHistory() { applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
-    fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
+    private suspend fun clearHistoryData() {
+        try {
+            database.dao().clearHistory()
+        } finally {
+            settingsStore.clearSearchHistory()
+        }
+    }
+
+    fun clearHistory(onComplete: (Boolean) -> Unit = {}) {
+        applicationScope.launch {
+            val result = runCatching { clearHistoryData() }
+            result.exceptionOrNull()?.let { CrashReporter.record(getApplication(), it) }
+            withContext(Dispatchers.Main) { onComplete(result.isSuccess) }
+        }
+    }
+    fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true, onComplete: (Boolean) -> Unit = {}) {
         var flags = 0L
         if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES
         if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
-        if (flags != 0L) {
-            // storageController 带 @UiThread 断言，必须在主线程取用，否则抛 IllegalThreadStateException
-            val clearFlags = flags
-            applicationScope.launch {
-                runCatching {
-                    withContext(Dispatchers.Main) { runtime.storageController.clearData(clearFlags) }
-                }.onFailure { CrashReporter.record(getApplication(), it) }
+        val clearFlags = flags
+        applicationScope.launch {
+            val historyResult = runCatching { if (history) clearHistoryData() }
+            val storageResult = runCatching {
+                if (clearFlags != 0L) withContext(Dispatchers.Main) {
+                    suspendCoroutine<Unit> { continuation ->
+                        runtime.storageController.clearData(clearFlags).accept(
+                            { continuation.resume(Unit) },
+                            { continuation.resumeWithException(it ?: IllegalStateException("GeckoView clearData failed")) }
+                        )
+                    }
+                }
             }
+            historyResult.exceptionOrNull()?.let { CrashReporter.record(getApplication(), it) }
+            storageResult.exceptionOrNull()?.let { CrashReporter.record(getApplication(), it) }
+            withContext(Dispatchers.Main) { onComplete(historyResult.isSuccess && storageResult.isSuccess) }
         }
-        if (history) applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
     }
     // 退出清理需要不随 ViewModel 销毁而取消的协程，否则进程结束时历史可能未清完
     private fun clearIncognitoContextIfEmpty() {

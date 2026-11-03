@@ -148,6 +148,7 @@
     <string name="s148">清除瀏覽紀錄？</string>
     <string name="s149">此操作無法復原。</string>
     <string name="s150">已清除</string>
+    <string name="clear_data_failed">清除資料失敗，請重試。</string>
     <string name="s151">找不到系統安裝程式</string>
     <string name="s152">開啟檔案</string>
     <string name="s153">找不到可開啟此檔案的應用程式</string>

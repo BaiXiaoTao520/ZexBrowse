@@ -1352,8 +1352,9 @@ private fun PageContent(
             setCookie = { scope.launch { settingsStore.cookies(it) } },
             setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
             clearBrowserData = {
-                browserViewModel.clearBrowserData()
-                Toast.makeText(context, context.getString(R.string.s050), Toast.LENGTH_SHORT).show()
+                browserViewModel.clearBrowserData { success ->
+                    Toast.makeText(context, context.getString(if (success) R.string.s050 else R.string.clear_data_failed), Toast.LENGTH_SHORT).show()
+                }
             },
             onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
             onBack = goBack
@@ -1397,7 +1398,7 @@ private fun PageContent(
             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
             onBack = goBack
         )
-        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
+        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, hasSearchHistory = settings.searchHistory.isNotEmpty(), onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
         Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
             settings = settings,
             onSave = { mode, uri, path ->
@@ -3423,11 +3424,11 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
 private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
 
 @Composable
-private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit, onBack: () -> Unit) {
+private fun HistoryScreen(viewModel: BrowserViewModel, hasSearchHistory: Boolean, onOpen: (String) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val history by viewModel.history.collectAsState(initial = emptyList())
     var showClearConfirmation by remember { mutableStateOf(false) }
-    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s058)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }, actions = { if (history.isNotEmpty()) TextButton(onClick = { showClearConfirmation = true }) { Text(stringResource(R.string.s146)) } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s058)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }, actions = { if (history.isNotEmpty() || hasSearchHistory) TextButton(onClick = { showClearConfirmation = true }) { Text(stringResource(R.string.s146)) } }) }) { padding ->
         if (history.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(stringResource(R.string.s147)) }
         } else {
@@ -3446,8 +3447,9 @@ private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit,
     }
     if (showClearConfirmation) {
         ConfirmDialog(stringResource(R.string.s148), stringResource(R.string.s149), {
-            viewModel.clearHistory()
-            Toast.makeText(context, context.getString(R.string.s150), Toast.LENGTH_SHORT).show()
+            viewModel.clearHistory { success ->
+                Toast.makeText(context, context.getString(if (success) R.string.s150 else R.string.clear_data_failed), Toast.LENGTH_SHORT).show()
+            }
             showClearConfirmation = false
         }, { showClearConfirmation = false })
     }

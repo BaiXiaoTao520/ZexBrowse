@@ -148,6 +148,7 @@
     <string name="s148">Clear browsing history?</string>
     <string name="s149">This cannot be undone.</string>
     <string name="s150">Cleared</string>
+    <string name="clear_data_failed">Could not clear data. Please try again.</string>
     <string name="s151">No system installer found</string>
     <string name="s152">Open file</string>
     <string name="s153">No app can open this file</string>
