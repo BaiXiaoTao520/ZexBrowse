@@ -148,6 +148,7 @@
     <string name="s148">清除浏览历史？</string>
     <string name="s149">此操作无法撤销。</string>
     <string name="s150">已清除</string>
+    <string name="clear_data_failed">清除数据失败，请重试。</string>
     <string name="s151">未找到系统安装器</string>
     <string name="s152">打开文件</string>
     <string name="s153">未找到可打开此文件的应用</string>
