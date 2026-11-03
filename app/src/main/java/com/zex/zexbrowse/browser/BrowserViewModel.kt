@@ -69,33 +69,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             externalDownloadHandler = value
             while (bufferedExternalDownloads.isNotEmpty()) value(bufferedExternalDownloads.removeFirst())
         }
-    // 界面层注入：命中风险站点时的拦截回调。参数：目标地址、扫描结论、继续访问回调。
-    // 为 null 表示尚未接入界面，不做拦截（仅显示图标）。
-    var riskySiteHandler: ((url: String, assessment: SecurityScanner.RiskAssessment, proceed: () -> Unit) -> Unit)? = null
-    // 用户选「仍然访问」后的放行名单：避免同一个地址被反复拦回
-    private val allowedOnce = HashSet<String>()
+    private val riskyNavigationGate = RiskyNavigationGate()
+    internal val riskySiteWarnings = riskyNavigationGate.warnings
 
-    fun clearSecurityAllowance() { allowedOnce.clear() }
+    fun clearSecurityAllowance() { riskyNavigationGate.clearAllowances() }
+    internal fun dismissRiskySite(tabId: String, warning: RiskySiteWarning) = riskyNavigationGate.dismiss(tabId, warning)
+    internal fun proceedRiskySite(tabId: String, warning: RiskySiteWarning) {
+        val tab = _tabs.value.firstOrNull { it.id == tabId } ?: return
+        val uri = riskyNavigationGate.proceed(tabId, warning) ?: return
+        tab.session.loadUri(uri)
+    }
 
     /** 当前安全防护模式（由界面层同步） */
     var securityMode: String = "standard"
-
-    /**
-     * 根据防护模式判断是否拦截。
-     *
-     * - enhanced：可疑及以上均拦，并提示未加密连接
-     * - standard：只拦危险级（默认，避免干扰正常浏览）
-     * - basic：不拦，只显示护盾图标
-     */
-    private fun shouldBlockRisky(uri: String): Boolean {
-        if (uri in allowedOnce) return false
-        if (securityMode == "basic") return false
-        val level = SecurityScanner.assessUrl(uri).level
-        return when (securityMode) {
-            "enhanced" -> level == SecurityScanner.RiskLevel.SUSPICIOUS || level == SecurityScanner.RiskLevel.DANGEROUS
-            else -> level == SecurityScanner.RiskLevel.DANGEROUS
-        }
-    }
 
     private fun notifyExternalDownload(url: String) {
         val handler = externalDownloadHandler
@@ -537,19 +523,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val uri = request.uri
 
                 // 风险站点拦截：只拦用户主动发起的导航与顶层页面，不拦资源加载。
-                // 不用 isDirectNavigation：它表示「由应用调 load 发起」，语义不同。
                 val userInitiated = request.hasUserGesture || request.isDirectNavigation
-                if (shouldBlockRisky(uri) && userInitiated) {
-                    val assessment = SecurityScanner.assessUrl(uri)
-                    val handler = riskySiteHandler
-                    if (handler != null) {
-                        handler(uri, assessment) {
-                            // 用户选择继续：记入放行名单后重新加载
-                            allowedOnce.add(uri)
-                            session.loadUri(uri)
-                        }
-                        return GeckoResult.fromValue(AllowOrDeny.DENY)
-                    }
+                if (riskyNavigationGate.shouldBlock(id, uri, userInitiated, securityMode)) {
+                    // A denied initial load must not be retried while the warning is pending.
+                    if (pendingInitialLoads[id] == uri) clearPending(id)
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
 
                 // 外部应用 scheme：只有用户真的点了链接才值得询问。
@@ -580,6 +558,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
         clearPending(id)
+        riskyNavigationGate.dismiss(id)
         attachedSessions.remove(id)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
@@ -593,6 +572,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 仅关闭普通标签，不动无痕标签
     fun closeAllNormal() {
         _tabs.value.filter { !it.incognito }.forEach { tab ->
+            riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
@@ -601,6 +581,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
     fun closeAllIncognito() {
         _tabs.value.filter { it.incognito }.forEach { tab ->
+            riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
@@ -613,6 +594,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val incognitoTabs = _tabs.value.filter { it.incognito }
         if (incognitoTabs.isEmpty()) return
         incognitoTabs.forEach { tab ->
+            riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
