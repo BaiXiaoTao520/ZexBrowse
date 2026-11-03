@@ -767,9 +767,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 解法：视图已通过 onSessionAttached 声明就绪时才直接加载，
      * 否则先入队，等挂载回调到来时由重试链控制加载时机。
      */
-    fun load(input: String) {
+    fun load(input: String, tab: BrowserTab? = selected) {
         val target = normalize(input)
-        val tab = selected ?: return
+        tab ?: return
         cancelPendingFailure(tab.id)
         if (attachedSessions.contains(tab.id)) {
             runCatching { tab.session.loadUri(target) }
