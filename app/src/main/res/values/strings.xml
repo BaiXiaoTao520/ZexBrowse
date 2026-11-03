@@ -447,6 +447,7 @@
     <string name="dl_notify_failed">下载失败</string>
     <string name="dl_channel_name">浏览器下载</string>
     <string name="dl_channel_done">下载完成</string>
+    <string name="dl_err_invalid_name">文件名不能为空或包含路径分隔符，也不能是 . 或 ..</string>
     <string name="dl_err_cancelled">下载已取消</string>
     <string name="dl_err_unknown">未知错误</string>
     <string name="dl_err_empty_body">下载响应内容为空</string>

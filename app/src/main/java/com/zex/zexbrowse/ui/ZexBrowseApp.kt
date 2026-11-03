@@ -234,6 +234,7 @@ import com.zex.zexbrowse.data.SearchSuggestions
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.download.DownloadFileName
+import com.zex.zexbrowse.download.DownloadTarget
 import com.zex.zexbrowse.util.DebugInfo
 import com.zex.zexbrowse.util.DebugSettingsSnapshot
 import com.zex.zexbrowse.util.DebugUnlock
@@ -3481,7 +3482,15 @@ private fun openUpdateApk(context: android.content.Context, file: java.io.File) 
 
 private fun openDownload(context: android.content.Context, item: DownloadEntity) {
     val source = Uri.parse(item.targetUri)
-    val uri = if (source.scheme == "file") FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(source.path.orEmpty())) else source
+    val uri = if (source.scheme == "file") {
+        val file = runCatching {
+            DownloadTarget.checkedFile(java.io.File(context.filesDir, "downloads"), java.io.File(source.path.orEmpty()))
+        }.getOrElse {
+            Toast.makeText(context, context.getString(R.string.dl_err_cannot_read), Toast.LENGTH_SHORT).show()
+            return
+        }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    } else source
     val isApk = item.fileName.endsWith(".apk", true)
     val type = if (isApk) "application/vnd.android.package-archive" else when {
         item.fileName.endsWith(".pdf", true) -> "application/pdf"
@@ -5311,6 +5320,8 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
                     onValueChange = { fileName = it },
                     label = { Text(stringResource(R.string.s395)) },
                     singleLine = true,
+                    isError = !DownloadTarget.isValidName(fileName),
+                    supportingText = { if (!DownloadTarget.isValidName(fileName)) Text(stringResource(R.string.dl_err_invalid_name)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -5324,7 +5335,7 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
         },
         confirmButton = {
             // 解析中禁用：否则会把 download.aspx 作为文件名入队，用户看到的与实际落盘不一致
-            TextButton(enabled = !resolving && fileName.isNotBlank(), onClick = { onDownload(fileName, expectedHash) }) {
+            TextButton(enabled = !resolving && DownloadTarget.isValidName(fileName), onClick = { onDownload(fileName, expectedHash) }) {
                 Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.s069))
             }
         },
