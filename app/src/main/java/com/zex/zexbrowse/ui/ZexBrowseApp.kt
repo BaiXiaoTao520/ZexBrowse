@@ -234,6 +234,7 @@ import com.zex.zexbrowse.data.SearchSuggestions
 import com.zex.zexbrowse.data.UpdateChecker
 import com.zex.zexbrowse.data.ReleaseInfo
 import com.zex.zexbrowse.download.DownloadFileName
+import com.zex.zexbrowse.download.DownloadTarget
 import com.zex.zexbrowse.util.DebugInfo
 import com.zex.zexbrowse.util.DebugSettingsSnapshot
 import com.zex.zexbrowse.util.DebugUnlock
@@ -684,6 +685,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     val settings = storedSettings ?: return
     val scope = rememberCoroutineScope()
     val browserViewModel: BrowserViewModel = viewModel()
+    browserViewModel.securityMode = settings.securityMode
     browserViewModel.syncSettings(settings)
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     // 默认浏览器角色请求：结果由 ON_RESUME 时的 isAppDefaultBrowser 重新检测，这里无需处理返回值
@@ -1237,9 +1239,12 @@ private fun PageContent(
             onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
             onOpen = { address ->
-                // 记录搜索历史（网址也一并记下，便于重复访问）
-                scope.launch { settingsStore.addSearchHistory(address) }
-                browserViewModel.load(address); navigate(Page.BROWSER)
+                val tab = browserViewModel.selected
+                // 只为目标普通标签记录搜索历史（网址也一并记下，便于重复访问）
+                if (tab != null && !tab.incognito) {
+                    scope.launch { settingsStore.addSearchHistory(address) }
+                }
+                browserViewModel.load(address, tab); navigate(Page.BROWSER)
             },
             onHistory = { navigate(Page.HISTORY) },
             onSettings = { navigate(Page.SETTINGS) },
@@ -1348,8 +1353,9 @@ private fun PageContent(
             setCookie = { scope.launch { settingsStore.cookies(it) } },
             setClearOnExit = { enabled, cookies, cache, history -> scope.launch { settingsStore.clearOnExit(enabled, cookies, cache, history) } },
             clearBrowserData = {
-                browserViewModel.clearBrowserData()
-                Toast.makeText(context, context.getString(R.string.s050), Toast.LENGTH_SHORT).show()
+                browserViewModel.clearBrowserData { success ->
+                    Toast.makeText(context, context.getString(if (success) R.string.s050 else R.string.clear_data_failed), Toast.LENGTH_SHORT).show()
+                }
             },
             onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
             onBack = goBack
@@ -1393,7 +1399,7 @@ private fun PageContent(
             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
             onBack = goBack
         )
-        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
+        Page.HISTORY -> HistoryScreen(viewModel = browserViewModel, hasSearchHistory = settings.searchHistory.isNotEmpty(), onOpen = { url -> browserViewModel.load(url); navigate(Page.BROWSER) }, onBack = goBack)
         Page.DOWNLOAD_DIRECTORY -> DownloadDirectoryScreen(
             settings = settings,
             onSave = { mode, uri, path ->
@@ -1517,7 +1523,8 @@ private fun ClockText() {
 
 @Composable
 private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
+    // 首页可能复用无痕标签；输入内容不能写入 Activity 的 savedInstanceState。
+    var query by remember { mutableStateOf("") }
     val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
     var editingBookmark by remember { mutableStateOf<QuickSite?>(null) }
@@ -3014,10 +3021,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     var selectedFileName by remember { mutableStateOf("") }
     var showNewTabDialog by remember { mutableStateOf(false) }
     var showBrowserMenu by remember { mutableStateOf(false) }
-    // 风险站点拦截：目标地址、扫描结论、用户选择继续后的回调
-    var riskySiteTarget by remember { mutableStateOf<String?>(null) }
-    var riskySiteAssessment by remember { mutableStateOf<SecurityScanner.RiskAssessment?>(null) }
-    var riskySiteProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val riskySiteWarnings by viewModel.riskySiteWarnings.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -3092,13 +3096,6 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 
     viewModel.onExternalDownload = { url -> scope.launch { downloadUrl = url } }
 
-    // 安全防护：把模式同步给 ViewModel，并接管风险站点的拦截弹窗
-    LaunchedEffect(settings.securityMode) { viewModel.securityMode = settings.securityMode }
-    viewModel.riskySiteHandler = { url, assessment, proceed ->
-        riskySiteTarget = url
-        riskySiteAssessment = assessment
-        riskySiteProceed = proceed
-    }
     // 正在展示的护盾说明
     var securityDetail by remember { mutableStateOf<Pair<String, SecurityScanner.RiskAssessment>?>(null) }
     // 网页请求选择文件 → 拉起系统文件选择器（原生文件应用），选完回传网页
@@ -3296,24 +3293,14 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         )
     }
     // 风险站点拦截弹窗：默认「返回」，避免误触进入风险页
-    val riskyTarget = riskySiteTarget
-    val riskyAssessment = riskySiteAssessment
-    if (riskyTarget != null && riskyAssessment != null) {
+    val warningTabId = selectedId
+    val riskyWarning = warningTabId?.let { riskySiteWarnings[it] }
+    if (warningTabId != null && riskyWarning != null) {
         RiskySiteDialog(
-            host = Uri.parse(riskyTarget).host.orEmpty(),
-            assessment = riskyAssessment,
-            onProceed = {
-                val proceed = riskySiteProceed
-                riskySiteTarget = null
-                riskySiteAssessment = null
-                riskySiteProceed = null
-                proceed?.invoke()
-            },
-            onBack = {
-                riskySiteTarget = null
-                riskySiteAssessment = null
-                riskySiteProceed = null
-            }
+            host = Uri.parse(riskyWarning.uri).host.orEmpty(),
+            assessment = riskyWarning.assessment,
+            onProceed = { viewModel.proceedRiskySite(warningTabId, riskyWarning) },
+            onBack = { viewModel.dismissRiskySite(warningTabId, riskyWarning) }
         )
     }
     if (downloadUrl != null) {
@@ -3438,11 +3425,11 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
 private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
 
 @Composable
-private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit, onBack: () -> Unit) {
+private fun HistoryScreen(viewModel: BrowserViewModel, hasSearchHistory: Boolean, onOpen: (String) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val history by viewModel.history.collectAsState(initial = emptyList())
     var showClearConfirmation by remember { mutableStateOf(false) }
-    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s058)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }, actions = { if (history.isNotEmpty()) TextButton(onClick = { showClearConfirmation = true }) { Text(stringResource(R.string.s146)) } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s058)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }, actions = { if (history.isNotEmpty() || hasSearchHistory) TextButton(onClick = { showClearConfirmation = true }) { Text(stringResource(R.string.s146)) } }) }) { padding ->
         if (history.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(stringResource(R.string.s147)) }
         } else {
@@ -3461,8 +3448,9 @@ private fun HistoryScreen(viewModel: BrowserViewModel, onOpen: (String) -> Unit,
     }
     if (showClearConfirmation) {
         ConfirmDialog(stringResource(R.string.s148), stringResource(R.string.s149), {
-            viewModel.clearHistory()
-            Toast.makeText(context, context.getString(R.string.s150), Toast.LENGTH_SHORT).show()
+            viewModel.clearHistory { success ->
+                Toast.makeText(context, context.getString(if (success) R.string.s150 else R.string.clear_data_failed), Toast.LENGTH_SHORT).show()
+            }
             showClearConfirmation = false
         }, { showClearConfirmation = false })
     }
@@ -3483,7 +3471,15 @@ private fun openUpdateApk(context: android.content.Context, file: java.io.File) 
 
 private fun openDownload(context: android.content.Context, item: DownloadEntity) {
     val source = Uri.parse(item.targetUri)
-    val uri = if (source.scheme == "file") FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(source.path.orEmpty())) else source
+    val uri = if (source.scheme == "file") {
+        val file = runCatching {
+            DownloadTarget.checkedFile(java.io.File(context.filesDir, "downloads"), java.io.File(source.path.orEmpty()))
+        }.getOrElse {
+            Toast.makeText(context, context.getString(R.string.dl_err_cannot_read), Toast.LENGTH_SHORT).show()
+            return
+        }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    } else source
     val isApk = item.fileName.endsWith(".apk", true)
     val type = if (isApk) "application/vnd.android.package-archive" else when {
         item.fileName.endsWith(".pdf", true) -> "application/pdf"
@@ -5313,6 +5309,8 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
                     onValueChange = { fileName = it },
                     label = { Text(stringResource(R.string.s395)) },
                     singleLine = true,
+                    isError = !DownloadTarget.isValidName(fileName),
+                    supportingText = { if (!DownloadTarget.isValidName(fileName)) Text(stringResource(R.string.dl_err_invalid_name)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -5326,7 +5324,7 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
         },
         confirmButton = {
             // 解析中禁用：否则会把 download.aspx 作为文件名入队，用户看到的与实际落盘不一致
-            TextButton(enabled = !resolving && fileName.isNotBlank(), onClick = { onDownload(fileName, expectedHash) }) {
+            TextButton(enabled = !resolving && DownloadTarget.isValidName(fileName), onClick = { onDownload(fileName, expectedHash) }) {
                 Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.s069))
             }
         },

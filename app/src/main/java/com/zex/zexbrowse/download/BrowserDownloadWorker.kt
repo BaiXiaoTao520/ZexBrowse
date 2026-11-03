@@ -64,7 +64,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
      * 用内存里的 downloaded 会比文件多，重启后发现前半段不够就会被迫重下。
      */
     private suspend fun savePausedProgress(id: String, downloaded: Long, total: Long, uri: Uri) {
-        val onDisk = runCatching { if (uri.scheme == "file") File(uri.path.orEmpty()).length() else targetSize(uri) }
+        val onDisk = runCatching { if (uri.scheme == "file") internalTarget(uri).length() else targetSize(uri) }
             .getOrDefault(0L)
         val committed = if (onDisk > 0L) minOf(onDisk, downloaded) else downloaded
         val progress = if (total > 0) ((committed * 100) / total).toInt().coerceIn(0, 100) else 0
@@ -76,7 +76,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     private suspend fun deletePartialFile(uri: Uri) {
         runCatching {
             if (uri.scheme == "file") {
-                File(uri.path.orEmpty()).delete()
+                internalTarget(uri).delete()
             } else {
                 android.provider.DocumentsContract.deleteDocument(applicationContext.contentResolver, uri)
             }
@@ -87,9 +87,13 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val id = inputData.getString(KEY_ID) ?: return@withContext Result.failure()
         val url = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
+        val record = database.downloadDao().find(id) ?: return@withContext Result.failure()
+        if (!record.ownsTarget || record.targetUri != uri.toString()) {
+            database.downloadDao().finishWithMessage(id, "failed", applicationContext.getString(R.string.dl_err_no_resume))
+            return@withContext Result.failure()
+        }
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
-        // 下载过程中可能被响应头纠正为真实文件名，后续通知与记录都用这个变量
-        var displayName = fileName
+        val displayName = fileName
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
         // 本地捕获文件：onExternalResponse 时 Gecko 已把响应体拉下来存到临时文件。
         // 存在且可用时直接读它落盘，全程不再发第二次 HTTP 请求（一次性令牌二次请求会 403）。
@@ -109,13 +113,13 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         var downloadedBytes = 0L
         var totalBytes = -1L
         try {
+            if (uri.scheme == "file") internalTarget(uri)
             var total = -1L
             // 续传起点：上次暂停/中断时已经落盘的字节数。
             // 只有服务端明确支持 Range 并返回 206 时才会从这里开始，
             // 否则（返回 200）必须从头写，否则会拼出损坏文件。
-            val record = database.downloadDao().find(id)
-            var startOffset = record?.downloadedBytes?.coerceAtLeast(0L) ?: 0L
-            val ifRange = record?.etag.orEmpty()
+            var startOffset = record.downloadedBytes.coerceAtLeast(0L)
+            val ifRange = record.etag
             if (localBin != null) {
                 // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完。
                 // fail 一出现就直接跳出，不再把剩下的超时时间白等完（否则界面会停在「正在下载」不动）。
@@ -153,16 +157,6 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 }
                 val response = c.execute()
                 if (!response.isSuccessful) { response.close(); error(applicationContext.getString(R.string.dl_err_http, response.code)) }
-                // 兜底：若入队时仍未拿到真实文件名，用本次下载的响应头纠正，
-                // 保证「显示的文件名」与「实际落盘文件名」一致。
-                if (DownloadFileName.isGeneric(displayName)) {
-                    val fromHeader = DownloadFileName.fromContentDisposition(response.header("Content-Disposition"))
-                    if (fromHeader != null && !DownloadFileName.isGeneric(fromHeader)) {
-                        displayName = fromHeader
-                        database.downloadDao().rename(id, displayName)
-                        setForeground(createForegroundInfo(id, displayName, 0, true))
-                    }
-                }
                 val body = response.body ?: run { response.close(); error(applicationContext.getString(R.string.dl_err_empty_body)) }
                 httpResponse = response
                 input = body.byteStream()
@@ -174,7 +168,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 totalBytes = total
                 // 存下 ETag，下次续传时用 If-Range 校验，避免服务器换了文件还硬拼
                 val etag = response.header("ETag").orEmpty()
-                if (etag.isNotBlank() && etag != record?.etag) {
+                if (etag.isNotBlank() && etag != record.etag) {
                     database.downloadDao().updateEtag(id, etag)
                 }
             }
@@ -184,9 +178,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             var lastProgress = -1
             var lastNotifyAt = 0L
             val digest = MessageDigest.getInstance("SHA-256")
-            val targetFile = File(uri.path.orEmpty())
             val isFileTarget = uri.scheme == "file"
-            val existing = if (isFileTarget) targetFile.length() else targetSize(uri)
+            val existing = if (isFileTarget) internalTarget(uri).length() else targetSize(uri)
             // 只有磁盘上确实已经有 startOffset 这么多数据，追加写才是安全的
             val appendable = startOffset > 0L && existing >= startOffset
             if (startOffset > 0L && !appendable) {
@@ -211,7 +204,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             // 内部 file:// 用追加模式；外部 SAF 用 "wa"（write + append），
             // 两者都只在有可信偏移时追加，否则截断重写
             val output: OutputStream = if (isFileTarget) {
-                FileOutputStream(targetFile, appendable)
+                FileOutputStream(internalTarget(uri), appendable)
             } else {
                 val mode = if (appendable) "wa" else "wt"
                 applicationContext.contentResolver.openOutputStream(uri, mode)
@@ -299,6 +292,9 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         }
     }
 
+    private fun internalTarget(uri: Uri): File =
+        DownloadTarget.checkedFile(File(applicationContext.filesDir, "downloads"), File(uri.path.orEmpty()))
+
     /** 目标文件当前实际大小（SAF 通过文件描述符读取），读不到按 0 处理 */
     private fun targetSize(uri: Uri): Long = runCatching {
         applicationContext.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
@@ -307,7 +303,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
     /** 打开目标文件用于计算续传时的 SHA-256；SAF 走 contentResolver */
     private fun openTargetInput(uri: Uri): java.io.InputStream =
         if (uri.scheme == "file") {
-            File(uri.path.orEmpty()).inputStream()
+            internalTarget(uri).inputStream()
         } else {
             applicationContext.contentResolver.openInputStream(uri)
                 ?: error(applicationContext.getString(R.string.dl_err_cannot_read))

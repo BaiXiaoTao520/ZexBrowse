@@ -148,6 +148,7 @@
     <string name="s148">清除浏览历史？</string>
     <string name="s149">此操作无法撤销。</string>
     <string name="s150">已清除</string>
+    <string name="clear_data_failed">清除数据失败，请重试。</string>
     <string name="s151">未找到系统安装器</string>
     <string name="s152">打开文件</string>
     <string name="s153">未找到可打开此文件的应用</string>
@@ -440,6 +441,7 @@
     <string name="dl_notify_failed">下载失败</string>
     <string name="dl_channel_name">浏览器下载</string>
     <string name="dl_channel_done">下载完成</string>
+    <string name="dl_err_invalid_name">文件名不能为空或包含路径分隔符，也不能是 . 或 ..</string>
     <string name="dl_err_cancelled">下载已取消</string>
     <string name="dl_err_unknown">未知错误</string>
     <string name="dl_err_empty_body">下载响应内容为空</string>
@@ -630,6 +632,8 @@
     <string name="risk_reason_mixed_passive">部分内容未加密</string>
     <string name="risk_detail_mixed_passive">页面中的图片等资源通过明文加载，不影响登录安全，但内容可能被替换。</string>
     <string name="risk_reason_deceptive_url">网址具有欺骗性</string>
+    <string name="risk_reason_ambiguous_url">网址的目标不明确</string>
+    <string name="risk_detail_ambiguous_url">无法可靠地确定这个网址的目标网站，请确认后再继续。</string>
     <string name="risk_detail_deceptive_url">这个链接用「@」隐藏了真实网站，实际访问的是 %1$s。这是常见的钓鱼手法。</string>
     <string name="risk_reason_known_bad">已知风险网站</string>
     <string name="risk_reason_trojan">疑似木马或欺诈</string>
