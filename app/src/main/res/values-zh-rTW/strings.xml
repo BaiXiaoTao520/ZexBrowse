@@ -659,6 +659,7 @@
     <string name="dl_err_cannot_read">無法讀取已下載檔案</string>
     <string name="dl_err_cannot_create_dir">無法建立更新下載目錄</string>
     <string name="dl_err_cannot_save_update">無法完成更新檔儲存</string>
+    <string name="dl_err_invalid_update">更新檔不是此應用程式的有效安裝檔</string>
     <string name="ad_block_how_it_works">開啟時在請求層攔截廣告與追蹤網域，並用頁面樣式隱藏常見廣告版位；關閉後網頁依原樣載入。變更會立即套用到所有已開啟的分頁。</string>
     <string name="ad_block_tip_title">提示</string>
     <string name="ad_block_tip">攔截可能導致極少數網站內容顯示異常，如遇問題可暫時關閉。</string>

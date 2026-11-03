@@ -659,6 +659,7 @@
     <string name="dl_err_cannot_read">Cannot read the downloaded file</string>
     <string name="dl_err_cannot_create_dir">Cannot create the update download folder</string>
     <string name="dl_err_cannot_save_update">Cannot finish saving the update file</string>
+    <string name="dl_err_invalid_update">The update file is not a valid package for this app</string>
     <string name="ad_block_how_it_works">When on, ad and tracker domains are blocked at the request level and common ad slots are hidden with page styles. When off, pages load as-is. Changes apply to every open tab immediately.</string>
     <string name="ad_block_tip_title">Note</string>
     <string name="ad_block_tip">Blocking may rarely break parts of a site. Turn it off temporarily if something looks wrong.</string>
