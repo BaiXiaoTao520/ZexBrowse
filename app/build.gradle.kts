@@ -191,6 +191,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    testImplementation("junit:junit:4.13.2")
     // GeckoView 内核：升级到 158（2026-10），替代原先的 131（2024-10）。
     // 旧版本落后 27 个版本，累积了大量已修复的高危漏洞（沙箱逃逸、UAF、同源绕过等），
     // 浏览器内核直接渲染不可信网页，必须保持更新。

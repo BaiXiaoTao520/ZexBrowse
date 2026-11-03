@@ -193,7 +193,7 @@ data class BrowserSettings(
     /** 硬件加速：开启时 GeckoView 使用 SurfaceView 后端（默认），关闭后改用 TextureView 以降低部分机型的渲染开销 */
     val hardwareAcceleration: Boolean = true,
     val sitePermissions: Map<String, String> = emptyMap(),
-    /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
+    /** 麦克风权限按来源记忆，格式同 [sitePermissions] */
     val siteMicPermissions: Map<String, String> = emptyMap(),
     /** 首页搜索框的搜索历史（新→旧，最多保留 10 条） */
     val searchHistory: List<String> = emptyList(),
@@ -276,7 +276,8 @@ class SettingsStore(private val context: Context) {
     private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
     private val hardwareAccelerationKey = booleanPreferencesKey("hardware_acceleration")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
-    private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
+    // Host-only decisions cannot be safely assigned to an origin; ask again after upgrading.
+    private val siteMicPermissionsKey = stringPreferencesKey("origin_mic_permissions")
     private val searchHistoryKey = stringPreferencesKey("search_history")
     private val securityModeKey = stringPreferencesKey("security_mode")
     private val httpsOnlyEnabledKey = booleanPreferencesKey("https_only_enabled")
@@ -323,7 +324,7 @@ class SettingsStore(private val context: Context) {
             siteMicPermissions = (preferences[siteMicPermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
-                .associate { it.substringBefore('=') to it.substringAfter('=') },
+                .associate { it.substringBeforeLast('=') to it.substringAfterLast('=') },
             searchHistory = (preferences[searchHistoryKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() },
@@ -405,7 +406,7 @@ class SettingsStore(private val context: Context) {
     suspend fun clearSitePermissions() = update { it[sitePermissionsKey] = "" }
     suspend fun setSiteMicPermission(key: String, value: String) = update { preferences ->
         val current = preferences[siteMicPermissionsKey] ?: ""
-        val entries = current.split("\n").filter { it.isNotBlank() && it.substringBefore('=') != key }
+        val entries = current.split("\n").filter { it.isNotBlank() && it.substringBeforeLast('=') != key }
         preferences[siteMicPermissionsKey] = (entries + "$key=$value").joinToString("\n")
     }
     suspend fun clearSiteMicPermissions() = update { it[siteMicPermissionsKey] = "" }
