@@ -8,7 +8,6 @@ package com.zex.zexbrowse.download
 
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import com.zex.zexbrowse.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +22,14 @@ import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
 
 data class UpdateDownloadResult(val file: File, val sha256: String)
+
+internal fun updateFiles(filesDir: File, fileName: String): Pair<File, File> {
+    // The version used in fileName comes from release metadata; keep it inside filesDir.
+    val safeName = fileName.replace('/', '_').replace('\\', '_')
+        .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "ZexBrowse-update.apk"
+    val destination = File(File(filesDir, "updates"), safeName)
+    return destination to File(destination.parentFile, "${destination.name}.download")
+}
 
 object ApkHashVerifier {
     suspend fun sha256(input: InputStream): String = withContext(Dispatchers.IO) {
@@ -44,13 +51,10 @@ class DownloadManager(private val context: Context) {
 
     /** 更新包存放目录：不进用户下载目录，仅用于应用内更新流程 */
     private fun updateDirectory(): File =
-        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "updates")
+        File(context.filesDir, "updates")
 
     /** 更新包与同名临时文件；统一定位，避免下载与清场指向不同路径 */
-    private fun updateFiles(fileName: String): Pair<File, File> {
-        val destination = File(updateDirectory(), fileName.ifBlank { "ZexBrowse-update.apk" })
-        return destination to File(destination.parentFile, "${destination.name}.download")
-    }
+    private fun updateFiles(fileName: String): Pair<File, File> = updateFiles(context.filesDir, fileName)
 
     /** 删除更新包及其未完成的临时文件，供取消下载 / 放弃安装时清场，避免残留 */
     fun deleteUpdateApk(fileName: String) {
@@ -112,6 +116,11 @@ class DownloadManager(private val context: Context) {
                     withContext(Dispatchers.Main.immediate) { onProgress(100) }
                     if (destination.exists()) destination.delete()
                     check(temporary.renameTo(destination)) { context.getString(R.string.dl_err_cannot_save_update) }
+                    // The system installer verifies the signing identity when applying an update.
+                    if (context.packageManager.getPackageArchiveInfo(destination.absolutePath, 0)?.packageName != context.packageName) {
+                        destination.delete()
+                        error(context.getString(R.string.dl_err_invalid_update))
+                    }
                     UpdateDownloadResult(destination, digest.digest().joinToString("") { byte -> "%02x".format(byte) })
                 }
             } finally {

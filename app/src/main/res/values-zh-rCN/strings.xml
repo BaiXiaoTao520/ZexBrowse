@@ -655,6 +655,7 @@
     <string name="dl_err_cannot_read">无法读取已下载文件</string>
     <string name="dl_err_cannot_create_dir">无法创建更新下载目录</string>
     <string name="dl_err_cannot_save_update">无法完成更新文件保存</string>
+    <string name="dl_err_invalid_update">更新文件不是此应用的有效安装包</string>
     <string name="ad_block_how_it_works">开启时在请求层拦截广告与追踪域名，并用页面样式隐藏常见广告位；关闭后网页按原样加载。更改会立即应用到所有已打开的标签页。</string>
     <string name="ad_block_tip_title">提示</string>
     <string name="ad_block_tip">拦截可能导致极少数网站内容显示异常，如遇问题可临时关闭。</string>
