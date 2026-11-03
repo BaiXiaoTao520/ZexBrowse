@@ -630,6 +630,8 @@
     <string name="risk_reason_mixed_passive">Some content is unencrypted</string>
     <string name="risk_detail_mixed_passive">Images and similar resources load over plain HTTP. Sign-in is unaffected, but content could be swapped.</string>
     <string name="risk_reason_deceptive_url">Deceptive URL</string>
+    <string name="risk_reason_ambiguous_url">Unclear URL destination</string>
+    <string name="risk_detail_ambiguous_url">The destination of this URL cannot be determined reliably. Check it before continuing.</string>
     <string name="risk_detail_deceptive_url">This link hides the real site behind an "@": you would actually visit %1$s. This is a common phishing trick.</string>
     <string name="risk_reason_known_bad">Known risky site</string>
     <string name="risk_reason_trojan">Suspected trojan or fraud</string>
