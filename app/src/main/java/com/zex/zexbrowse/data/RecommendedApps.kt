@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.zex.zexbrowse.R
 
@@ -256,6 +257,18 @@ val twilightToolboxRecommendation = RecommendedApp(
     description = "一款秉承互联网分享精神以 Material Design 3 风格进行设计开发的多功能工具聚合工具箱"
 )
 
+val wearOsBoxRecommendation = RecommendedApp(
+    name = "WearOS 工具箱",
+    version = "",
+    summary = "面向 Wear OS 手表的一站式工具集合",
+    downloadUrl = "https://wearosbox.com",
+    icon = Icons.Rounded.Watch,
+    category = RecommendCategory.TOOLS,
+    description = "WearOS 工具箱是一套面向 Wear OS 手表的实用工具合集，把日常在手表上零散难找的功能集中到一处。\n\n" +
+        "涵盖表盘与壁纸管理、快捷设置开关、性能与存储信息查看等常用项，界面按手表圆形屏幕布局，操作以小控件和滑动为主，抬手即可完成。\n\n" +
+        "工具均为本地运行，不依赖手机端常驻连接，震动反馈与常亮显示也做了适配。具体功能以站点当前版本为准。"
+)
+
 val aEmulatorRecommendation = RecommendedApp(
     name = "AEmulator",
     version = "v0.0.0.3",
@@ -316,6 +329,7 @@ val recommendedApps = listOf(
     cccodroidRecommendation,
     coolMonitorRecommendation,
     twilightToolboxRecommendation,
+    wearOsBoxRecommendation,
     aEmulatorRecommendation,
     astralGameRecommendation,
     // 商店类：ReShare 位于列表中部，Komi Store 固定排在最后一位

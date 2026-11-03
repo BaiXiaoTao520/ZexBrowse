@@ -30,7 +30,12 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -41,6 +46,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -178,8 +184,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1506,18 +1518,41 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     var editingBookmark by remember { mutableStateOf<QuickSite?>(null) }
 
     Box(Modifier.fillMaxSize()) {
-        // 顶部渐变：作为整页的视觉基底，向下淡出到背景色，避免大面积纯色显得单调
+        // 顶部渐变头图：作为整页的视觉基底。
+        // 用无限循环的相位驱动三段主色（主色 / 第三色 / 第二色）沿对角方向缓慢漂移，
+        // 让渐变色相不断软化交替，既有颜色流动感，又不会像高频闪烁那样分散注意力。
+        // 颜色每次组合都从主题重新推导，切换主题或深浅色后立即跟着变。
+        val gradientTransition = rememberInfiniteTransition(label = "homeHeaderGradient")
+        val gradientPhase by gradientTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 14_000, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "homeHeaderGradientPhase"
+        )
+        val headerColors = listOf(
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.40f),
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f),
+            Color.Transparent
+        )
+        // 相位 0 时渐变起点在左上，相位 1 时滑到右上，颜色因此横向漫移而非整块变亮变暗
+        val headerStartX = 0f + gradientPhase * 0.35f
+        val headerEndX = 0.65f + gradientPhase * 0.35f
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(300.dp)
                 .background(
                     Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0f)
-                        )
+                        colors = headerColors,
+                        startY = 0f,
+                        endY = Float.POSITIVE_INFINITY,
+                        startX = headerStartX,
+                        endX = headerEndX
                     )
                 )
         )
@@ -1533,9 +1568,8 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
         ) {
             HomeHeader(onHistory = onHistory, onSettings = onSettings)
 
-            // 搜索框：直接用描边圈线形式呈现，不套卡片外壳。
-            // 之前卡片 + 输入框两层边框叠在一起会在四角留下双重描边，看着很脏；
-            // 单层细圈线既干净也更接近系统搜索框的观感。
+            // 搜索框：毛玻璃卡片样式（半透明底 + 描边 + 聚焦发光环）。
+            // 点击输入框之外的任意位置会先清掉焦点，光晕随之熄灭。
             AddressInput(
                 value = query,
                 onValueChange = { query = it },
@@ -2067,6 +2101,7 @@ private fun RecommendationCategoryCard(
  *
  * 用 errorContainer 而非 error，保证在深浅色下都能读且不至于像错误弹窗那样刺眼。
  * 可收起：收起后只保留图标与标题，正文则随动效伸缩。
+ * 点击无水波纹：展开/收起是就地切换状态，不需要暗示跳转的水波纹。
  *
  * @param expanded 正文是否展开
  * @param onToggle 点击标题行或右侧按钮时切换展开状态
@@ -2080,11 +2115,17 @@ private fun RecommendationServiceNotice(expanded: Boolean, onToggle: () -> Unit)
         shape = MaterialTheme.shapes.large
     ) {
         Column(Modifier.fillMaxWidth()) {
-            // 标题行始终可点：图标 + 标题 + 「展开/收起」+ 旋转箭头
+            // 标题行始终可点：图标 + 标题 + 「展开/收起」+ 旋转箭头。
+            // 用无 indication 的 clickable：展开/收起是状态切换而非跳转，
+            // 水波纹会让人误以为要点进另一个页面，这里只用箭头与文字变化做反馈。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onToggle)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onToggle
+                    )
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2505,6 +2546,20 @@ private fun AddressInput(
     compact: Boolean = false
 ) {
     var focused by remember { mutableStateOf(false) }
+    // 根节点尺寸：绘制毛玻璃底与发光环时需要知道圆角矩形的大小
+    var inputSize by remember { mutableStateOf(IntSize.Zero) }
+    // 焦点管理器：输入态下点击页面其他位置时主动清掉焦点，键盘与光晕一起熄灭
+    val focusManager = LocalFocusManager.current
+    // 交互源只为了在点击输入框内部时不把这次点击当成「点外面」
+    val interactionSource = remember { MutableInteractionSource() }
+    val inputShape = RoundedCornerShape(26.dp)
+    val inputShapeRadius = 26.dp
+    // 聚焦光晕：展开时淡入，失去焦点时淡出
+    val ringAlpha by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = tween(220),
+        label = "inputFocusRing"
+    )
     // 远程联想结果；每次输入变化后由防抖效应刷新
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     // 本地过滤后的搜索历史（仅在无远程建议或未输入时展示）
@@ -2528,7 +2583,87 @@ private fun AddressInput(
     val fallbackHistory = value.isNotBlank() && suggestions.isEmpty() && matchedHistory.isNotEmpty()
     val expanded = showSuggestionsPanel && focused && (showHistory || showSuggestions || fallbackHistory)
 
-    Column(modifier.fillMaxWidth()) {
+    Column(
+        modifier.fillMaxWidth().pointerInput(focused) {
+            // 仅在输入态下拦截：点击输入框之外的任意位置就退出输入态。
+            // 用 Main 阶段判断：子节点（输入框、“清空”按钮、联想项）先把本次事件吃完，
+            // 因此点它们不会误伤输入态；若没有子节点消费，才算点了页面其他位置。
+            // 循环常驻，保证一次进入后每次点击都能生效。
+            if (!focused) return@pointerInput
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Main)
+                    if (event.type != PointerEventType.Press) continue
+                    val consumed = event.changes.any { it.isConsumed }
+                    if (consumed) continue
+                    // 命中输入框本身时也交给它自己处理，否则清焦点（联想面板随之收起）
+                    val point = event.changes.firstOrNull()?.position
+                    val inside = point != null &&
+                        point.x in 0f..inputSize.width.toFloat() &&
+                        point.y in 0f..inputSize.height.toFloat()
+                    if (!inside) {
+                        focusManager.clearFocus()
+                        focused = false
+                        onFocusChange(false)
+                    }
+                }
+            }
+        }
+    ) {
+        // 毛玻璃外层：半透明底 + 细描边，聚焦时叠一层主色发光环。
+        // 必须在输入框之前绘制：OutlinedTextField 自身会有不透明的容器色，
+        // 若把毛玻璃画在它上面，会盖掉文字。
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { inputSize = it.size }
+                // drawBehind：在子内容下方绘制，输入框文字与图标始终在上层；
+                // 若用 drawWithContent 而忘了调 drawContent()，孩子内容会整个不显示。
+                .drawBehind {
+                    val radius = inputShapeRadius.toPx()
+                    val corner = CornerRadius(radius, radius)
+                    // 半透明底：比不透明容器轻一些，透出背后的动态渐变头图
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = 0.08f),
+                        size = size,
+                        cornerRadius = corner
+                    )
+                    drawRoundRect(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
+                        size = size,
+                        cornerRadius = corner
+                    )
+                    // 描边：常态细而淡，聚焦时交给下面的发光环表达
+                    drawRoundRect(
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f + 0.18f * ringAlpha),
+                        size = size,
+                        cornerRadius = corner,
+                        style = Stroke(width = 1.dp.toPx())
+                    )
+                    // 发光环：由内向外三道主色描边，透明度递减，形成柔和的光晕
+                    if (ringAlpha > 0.01f) {
+                        val base = MaterialTheme.colorScheme.primary
+                        drawRoundRect(
+                            color = base.copy(alpha = 0.30f * ringAlpha),
+                            size = size,
+                            cornerRadius = corner,
+                            style = Stroke(width = 5.dp.toPx())
+                        )
+                        drawRoundRect(
+                            color = base.copy(alpha = 0.55f * ringAlpha),
+                            size = size,
+                            cornerRadius = corner,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        drawRoundRect(
+                            color = base.copy(alpha = 0.90f * ringAlpha),
+                            size = size,
+                            cornerRadius = corner,
+                            style = Stroke(width = 1.dp.toPx())
+                        )
+                    }
+                }
+        ) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -2539,10 +2674,13 @@ private fun AddressInput(
             modifier = Modifier.fillMaxWidth()
                 .then(if (compact) Modifier.height(52.dp) else Modifier.heightIn(min = 56.dp))
                 .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) },
-            placeholder = { Text(stringResource(R.string.s091), style = MaterialTheme.typography.bodyMedium) },
+            placeholder = { Text(stringResource(R.string.s091), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
-            shape = RoundedCornerShape(26.dp),
-            textStyle = MaterialTheme.typography.bodyMedium,
+            shape = inputShape,
+            // 容器是半透明的，文字颜色必须显式指定跟随主题，
+            // 否则在浅色/深色主题或浏览器深色网页上可能对比不足。
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+            interactionSource = interactionSource,
             leadingIcon = if (security != null) {
                 {
                     ShieldBadge(assessment = security, onClick = onSecurityClick, compact = compact)
@@ -2565,16 +2703,15 @@ private fun AddressInput(
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Go),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (value.isNotBlank()) onSubmit() }),
             colors = OutlinedTextFieldDefaults.colors(
-                // 线框风：常态细描边、聚焦时换主色
-                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                // 描边内部给一层比页面底色略深的容器色，输入内容与描边不会叠在一起；
-                // OutlinedTextField 自身会把容器背景裁到 shape（RoundedCornerShape(26.dp)）内，
-                // 因此不会溢出描线之外
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                // 毛玻璃风：边框与容器都交给外面那层绘制，输入框自身保持透明，
+                // 否则它的不透明容器色会把毛玻璃底与发光环盖掉。
+                unfocusedBorderColor = Color.Transparent,
+                focusedBorderColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent
             )
         )
+        }
 
         // 展开/收起动效：高度伸展 + 淡入淡出同步进行，展开与收起都保持顺滑
         AnimatedVisibility(

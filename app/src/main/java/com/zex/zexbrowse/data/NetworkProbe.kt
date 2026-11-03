@@ -16,14 +16,19 @@ import java.util.concurrent.TimeUnit
 /**
  * 应用推荐页的连通性探测。
  *
- * 推荐条目全部托管在境外站点（GitHub 及其代理），国内网络未必可达。
+ * 推荐条目多数托管在境外站点，国内网络未必可达。
  * 进入页面时先探测一次，通才展示内容，不通则给出提示，避免用户看到
  * 一堆点了没反应的应用卡片。
  */
 object NetworkProbe {
 
-    /** 探测地址：与应用推荐的实际取源站点一致 */
-    private const val PROBE_URL = "https://www.github.com"
+    /**
+     * 探测地址。
+     *
+     * 用 bing.com 而非 github.com：后者在部分网络下本身就被阻断，
+     * 拿它当基准会把「本地网络正常」误判为不可用。
+     */
+    private const val PROBE_URL = "https://www.bing.com"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
