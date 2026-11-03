@@ -817,7 +817,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val record = database.downloadDao().findBySourceUrl(url) ?: return@launch
             downloadScheduler.cancel(record.id)
-            downloadScheduler.delete(record.id, record.targetUri, deleteFile = true)
+            downloadScheduler.delete(record.id, record.targetUri, deleteFile = false)
         }
     }
     fun pauseDownload(id: String) { viewModelScope.launch { downloadScheduler.pause(id) } }
@@ -825,7 +825,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun resumeDownload(id: String) {
         viewModelScope.launch {
             if (!downloadScheduler.resume(id)) {
-                android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.err_record_lost), android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.dl_err_no_resume), android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }

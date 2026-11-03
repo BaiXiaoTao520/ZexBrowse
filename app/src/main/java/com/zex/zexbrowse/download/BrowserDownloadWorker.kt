@@ -87,6 +87,11 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
         val id = inputData.getString(KEY_ID) ?: return@withContext Result.failure()
         val url = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
         val uri = inputData.getString(KEY_URI)?.let(Uri::parse) ?: return@withContext Result.failure()
+        val record = database.downloadDao().find(id) ?: return@withContext Result.failure()
+        if (!record.ownsTarget || record.targetUri != uri.toString()) {
+            database.downloadDao().finishWithMessage(id, "failed", applicationContext.getString(R.string.dl_err_no_resume))
+            return@withContext Result.failure()
+        }
         val fileName = inputData.getString(KEY_FILE_NAME).orEmpty()
         val displayName = fileName
         val expectedHash = inputData.getString(KEY_EXPECTED_HASH).orEmpty()
@@ -113,9 +118,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             // 续传起点：上次暂停/中断时已经落盘的字节数。
             // 只有服务端明确支持 Range 并返回 206 时才会从这里开始，
             // 否则（返回 200）必须从头写，否则会拼出损坏文件。
-            val record = database.downloadDao().find(id)
-            var startOffset = record?.downloadedBytes?.coerceAtLeast(0L) ?: 0L
-            val ifRange = record?.etag.orEmpty()
+            var startOffset = record.downloadedBytes.coerceAtLeast(0L)
+            val ifRange = record.etag
             if (localBin != null) {
                 // 等待 capture 完成（done/fail 标记）；capture 是异步的，可能在 Worker 启动时还没读完。
                 // fail 一出现就直接跳出，不再把剩下的超时时间白等完（否则界面会停在「正在下载」不动）。
@@ -164,7 +168,7 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                 totalBytes = total
                 // 存下 ETag，下次续传时用 If-Range 校验，避免服务器换了文件还硬拼
                 val etag = response.header("ETag").orEmpty()
-                if (etag.isNotBlank() && etag != record?.etag) {
+                if (etag.isNotBlank() && etag != record.etag) {
                     database.downloadDao().updateEtag(id, etag)
                 }
             }
