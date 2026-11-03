@@ -87,7 +87,7 @@ object NetworkDiagnostics {
     }
 
     /** 第二层：DNS 解析 */
-    suspend fun checkDns(host: String = "www.github.com"): CheckResult = withContext(Dispatchers.IO) {
+    suspend fun checkDns(host: String = "www.bing.com"): CheckResult = withContext(Dispatchers.IO) {
         try {
             val start = System.nanoTime()
             val addresses = InetAddress.getAllByName(host)
@@ -102,7 +102,7 @@ object NetworkDiagnostics {
     }
 
     /** 第三层：TCP 连接耗时（直接反映链路延迟） */
-    suspend fun checkTcpLatency(host: String = "www.github.com", port: Int = 443): CheckResult =
+    suspend fun checkTcpLatency(host: String = "www.bing.com", port: Int = 443): CheckResult =
         withContext(Dispatchers.IO) {
             try {
                 val start = System.nanoTime()
@@ -119,7 +119,7 @@ object NetworkDiagnostics {
         }
 
     /** 第四层：HTTP 可达性与状态码 */
-    suspend fun checkHttp(url: String = "https://www.github.com"): CheckResult = withContext(Dispatchers.IO) {
+    suspend fun checkHttp(url: String = "https://www.bing.com"): CheckResult = withContext(Dispatchers.IO) {
         val client = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
