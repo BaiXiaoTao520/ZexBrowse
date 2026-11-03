@@ -542,9 +542,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
 
-                // 风险站点拦截：只拦用户主动发起的导航与顶层页面，不拦资源加载。
-                val userInitiated = request.hasUserGesture || request.isDirectNavigation
-                if (riskyNavigationGate.shouldBlock(id, uri, userInitiated, securityMode)) {
+                // 风险站点拦截：检查所有顶层导航，包括自动跳转和重定向，不拦子帧。
+                if (riskyNavigationGate.shouldBlock(id, uri, true, securityMode)) {
                     // A denied initial load must not be retried while the warning is pending.
                     if (pendingInitialLoads[id] == uri) clearPending(id)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
@@ -553,6 +552,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 外部应用 scheme：只有用户真的点了链接才值得询问。
                 // 搜索站的结果页常带自动跳转的推广链接（如 sogou://），
                 // 若连它们也弹窗，用户搜索一会儿就会被莫名其妙地问「是否打开外部应用」。
+                val userInitiated = request.hasUserGesture || request.isDirectNavigation
                 if (uri.isExternalAppUri()) {
                     // 无论是否询问，都要登记：拒绝后 Gecko 会回 onLoadError，
                     // 没登记就会被当成加载失败，把用户从当前页面踢到错误页。
