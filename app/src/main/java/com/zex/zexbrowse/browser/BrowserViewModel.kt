@@ -142,7 +142,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 界面层注入：网页请求麦克风等媒体权限时回调。参数：发起请求的站点、可用的音频设备、结果回调。
     // 是否询问用户由界面层根据用户的麦克风策略决定，本层只负责转发与返回结果。
     var mediaPermissionHandler: ((String, Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
-    var browserSettings = BrowserSettings()
+    private var browserSettings = BrowserSettings()
+    private var cookiePolicyEnabled: Boolean? = null
+    private var initialized = false
     private var incognitoContextId: String? = null
     // 不随 ViewModel 销毁而取消的协程：退出清理、写历史等必须在进程结束前跑完。
     private val applicationScope = kotlinx.coroutines.CoroutineScope(
@@ -189,9 +191,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 构建配置与依赖坐标同源（app/build.gradle.kts 的 geckoViewVersion），
      * 所以它一定等于实际打包进 APK 的内核版本，比运行时自报更可靠。
      *
-     * 注意：必须声明在 init 之前！init 里的 newTab() → createSession() → userAgentOverride()
-     * 会读取本属性；Kotlin 按声明顺序初始化字段，若本属性（by lazy 的委托字段）声明在 init 之后，
-     * 构造期读取会命中尚未初始化的委托字段 → NullPointerException 导致启动闪退。
      */
     private val engineVersion: String by lazy {
         val configured = FALLBACK_ENGINE_VERSION.substringBefore('.').takeIf { it.toIntOrNull() != null }
@@ -207,13 +206,29 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        // 兜底：ViewModel 构造期一旦抛异常，Compose 无法创建 ViewModel → 整个应用会直接闪退。
-        // 这里把初始化包住：最坏情况只是初始标签没建好（首页仍能打开），而不是应用打不开。
-        // 同时把异常写入崩溃日志，便于后续排查。
         runCatching { lastColorScheme = runtime.settings.getPreferredColorScheme() }
-        runCatching { newTab() }
-            .onFailure { CrashReporter.record(application, it) }
     }
+
+    // Gecko's cookie policy is runtime-wide, so it also affects existing tabs.
+    fun syncSettings(settings: BrowserSettings) {
+        if (cookiePolicyEnabled != settings.cookiesEnabled) {
+            val behavior = if (settings.cookiesEnabled) {
+                ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS
+            } else {
+                ContentBlocking.CookieBehavior.ACCEPT_NONE
+            }
+            runtime.settings.contentBlocking.setCookieBehavior(behavior)
+            runtime.settings.contentBlocking.setCookieBehaviorPrivateMode(behavior)
+            cookiePolicyEnabled = settings.cookiesEnabled
+        }
+        browserSettings = settings
+        if (!initialized) {
+            initialized = true
+            runCatching { newTab() }
+                .onFailure { CrashReporter.record(getApplication<Application>(), it) }
+        }
+    }
+
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val (session, id) = createSession(incognito)
         _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
