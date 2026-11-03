@@ -631,6 +631,8 @@
     <string name="risk_reason_mixed_passive">部分內容未加密</string>
     <string name="risk_detail_mixed_passive">頁面中的圖片等資源透過明文載入，不影響登入安全，但內容可能被替換。</string>
     <string name="risk_reason_deceptive_url">網址具有欺騙性</string>
+    <string name="risk_reason_ambiguous_url">網址的目標不明確</string>
+    <string name="risk_detail_ambiguous_url">無法可靠地確定這個網址的目標網站，請確認後再繼續。</string>
     <string name="risk_detail_deceptive_url">這個連結用「@」隱藏了真實網站，實際瀏覽的是 %1$s。這是常見的釣魚手法。</string>
     <string name="risk_reason_known_bad">已知風險網站</string>
     <string name="risk_reason_trojan">疑似木馬或詐欺</string>
