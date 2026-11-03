@@ -447,6 +447,7 @@
     <string name="dl_notify_failed">Download failed</string>
     <string name="dl_channel_name">Browser downloads</string>
     <string name="dl_channel_done">Download complete</string>
+    <string name="dl_err_invalid_name">Enter a file name without path separators. . and .. are not allowed.</string>
     <string name="dl_err_cancelled">Download cancelled</string>
     <string name="dl_err_unknown">Unknown error</string>
     <string name="dl_err_empty_body">The download response was empty</string>
