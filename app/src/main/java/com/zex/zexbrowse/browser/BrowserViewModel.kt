@@ -256,16 +256,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 全程只碰 incognito 标签，绝不影响普通标签。
      */
     fun loadInIncognito(input: String): Boolean {
-        val tab = _tabs.value.lastOrNull { it.incognito } ?: return false
-        _selectedId.value = tab.id
         val target = normalize(input)
-        cancelPendingFailure(tab.id)
-        if (attachedSessions.contains(tab.id)) {
-            runCatching { tab.session.loadUri(target) }
+        // 与普通模式对齐：优先复用「唯一且仍为空白」的无痕标签，
+        // 否则（已看过页面、或有多个无痕标签）新建一个，让搜索内容落在新标签里
+        val blankIncognito = _tabs.value.singleOrNull {
+            it.incognito && (it.url.isBlank() || it.url == "about:blank")
+        }
+        if (blankIncognito == null) return false
+        _selectedId.value = blankIncognito.id
+        cancelPendingFailure(blankIncognito.id)
+        if (attachedSessions.contains(blankIncognito.id)) {
+            runCatching { blankIncognito.session.loadUri(target) }
         } else {
-            pendingInitialLoads[tab.id] = target
-            pendingLoadAttempts.remove(tab.id)
-            mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+            pendingInitialLoads[blankIncognito.id] = target
+            pendingLoadAttempts.remove(blankIncognito.id)
+            mainHandler.postDelayed({ onSessionAttached(blankIncognito.id) }, 0)
         }
         return true
     }
@@ -777,9 +782,24 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      */
     fun load(input: String) {
         val target = normalize(input)
-        // 标签已全部关完（界面仍可能停在空态页）时先补一个，避免搜索无反应
-        if (_tabs.value.isEmpty()) newTab()
-        val tab = selected ?: return
+        // 从首页搜索时，优先复用「唯一且仍为空白」的普通标签，避免每次搜索都堆一个新标签；
+        // 没有可复用标签（已经开了网页、或标签已全部关掉）时新建一个，
+        // 保证搜索内容落在新建标签里而不是被丢弃。
+        // 只考虑普通标签：此前直接拿 selected 会复用到无痕标签，
+        // 导致普通模式搜索把内容加载进了无痕会话。
+        val blankNormal = _tabs.value.singleOrNull {
+            !it.incognito && (it.url.isBlank() || it.url == "about:blank")
+        }
+        val tab = when {
+            blankNormal != null -> {
+                _selectedId.value = blankNormal.id
+                blankNormal
+            }
+            else -> {
+                newTab()
+                selected
+            }
+        } ?: return
         cancelPendingFailure(tab.id)
         if (attachedSessions.contains(tab.id)) {
             runCatching { tab.session.loadUri(target) }

@@ -1266,8 +1266,9 @@ private fun PageContent(
         )
         Page.INCOGNITO -> IncognitoHomeScreen(
             onSearch = { address ->
-                // 优先复用已有无痕标签：连续搜索不堆标签，与主流浏览器行为一致；
-                // 只有当前没有无痕标签时才新建。无论哪种走法，结果都不会落到普通标签。
+                // 优先复用唯一且仍为空白页的无痕标签；
+                // 没有可复用的（已看过页面、有多个无痕标签、或一个都没）则新建，
+                // 搜索内容随 initialUrl 一起交给新标签，不会落空。
                 if (!browserViewModel.loadInIncognito(address)) {
                     browserViewModel.newTab(incognito = true, initialUrl = address)
                 }
