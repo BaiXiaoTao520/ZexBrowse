@@ -621,7 +621,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 退出无痕浏览：彻底关闭全部无痕标签并清除其 Cookie/缓存，普通标签不受影响
     fun exitIncognito() {
         val incognitoTabs = _tabs.value.filter { it.incognito }
-        if (incognitoTabs.isEmpty()) return
+        if (incognitoTabs.isEmpty()) {
+            // 标签可能已经在 close() 里逐个关完，此时仍要确保存储上下文被清掉，
+            // 不能因为「没有无痕标签」就直接返回。
+            purgeIncognitoContext()
+            return
+        }
         incognitoTabs.forEach { tab ->
             riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
