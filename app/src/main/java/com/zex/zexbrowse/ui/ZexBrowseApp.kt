@@ -1038,34 +1038,29 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         else -> false
     }
 
-    // 状态栏图标明暗必须跟实际底色一致，而不是只看深浅主题：
-    // - 无痕首页（Page.INCOGNITO）与无痕标签页：深紫底 → 浅色图标
-    // - 无痕浏览页：顶栏/状态栏是淡紫 IncognitoTopBarColor → 必须深色图标，
-    //   否则浅底配白图标会完全看不见（上一版就是这里错了）
-    val incognitoDeepChrome = when (page) {
-        Page.INCOGNITO -> true
-        Page.TABS -> tabsIncognito
-        else -> false
-    }
+    // 状态栏图标明暗必须跟实际底色一致：
+    // - 无痕首页：整页深紫 → 浅色图标
+    // - 无痕浏览页：顶栏/状态栏是淡紫 IncognitoTopBarColor → 深色图标
+    // - 无痕标签管理页：不再铺深紫，跟随主题表面 → 与其它页面一样跟随深浅
+    val incognitoDeepChrome = page == Page.INCOGNITO
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
                 // 逐个列举底色，不用「取反」推导：
-                // - 无痕首页/标签页：深紫底 → 浅色图标
+                // - 无痕首页：深紫底 → 浅色图标
                 // - 无痕浏览页：淡紫底 → 深色图标
-                // - 其余页面：跟随主题深浅
+                // - 其余页面（含标签管理页）：跟随主题深浅
                 isAppearanceLightStatusBars = when {
                     incognitoDeepChrome -> false
-                    incognitoActive -> true
+                    page == Page.BROWSER && incognitoActive -> true
                     else -> !useDarkTheme
                 }
                 // 导航栏区域（手势条）的底色：
                 // - 无痕首页：整页深紫 → 浅色图标
                 // - 无痕浏览页：底栏与手势条区都铺淡紫 → 深色图标
-                // - 无痕标签管理页：只给状态栏铺了深紫，手势条区仍是主题表面 → 跟随深浅
-                // - 其余页面：跟随深浅
+                // - 标签管理页等其余页面：主题表面 → 跟随深浅
                 isAppearanceLightNavigationBars = when {
                     page == Page.BROWSER && incognitoActive -> true
                     page == Page.INCOGNITO -> false
@@ -1179,11 +1174,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                         }
                     }
                 }
-                if (page == Page.TABS && incognitoActive) {
-                    Spacer(Modifier.align(Alignment.TopCenter).fillMaxWidth()
-                        .windowInsetsTopHeight(WindowInsets.statusBars)
-                        .background(IncognitoBarBackground))
-                }
+                // 管理标签页的状态栏不额外铺色：只让状态栏图标跟随主题，
+                // 避免出现「深紫状态栏 + 浅色页面」的撞色（截图 2）
             }
             // 上次崩溃日志展示：启动可读，支持一键复制 / 清除
             previousCrashLog?.let { log ->
@@ -3399,7 +3391,13 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 // 地址栏输入态下点页面其他位置即收起键盘与光晕
                 .dismissFocusOnOutsideTap(inputFocused, focusManager, contentOutsideInput = true)
         ) {
-            LazyRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            // 标签条这一行位于地址栏与网页之间，默认透出主题背景色。
+            // 无痕时补上与上下栏同一档淡紫，否则中间会露出一条主题色断层（截图 1）。
+            LazyRow(
+                Modifier.fillMaxWidth()
+                    .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
+                    .padding(horizontal = 8.dp)
+            ) {
                 items(visibleTabs, key = { it.id }) { tab ->
                     AssistChip(
                         onClick = { viewModel.select(tab.id) },
