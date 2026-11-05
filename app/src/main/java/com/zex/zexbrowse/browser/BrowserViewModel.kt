@@ -586,13 +586,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
         blockedExternalUris.remove(id)
-        runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
+        val closing = _tabs.value.firstOrNull { it.id == id }
+        runCatching { closing?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
-        // 不再自动补空白标签：关完后标签列表真的为空，
-        // 由界面层根据空态回首页或停留在「暂无标签」页；
-        // 需要浏览时由 load / loadExternalUrl 按需新建。
-        _selectedId.value = _tabs.value.lastOrNull()?.id
+        // 选中项优先落在同类型标签上：无痕标签关完后不能直接跳到普通标签，
+        // 那会让用户以为「无痕标签变成了普通标签」。同类也没有后才回退到剩余任一标签。
+        val sameKind = _tabs.value.lastOrNull { it.incognito == (closing?.incognito ?: false) }
+        _selectedId.value = (sameKind ?: _tabs.value.lastOrNull())?.id
     }
     // 仅关闭普通标签，不动无痕标签。
     // 不再自动补空白标签：真的关空后由界面层展示「暂无标签」。

@@ -1004,14 +1004,21 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
     val colorScheme = resolveColorScheme(settings, useDarkTheme, context)
 
-    // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清
+    // 无痕浏览态：无痕首页整页深紫，无痕标签浏览页也属于无痕环境。
+    // 状态栏与工具栏必须跟着变，否则用户只能从地址栏一圈紫光分辨，太弱。
+    val allTabs by browserViewModel.tabs.collectAsState()
+    val currentTabId by browserViewModel.selectedId.collectAsState()
+    val incognitoActive = page == Page.INCOGNITO || allTabs.firstOrNull { it.id == currentTabId }?.incognito == true
+
+    // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清；
+    // 无痕环境下背景是深紫，图标必须用浅色，与主题深浅无关
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !useDarkTheme
-                isAppearanceLightNavigationBars = !useDarkTheme
+                isAppearanceLightStatusBars = !useDarkTheme && !incognitoActive
+                isAppearanceLightNavigationBars = !useDarkTheme && !incognitoActive
             }
         }
     }
@@ -1509,11 +1516,16 @@ private fun Modifier.dismissFocusOnOutsideTap(
     }
 }
 
+/**
+ * 底部工具栏的毛玻璃容器。
+ *
+ * @param tint 可选的覆盖底色（如无痕态传入紫色）；为 null 时用主题表面色
+ */
 @Composable
-private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+private fun GlassSurface(modifier: Modifier = Modifier, tint: Color? = null, content: @Composable RowScope.() -> Unit) {
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+        color = tint ?: MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
         tonalElevation = 3.dp,
         shape = MaterialTheme.shapes.extraLarge
     ) {
@@ -3238,7 +3250,15 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 0.dp)) {
+            Box(
+                Modifier.fillMaxWidth().statusBarsPadding()
+                    // 无痕时顶栏（含状态栏区）铺一层专属紫，让整个上边框一眼可分
+                    .background(
+                        if (incognitoActive) IncognitoAccentColor.copy(alpha = 0.22f)
+                        else Color.Transparent
+                    )
+                    .padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 0.dp)
+            ) {
                 AddressInput(
                     value = input,
                     onValueChange = { input = it },
@@ -3265,7 +3285,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             }
         },
         bottomBar = {
-            GlassSurface(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
+            GlassSurface(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp),
+                // 无痕时底栏也换成紫色调，与普通浏览区分
+                tint = if (incognitoActive) IncognitoAccentColor.copy(alpha = 0.28f) else null
+            ) {
                 IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
                 // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
@@ -3463,6 +3487,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     var incognitoOnly by remember { mutableStateOf(initialIncognito) }
+    // 新建标签弹窗：跟浏览器页一致，让用户自己选普通还是无痕
+    var showNewTabDialog by remember { mutableStateOf(false) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
     Scaffold(
         topBar = {
@@ -3485,9 +3511,9 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                 }
             )
         },
-        // 右下角新建标签：新建后直接回首页（新标签是空白的，留在列表看不到内容）
+        // 右下角新建标签：先弹窗让用户选普通还是无痕，选完直接回首页
         floatingActionButton = {
-            FloatingActionButton(onClick = { onNewTab(incognitoOnly) }) {
+            FloatingActionButton(onClick = { showNewTabDialog = true }) {
                 Icon(Icons.Default.Add, stringResource(R.string.s113))
             }
         }
@@ -3539,13 +3565,37 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                         }
                         IconButton(onClick = {
                             viewModel.close(tab.id)
-                            // 关掉最后一个后标签列表为空，标签页已无内容可展示，直接回首页
-                            if (viewModel.tabs.value.isEmpty()) onBackToHome()
+                            // 关掉最后一个标签后直接回首页，不在标签页停留空列表；
+                            // 无痕页签下同样退出无痕并清 Cookie/缓存，不能落到普通标签页
+                            if (viewModel.tabs.value.isEmpty()) {
+                                if (incognitoOnly) onExitIncognito() else onBackToHome()
+                            } else if (incognitoOnly && viewModel.tabs.value.none { it.incognito }) {
+                                onExitIncognito()
+                            }
                         }) { Icon(Icons.Default.Close, stringResource(R.string.s079)) }
                     }
                 }
             }
         }
+    }
+    if (showNewTabDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewTabDialog = false },
+            title = { Text(stringResource(R.string.s113)) },
+            text = { Text(stringResource(R.string.s122)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNewTabDialog = false
+                    onNewTab(false)
+                }) { Text(stringResource(R.string.s123)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showNewTabDialog = false
+                    onNewTab(true)
+                }) { Text(stringResource(R.string.s124)) }
+            }
+        )
     }
 }
 
