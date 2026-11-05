@@ -82,7 +82,7 @@ android {
         applicationId = "com.zex.zexbrowse"
         minSdk = 28
         targetSdk = 37
-        versionCode = 81
+        versionCode = 82
         versionName = "11.3.1"
         ndk { abiFilters += "arm64-v8a" }
 
