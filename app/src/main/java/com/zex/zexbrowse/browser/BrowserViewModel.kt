@@ -52,6 +52,9 @@ import kotlin.coroutines.suspendCoroutine
 internal fun canReuseBlankTab(url: String, incognito: Boolean, requestedIncognito: Boolean, hasPendingLoad: Boolean): Boolean =
     incognito == requestedIncognito && !hasPendingLoad && (url.isBlank() || url == "about:blank")
 
+internal fun <T> selectedOrSingleReusableTab(tabs: List<T>, selected: T?, isReusable: (T) -> Boolean): T? =
+    selected?.takeIf(isReusable) ?: tabs.singleOrNull(isReusable)
+
 data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
@@ -257,15 +260,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
 
-    /** Reuse the only available blank private tab, or let the caller create one. */
+    /** Reuse the selected blank private tab, or the only available blank private tab. */
     fun loadInIncognito(input: String): Boolean {
         val target = normalize(input)
-        // 与普通模式对齐：优先复用「唯一且仍为空白」的无痕标签，
-        // 否则（已看过页面、或有多个无痕标签）新建一个，让搜索内容落在新标签里
-        val blankIncognito = _tabs.value.singleOrNull {
+        val blankIncognito = selectedOrSingleReusableTab(_tabs.value, selected) {
             canReuseBlankTab(it.url, it.incognito, requestedIncognito = true, hasPendingLoad = it.id in pendingInitialLoads)
-        }
-        if (blankIncognito == null) return false
+        } ?: return false
         _selectedId.value = blankIncognito.id
         cancelPendingFailure(blankIncognito.id)
         if (attachedSessions.contains(blankIncognito.id)) {

@@ -1017,9 +1017,12 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 状态栏与工具栏必须跟着变，否则用户只能从地址栏一圈紫光分辨，太弱。
     val allTabs by browserViewModel.tabs.collectAsState()
     val currentTabId by browserViewModel.selectedId.collectAsState()
-    val incognitoActive = page == Page.INCOGNITO ||
-        ((page == Page.BROWSER || page == Page.TABS) &&
-            allTabs.firstOrNull { it.id == currentTabId }?.incognito == true)
+    val incognitoActive = when (page) {
+        Page.INCOGNITO -> true
+        Page.TABS -> tabsIncognito
+        Page.BROWSER -> allTabs.firstOrNull { it.id == currentTabId }?.incognito == true
+        else -> false
+    }
 
     // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清；
     // 无痕环境下背景是深紫，图标必须用浅色，与主题深浅无关
@@ -1283,8 +1286,8 @@ private fun PageContent(
         )
         Page.INCOGNITO -> IncognitoHomeScreen(
             onSearch = { address ->
-                // 优先复用唯一且仍为空白页的无痕标签；
-                // 没有可复用的（已看过页面、有多个无痕标签、或一个都没）则新建，
+                // 优先复用当前空白无痕标签，其次复用唯一可用的空白无痕标签；
+                // 没有可复用的则新建，
                 // 搜索内容随 initialUrl 一起交给新标签，不会落空。
                 if (!browserViewModel.loadInIncognito(address)) {
                     browserViewModel.newTab(incognito = true, initialUrl = address)
@@ -1311,7 +1314,8 @@ private fun PageContent(
         )
         Page.TABS -> TabOverview(
             viewModel = browserViewModel,
-            initialIncognito = tabsIncognito,
+            incognitoOnly = tabsIncognito,
+            onIncognitoOnlyChange = onTabsIncognitoChange,
             onBack = goBack,
             onExitIncognito = resetToHome,
             onBackToHome = resetToHome,
@@ -3492,9 +3496,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, incognitoOnly: Boolean, onIncognitoOnlyChange: (Boolean) -> Unit, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
-    var incognitoOnly by remember { mutableStateOf(initialIncognito) }
     // 新建标签弹窗：跟浏览器页一致，让用户自己选普通还是无痕
     var showNewTabDialog by remember { mutableStateOf(false) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
@@ -3532,7 +3535,7 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                 .padding(top = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
+            item { Row { AssistChip(onClick = { onIncognitoOnlyChange(false) }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { onIncognitoOnlyChange(true) }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
             if (displayedTabs.isEmpty()) item {
                 // 空态：给出图标与说明，而不是一行灰字，避免看起来像加载失败
                 Surface(
