@@ -3839,7 +3839,13 @@ private fun SettingsScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                    // 紧凑化：M3 文本框自然高度是 56dp，这里压到 52dp（安全下限：16+20+16），
+                    // 并把上下留白收紧到 6dp，让搜索框离顶栏更近；
+                    // 它在 LazyColumn 的第一个 item 里，后续入口卡片会随之整体上移，
+                    // 不会像固定头部那样在下方留下空白。
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .height(52.dp)
                         .onFocusChanged { searchFocused = it.isFocused },
                     placeholder = { Text(stringResource(R.string.s302)) },
                     singleLine = true,
