@@ -23,6 +23,7 @@ import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.LemwoodMirror
 import com.zex.zexbrowse.data.SecurityScanner
+import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.resolveCustomSearchTemplate
 import com.zex.zexbrowse.media.MediaPlaybackController
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,12 @@ import java.io.File
 import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
+
+internal fun canReuseBlankTab(url: String, incognito: Boolean, requestedIncognito: Boolean, hasPendingLoad: Boolean): Boolean =
+    incognito == requestedIncognito && !hasPendingLoad && (url.isBlank() || url == "about:blank")
 
 data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
@@ -54,6 +61,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 网页媒体播放期间的前台服务与音频焦点管理（避免后台/锁屏时音频断续）
     private val mediaPlayback = MediaPlaybackController(getApplication())
     private val database = BrowserDatabase.create(application)
+    private val settingsStore = SettingsStore(application)
     private val downloadScheduler = DownloadScheduler(application)
     val downloads = database.downloadDao().observeAll()
     val history = database.dao().history()
@@ -69,33 +77,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             externalDownloadHandler = value
             while (bufferedExternalDownloads.isNotEmpty()) value(bufferedExternalDownloads.removeFirst())
         }
-    // 界面层注入：命中风险站点时的拦截回调。参数：目标地址、扫描结论、继续访问回调。
-    // 为 null 表示尚未接入界面，不做拦截（仅显示图标）。
-    var riskySiteHandler: ((url: String, assessment: SecurityScanner.RiskAssessment, proceed: () -> Unit) -> Unit)? = null
-    // 用户选「仍然访问」后的放行名单：避免同一个地址被反复拦回
-    private val allowedOnce = HashSet<String>()
+    private val riskyNavigationGate = RiskyNavigationGate()
+    internal val riskySiteWarnings = riskyNavigationGate.warnings
 
-    fun clearSecurityAllowance() { allowedOnce.clear() }
+    fun clearSecurityAllowance() { riskyNavigationGate.clearAllowances() }
+    internal fun dismissRiskySite(tabId: String, warning: RiskySiteWarning) = riskyNavigationGate.dismiss(tabId, warning)
+    internal fun proceedRiskySite(tabId: String, warning: RiskySiteWarning) {
+        val tab = _tabs.value.firstOrNull { it.id == tabId } ?: return
+        val uri = riskyNavigationGate.proceed(tabId, warning) ?: return
+        tab.session.loadUri(uri)
+    }
 
     /** 当前安全防护模式（由界面层同步） */
     var securityMode: String = "standard"
-
-    /**
-     * 根据防护模式判断是否拦截。
-     *
-     * - enhanced：可疑及以上均拦，并提示未加密连接
-     * - standard：只拦危险级（默认，避免干扰正常浏览）
-     * - basic：不拦，只显示护盾图标
-     */
-    private fun shouldBlockRisky(uri: String): Boolean {
-        if (uri in allowedOnce) return false
-        if (securityMode == "basic") return false
-        val level = SecurityScanner.assessUrl(uri).level
-        return when (securityMode) {
-            "enhanced" -> level == SecurityScanner.RiskLevel.SUSPICIOUS || level == SecurityScanner.RiskLevel.DANGEROUS
-            else -> level == SecurityScanner.RiskLevel.DANGEROUS
-        }
-    }
 
     private fun notifyExternalDownload(url: String) {
         val handler = externalDownloadHandler
@@ -142,7 +136,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 界面层注入：网页请求麦克风等媒体权限时回调。参数：发起请求的站点、可用的音频设备、结果回调。
     // 是否询问用户由界面层根据用户的麦克风策略决定，本层只负责转发与返回结果。
     var mediaPermissionHandler: ((String, Array<out GeckoSession.PermissionDelegate.MediaSource>, GeckoSession.PermissionDelegate.MediaCallback) -> Unit)? = null
-    var browserSettings = BrowserSettings()
+    private var browserSettings = BrowserSettings()
+    private var cookiePolicyEnabled: Boolean? = null
+    private var initialized = false
     private var incognitoContextId: String? = null
     // 不随 ViewModel 销毁而取消的协程：退出清理、写历史等必须在进程结束前跑完。
     private val applicationScope = kotlinx.coroutines.CoroutineScope(
@@ -189,9 +185,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 构建配置与依赖坐标同源（app/build.gradle.kts 的 geckoViewVersion），
      * 所以它一定等于实际打包进 APK 的内核版本，比运行时自报更可靠。
      *
-     * 注意：必须声明在 init 之前！init 里的 newTab() → createSession() → userAgentOverride()
-     * 会读取本属性；Kotlin 按声明顺序初始化字段，若本属性（by lazy 的委托字段）声明在 init 之后，
-     * 构造期读取会命中尚未初始化的委托字段 → NullPointerException 导致启动闪退。
      */
     private val engineVersion: String by lazy {
         val configured = FALLBACK_ENGINE_VERSION.substringBefore('.').takeIf { it.toIntOrNull() != null }
@@ -207,13 +200,29 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        // 兜底：ViewModel 构造期一旦抛异常，Compose 无法创建 ViewModel → 整个应用会直接闪退。
-        // 这里把初始化包住：最坏情况只是初始标签没建好（首页仍能打开），而不是应用打不开。
-        // 同时把异常写入崩溃日志，便于后续排查。
         runCatching { lastColorScheme = runtime.settings.getPreferredColorScheme() }
-        runCatching { newTab() }
-            .onFailure { CrashReporter.record(application, it) }
     }
+
+    // Gecko's cookie policy is runtime-wide, so it also affects existing tabs.
+    fun syncSettings(settings: BrowserSettings) {
+        if (cookiePolicyEnabled != settings.cookiesEnabled) {
+            val behavior = if (settings.cookiesEnabled) {
+                ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS
+            } else {
+                ContentBlocking.CookieBehavior.ACCEPT_NONE
+            }
+            runtime.settings.contentBlocking.setCookieBehavior(behavior)
+            runtime.settings.contentBlocking.setCookieBehaviorPrivateMode(behavior)
+            cookiePolicyEnabled = settings.cookiesEnabled
+        }
+        browserSettings = settings
+        if (!initialized) {
+            initialized = true
+            runCatching { newTab() }
+                .onFailure { CrashReporter.record(getApplication<Application>(), it) }
+        }
+    }
+
     fun newTab(incognito: Boolean = false, initialUrl: String? = null): GeckoSession {
         val (session, id) = createSession(incognito)
         _tabs.value = _tabs.value + BrowserTab(id, session, incognito); _selectedId.value = id
@@ -248,19 +257,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
 
-    /**
-     * 在无痕环境里加载地址：复用最后一个无痕标签，没有则返回 false 由调用方新建。
-     *
-     * 与 [loadExternalUrl] 的区别：这里不看当前页是否空白——无痕页的搜索框
-     * 就是一个新入口，用户希望在同一无痕标签里连续跳转，而不是每次堆一个新标签。
-     * 全程只碰 incognito 标签，绝不影响普通标签。
-     */
+    /** Reuse the only available blank private tab, or let the caller create one. */
     fun loadInIncognito(input: String): Boolean {
         val target = normalize(input)
         // 与普通模式对齐：优先复用「唯一且仍为空白」的无痕标签，
         // 否则（已看过页面、或有多个无痕标签）新建一个，让搜索内容落在新标签里
         val blankIncognito = _tabs.value.singleOrNull {
-            it.incognito && (it.url.isBlank() || it.url == "about:blank")
+            canReuseBlankTab(it.url, it.incognito, requestedIncognito = true, hasPendingLoad = it.id in pendingInitialLoads)
         }
         if (blankIncognito == null) return false
         _selectedId.value = blankIncognito.id
@@ -378,6 +381,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         userAgentOverride(browserSettings)?.let(sessionSettings::userAgentOverride)
         val session = GeckoSession(sessionSettings.build())
         val id = UUID.randomUUID().toString()
+        val connectionSecurity = ConnectionSecurityState()
         // 媒体播放委托：播放时启动前台服务 + 申请音频焦点，停止时释放（修复后台/锁屏音频断续）
         mediaPlayback.attach(session)
         session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
@@ -403,8 +407,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 update(id) { tab ->
                     // 加载失败后 Gecko 会导航到 about:blank 之类的内部页；
                     // 此时必须保留 failed 与失败网址，否则错误页会被冲掉、变成空白页。
-                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true)
-                    else tab.copy(url = url, loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
+                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true, risk = connectionSecurity.onPageStart(tab.url))
+                    else tab.copy(url = url, risk = connectionSecurity.onPageStart(url), loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
                 }
             }
             override fun onPageStop(session: GeckoSession, success: Boolean) {
@@ -432,8 +436,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val secure = securityInfo.isSecure && !securityInfo.isException
                 update(id) { tab ->
                     tab.copy(
-                        risk = SecurityScanner.assess(
-                            url = tab.url,
+                        risk = connectionSecurity.onSecurityChange(
+                            securityOrigin = securityInfo.origin,
                             isSecure = secure,
                             mixedActive = mixedActive,
                             mixedPassive = mixedPassive,
@@ -520,10 +524,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onLocationChange(session: GeckoSession, url: String?, permissions: List<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
                 if (url != null) {
                     android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url")
-                    val risk = SecurityScanner.assessUrl(url)
                     update(id) { tab ->
                         if (url.startsWith("about:") && tab.failed) tab
-                        else tab.copy(url = url, risk = risk)
+                        else tab.copy(url = url, risk = connectionSecurity.onLocationChange(url))
                     }
                 }
             }
@@ -543,25 +546,17 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
 
-                // 风险站点拦截：只拦用户主动发起的导航与顶层页面，不拦资源加载。
-                // 不用 isDirectNavigation：它表示「由应用调 load 发起」，语义不同。
-                val userInitiated = request.hasUserGesture || request.isDirectNavigation
-                if (shouldBlockRisky(uri) && userInitiated) {
-                    val assessment = SecurityScanner.assessUrl(uri)
-                    val handler = riskySiteHandler
-                    if (handler != null) {
-                        handler(uri, assessment) {
-                            // 用户选择继续：记入放行名单后重新加载
-                            allowedOnce.add(uri)
-                            session.loadUri(uri)
-                        }
-                        return GeckoResult.fromValue(AllowOrDeny.DENY)
-                    }
+                // 风险站点拦截：检查所有顶层导航，包括自动跳转和重定向，不拦子帧。
+                if (riskyNavigationGate.shouldBlock(id, uri, true, securityMode)) {
+                    // A denied initial load must not be retried while the warning is pending.
+                    if (pendingInitialLoads[id] == uri) clearPending(id)
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
 
                 // 外部应用 scheme：只有用户真的点了链接才值得询问。
                 // 搜索站的结果页常带自动跳转的推广链接（如 sogou://），
                 // 若连它们也弹窗，用户搜索一会儿就会被莫名其妙地问「是否打开外部应用」。
+                val userInitiated = request.hasUserGesture || request.isDirectNavigation
                 if (uri.isExternalAppUri()) {
                     // 无论是否询问，都要登记：拒绝后 Gecko 会回 onLoadError，
                     // 没登记就会被当成加载失败，把用户从当前页面踢到错误页。
@@ -587,6 +582,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun select(id: String) { _selectedId.value = id }
     fun close(id: String) {
         clearPending(id)
+        riskyNavigationGate.dismiss(id)
         attachedSessions.remove(id)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
@@ -604,6 +600,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 不再自动补空白标签：真的关空后由界面层展示「暂无标签」。
     fun closeAllNormal() {
         _tabs.value.filter { !it.incognito }.forEach { tab ->
+            riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
@@ -612,6 +609,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
     fun closeAllIncognito() {
         _tabs.value.filter { it.incognito }.forEach { tab ->
+            riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
@@ -625,6 +623,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val incognitoTabs = _tabs.value.filter { it.incognito }
         if (incognitoTabs.isEmpty()) return
         incognitoTabs.forEach { tab ->
+            riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
@@ -780,35 +779,39 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 解法：视图已通过 onSessionAttached 声明就绪时才直接加载，
      * 否则先入队，等挂载回调到来时由重试链控制加载时机。
      */
-    fun load(input: String) {
+    fun load(input: String, tab: BrowserTab? = selected) {
         val target = normalize(input)
-        // 从首页搜索时，优先复用「唯一且仍为空白」的普通标签，避免每次搜索都堆一个新标签；
-        // 没有可复用标签（已经开了网页、或标签已全部关掉）时新建一个，
-        // 保证搜索内容落在新建标签里而不是被丢弃。
-        // 只考虑普通标签：此前直接拿 selected 会复用到无痕标签，
-        // 导致普通模式搜索把内容加载进了无痕会话。
-        val blankNormal = _tabs.value.singleOrNull {
-            !it.incognito && (it.url.isBlank() || it.url == "about:blank")
-        }
-        val tab = when {
-            blankNormal != null -> {
-                _selectedId.value = blankNormal.id
-                blankNormal
-            }
-            else -> {
-                newTab()
-                selected
-            }
-        } ?: return
-        cancelPendingFailure(tab.id)
-        if (attachedSessions.contains(tab.id)) {
-            runCatching { tab.session.loadUri(target) }
+        // An explicit navigation targets the selected session, including private sessions.
+        val targetTab = tab ?: if (_tabs.value.isEmpty()) {
+            newTab()
+            selected
+        } else null
+        targetTab ?: return
+        cancelPendingFailure(targetTab.id)
+        if (attachedSessions.contains(targetTab.id)) {
+            // Stop any earlier retry from replacing this explicit navigation.
+            clearPending(targetTab.id)
+            runCatching { targetTab.session.loadUri(target) }
             return
         }
         // 视图尚未挂载：交给待加载重试链，它会在 onPageStart 后自行停止
-        pendingInitialLoads[tab.id] = target
-        pendingLoadAttempts.remove(tab.id)
-        mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+        pendingInitialLoads[targetTab.id] = target
+        pendingLoadAttempts.remove(targetTab.id)
+        mainHandler.postDelayed({ onSessionAttached(targetTab.id) }, 0)
+    }
+    /** Home searches use a normal blank tab or create a new normal tab. */
+    fun loadFromHome(input: String) {
+        val blankNormal = _tabs.value.singleOrNull {
+            canReuseBlankTab(it.url, it.incognito, requestedIncognito = false, hasPendingLoad = it.id in pendingInitialLoads)
+        }
+        val targetTab = if (blankNormal != null) {
+            _selectedId.value = blankNormal.id
+            blankNormal
+        } else {
+            newTab()
+            selected
+        }
+        load(input, targetTab)
     }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
     fun reload() {
@@ -860,7 +863,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val record = database.downloadDao().findBySourceUrl(url) ?: return@launch
             downloadScheduler.cancel(record.id)
-            downloadScheduler.delete(record.id, record.targetUri, deleteFile = true)
+            downloadScheduler.delete(record.id, record.targetUri, deleteFile = false)
         }
     }
     fun pauseDownload(id: String) { viewModelScope.launch { downloadScheduler.pause(id) } }
@@ -868,7 +871,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun resumeDownload(id: String) {
         viewModelScope.launch {
             if (!downloadScheduler.resume(id)) {
-                android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.err_record_lost), android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.dl_err_no_resume), android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -918,21 +921,42 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
     fun deleteDownload(id: String, uri: String, deleteFile: Boolean) { viewModelScope.launch { downloadScheduler.delete(id, uri, deleteFile) } }
-    fun clearHistory() { applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() } }
-    fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true) {
+    private suspend fun clearHistoryData() {
+        try {
+            database.dao().clearHistory()
+        } finally {
+            settingsStore.clearSearchHistory()
+        }
+    }
+
+    fun clearHistory(onComplete: (Boolean) -> Unit = {}) {
+        applicationScope.launch {
+            val result = runCatching { clearHistoryData() }
+            result.exceptionOrNull()?.let { CrashReporter.record(getApplication(), it) }
+            withContext(Dispatchers.Main) { onComplete(result.isSuccess) }
+        }
+    }
+    fun clearBrowserData(cookies: Boolean = true, cache: Boolean = true, history: Boolean = true, onComplete: (Boolean) -> Unit = {}) {
         var flags = 0L
         if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.DOM_STORAGES
         if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
-        if (flags != 0L) {
-            // storageController 带 @UiThread 断言，必须在主线程取用，否则抛 IllegalThreadStateException
-            val clearFlags = flags
-            applicationScope.launch {
-                runCatching {
-                    withContext(Dispatchers.Main) { runtime.storageController.clearData(clearFlags) }
-                }.onFailure { CrashReporter.record(getApplication(), it) }
+        val clearFlags = flags
+        applicationScope.launch {
+            val historyResult = runCatching { if (history) clearHistoryData() }
+            val storageResult = runCatching {
+                if (clearFlags != 0L) withContext(Dispatchers.Main) {
+                    suspendCoroutine<Unit> { continuation ->
+                        runtime.storageController.clearData(clearFlags).accept(
+                            { continuation.resume(Unit) },
+                            { continuation.resumeWithException(it ?: IllegalStateException("GeckoView clearData failed")) }
+                        )
+                    }
+                }
             }
+            historyResult.exceptionOrNull()?.let { CrashReporter.record(getApplication(), it) }
+            storageResult.exceptionOrNull()?.let { CrashReporter.record(getApplication(), it) }
+            withContext(Dispatchers.Main) { onComplete(historyResult.isSuccess && storageResult.isSuccess) }
         }
-        if (history) applicationScope.launch(Dispatchers.IO) { database.dao().clearHistory() }
     }
     // 退出清理需要不随 ViewModel 销毁而取消的协程，否则进程结束时历史可能未清完
     private fun clearIncognitoContextIfEmpty() {

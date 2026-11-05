@@ -7,7 +7,6 @@
 package com.zex.zexbrowse.download
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
@@ -29,40 +28,30 @@ class DownloadScheduler(private val context: Context) {
     /**
      * 入队一次下载。
      *
-     * 整个流程必须跑在 IO 线程：其中包含文件名网络探测、目标文件创建、
+     * 整个流程必须跑在 IO 线程：其中包含目标文件创建、
      * Room 写入与 WorkManager 入队，放在调用方（如界面层的 Main 协程）执行
      * 会卡住主线程，表现为“点下载后界面顿一下”。
      */
     suspend fun enqueue(url: String, fileName: String, expectedHash: String, useExternalDirectory: Boolean, externalTreeUri: String, localSourceBin: String? = null): String = withContext(Dispatchers.IO) {
-        // 创建目标文件之前必须先确定真实文件名：
-        // OpenList/Alist、SharePoint 等站点的下载入口常为 download.aspx，
-        // 末段并非真实文件名。若先用它建文件，之后再改就晚了（文件已落盘）。
-        // 界面层已解析过时这里不会重复请求（prefer 会保留非通用名）。
-        // 【关键】若有本地捕获文件，绝不能再去 resolve(url) 发网络探测：
-        // 那会对一次性令牌地址发生二次请求→ 403。直接沿用传入的已知名字。
-        val finalName = if (localSourceBin != null) {
-            fileName.ifBlank { "download" }
-        } else if (DownloadFileName.isGeneric(fileName)) {
-            DownloadFileName.prefer(fileName, DownloadFileName.resolve(url))
-        } else {
-            fileName
-        }
-        val target = createTargetUri(finalName, useExternalDirectory, externalTreeUri)
+        // The caller supplies the name approved by the user. Do not resolve it again here.
+        val finalName = fileName
         val id = UUID.randomUUID().toString()
+        val (target, targetName) = createTargetUri(finalName, id, useExternalDirectory, externalTreeUri)
         database.downloadDao().save(
             DownloadEntity(
                 id = id,
-                fileName = finalName,
+                fileName = targetName,
                 sourceUrl = url,
                 targetUri = target.toString(),
-                expectedSha256 = expectedHash.trim()
+                expectedSha256 = expectedHash.trim(),
+                ownsTarget = true
             )
         )
         val input = Data.Builder()
             .putString(BrowserDownloadWorker.KEY_ID, id)
             .putString(BrowserDownloadWorker.KEY_URL, url)
             .putString(BrowserDownloadWorker.KEY_URI, target.toString())
-            .putString(BrowserDownloadWorker.KEY_FILE_NAME, finalName)
+            .putString(BrowserDownloadWorker.KEY_FILE_NAME, targetName)
             .putString(BrowserDownloadWorker.KEY_EXPECTED_HASH, expectedHash.trim())
             .putString(BrowserDownloadWorker.KEY_LOCAL_SOURCE, localSourceBin)
             .build()
@@ -85,7 +74,9 @@ class DownloadScheduler(private val context: Context) {
      */
     suspend fun resume(id: String): Boolean = withContext(Dispatchers.IO) {
         val record = database.downloadDao().find(id) ?: return@withContext false
+        if (!record.ownsTarget) return@withContext false
         val target = Uri.parse(record.targetUri)
+        if (target.scheme == "file" && runCatching { internalTarget(target) }.isFailure) return@withContext false
         // 续传起点以「目标文件当前实际长度」为准，而不是数据库里的下载字节数：
         // 暂停时最后一小段可能还没写回记录，直接用记录值会漏掉那部分数据。
         // SAF（外部目录）同样能读到已有长度，只是写入方式不同（见 Worker 中的 "wa" 模式）。
@@ -108,7 +99,7 @@ class DownloadScheduler(private val context: Context) {
      * Worker 收到停止信号时若看到状态不是 paused，会按取消处理。
      */
     suspend fun cancel(id: String) {
-        val target = runCatching { database.downloadDao().find(id)?.targetUri?.let(Uri::parse) }.getOrNull()
+        val target = runCatching { database.downloadDao().find(id)?.takeIf { it.ownsTarget }?.targetUri?.let(Uri::parse) }.getOrNull()
         database.downloadDao().finishWithMessage(id, "cancelled", context.getString(R.string.dl_err_cancelled))
         workManager.cancelAllWorkByTag(id)
         if (target != null) withContext(Dispatchers.IO) { deleteTarget(target) }
@@ -121,7 +112,7 @@ class DownloadScheduler(private val context: Context) {
 
     /** 目标文件当前已写入的字节数；不存在或读不到时返回 0 */
     private fun existingSize(target: Uri): Long = if (target.scheme == "file") {
-        File(target.path.orEmpty()).length()
+        internalTarget(target).length()
     } else {
         runCatching {
             context.contentResolver.openFileDescriptor(target, "r")?.use { it.statSize } ?: 0L
@@ -131,7 +122,7 @@ class DownloadScheduler(private val context: Context) {
     /** 删除已写入的目标文件（内部 file:// 与外部 SAF 均支持） */
     private fun deleteTarget(target: Uri) = runCatching {
         if (target.scheme == "file") {
-            File(target.path.orEmpty()).delete()
+            internalTarget(target).delete()
         } else {
             try {
                 DocumentsContract.deleteDocument(context.contentResolver, target)
@@ -141,17 +132,22 @@ class DownloadScheduler(private val context: Context) {
         }
     }
 
-    private fun createTargetUri(fileName: String, useExternalDirectory: Boolean, externalTreeUri: String): Uri {
+    private fun internalTarget(target: Uri): File =
+        DownloadTarget.checkedFile(File(context.filesDir, "downloads"), File(target.path.orEmpty()))
+
+    private fun createTargetUri(fileName: String, id: String, useExternalDirectory: Boolean, externalTreeUri: String): Pair<Uri, String> {
+        require(DownloadTarget.isValidName(fileName)) { "Invalid download filename" }
+        val targetName = downloadTargetName(fileName, id)
         if (useExternalDirectory) {
             val treeUri = Uri.parse(externalTreeUri)
             val directory = DocumentFile.fromTreeUri(context, treeUri) ?: error(context.getString(R.string.dl_err_dir_unavailable))
-            val existing = directory.findFile(fileName)
-            val target = existing ?: directory.createFile(mimeType(fileName), fileName) ?: error(context.getString(R.string.dl_err_cannot_create_ext))
-            return target.uri
+            val target = directory.createFile(mimeType(targetName), targetName) ?: error(context.getString(R.string.dl_err_cannot_create_ext))
+            return target.uri to (target.name ?: targetName)
         }
         val directory = File(context.filesDir, "downloads")
         check(directory.exists() || directory.mkdirs()) { context.getString(R.string.dl_err_cannot_create_int) }
-        return Uri.fromFile(File(directory, fileName))
+        val target = createInternalTarget(directory, targetName)
+        return Uri.fromFile(target) to targetName
     }
 
     private fun mimeType(fileName: String): String = when {
@@ -160,4 +156,20 @@ class DownloadScheduler(private val context: Context) {
         fileName.endsWith(".zip", true) -> "application/zip"
         else -> "application/octet-stream"
     }
+}
+
+internal fun createInternalTarget(directory: File, targetName: String): File {
+    DownloadTarget.create(directory, targetName)
+    val target = File(directory, targetName)
+    check(target.createNewFile()) { "Download destination already exists" }
+    return target
+}
+
+// A per-task suffix prevents a cancelled worker from deleting a later download
+// that happens to have the same suggested name.
+internal fun downloadTargetName(fileName: String, id: String): String {
+    val base = fileName.substringAfterLast('/').substringAfterLast('\\')
+        .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "download"
+    val dot = base.lastIndexOf('.')
+    return if (dot > 0) "${base.substring(0, dot)}-$id${base.substring(dot)}" else "$base-$id"
 }
