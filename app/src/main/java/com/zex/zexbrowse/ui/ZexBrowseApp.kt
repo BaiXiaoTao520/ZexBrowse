@@ -64,6 +64,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -319,6 +322,7 @@ private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse
  * 不受用户主题变化影响。
  */
 private val IncognitoAccentColor = Color(0xFF7B4DDB)
+private val IncognitoBarBackground = Color(0xFF2A1B45)
 
 /** 联系我们的跳转地址 */
 private const val CONTACT_URL = "https://knocket.ai/u/zex"
@@ -1009,14 +1013,27 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
     val colorScheme = resolveColorScheme(settings, useDarkTheme, context)
 
-    // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清
+    // 无痕浏览态：无痕首页整页深紫，无痕标签浏览页也属于无痕环境。
+    // 状态栏与工具栏必须跟着变，否则用户只能从地址栏一圈紫光分辨，太弱。
+    val allTabs by browserViewModel.tabs.collectAsState()
+    val currentTabId by browserViewModel.selectedId.collectAsState()
+    val incognitoActive = when (page) {
+        Page.INCOGNITO -> true
+        Page.TABS -> tabsIncognito
+        Page.BROWSER -> allTabs.firstOrNull { it.id == currentTabId }?.incognito == true
+        else -> false
+    }
+
+    // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清；
+    // 无痕环境下背景是深紫，图标必须用浅色，与主题深浅无关
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !useDarkTheme
-                isAppearanceLightNavigationBars = !useDarkTheme
+                isAppearanceLightStatusBars = !useDarkTheme && !incognitoActive
+                // Browser and tab overview navigation insets use the theme surface.
+                isAppearanceLightNavigationBars = !useDarkTheme && page != Page.INCOGNITO
             }
         }
     }
@@ -1122,6 +1139,11 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                             )
                         }
                     }
+                }
+                if (page == Page.TABS && incognitoActive) {
+                    Spacer(Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                        .windowInsetsTopHeight(WindowInsets.statusBars)
+                        .background(IncognitoBarBackground))
                 }
             }
             // 上次崩溃日志展示：启动可读，支持一键复制 / 清除
@@ -1247,13 +1269,9 @@ private fun PageContent(
             onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
             onOpen = { address ->
-                if (browserViewModel.tabs.value.isEmpty()) browserViewModel.newTab()
-                val tab = browserViewModel.selected
-                // 只为目标普通标签记录搜索历史（网址也一并记下，便于重复访问）
-                if (tab != null && !tab.incognito) {
-                    scope.launch { settingsStore.addSearchHistory(address) }
-                }
-                browserViewModel.load(address, tab); navigate(Page.BROWSER)
+                // Home searches always target a normal tab.
+                scope.launch { settingsStore.addSearchHistory(address) }
+                browserViewModel.loadFromHome(address); navigate(Page.BROWSER)
             },
             onHistory = { navigate(Page.HISTORY) },
             onSettings = { navigate(Page.SETTINGS) },
@@ -1268,8 +1286,9 @@ private fun PageContent(
         )
         Page.INCOGNITO -> IncognitoHomeScreen(
             onSearch = { address ->
-                // 优先复用已有无痕标签：连续搜索不堆标签，与主流浏览器行为一致；
-                // 只有当前没有无痕标签时才新建。无论哪种走法，结果都不会落到普通标签。
+                // 优先复用当前空白无痕标签，其次复用唯一可用的空白无痕标签；
+                // 没有可复用的则新建，
+                // 搜索内容随 initialUrl 一起交给新标签，不会落空。
                 if (!browserViewModel.loadInIncognito(address)) {
                     browserViewModel.newTab(incognito = true, initialUrl = address)
                 }
@@ -1295,15 +1314,16 @@ private fun PageContent(
         )
         Page.TABS -> TabOverview(
             viewModel = browserViewModel,
-            initialIncognito = tabsIncognito,
+            incognitoOnly = tabsIncognito,
+            onIncognitoOnlyChange = onTabsIncognitoChange,
             onBack = goBack,
             onExitIncognito = resetToHome,
             onBackToHome = resetToHome,
-            // 新建标签后直接回首页：新标签本身是空白的，停在标签列表看不到内容，
-            // 回首页才能立刻输入地址或搜索
+            // 与浏览器工具栏的「新建标签」弹窗行为保持一致：
+            // 选普通 → 新建空白标签并回到浏览页；选无痕 → 新建无痕标签并进入完整无痕页
             onNewTab = { incognito ->
                 browserViewModel.newTab(incognito = incognito)
-                resetToHome()
+                if (incognito) navigate(Page.INCOGNITO) else navigate(Page.BROWSER)
             }
         )
         Page.SETTINGS -> SettingsScreen(
@@ -1523,11 +1543,16 @@ private fun Modifier.dismissFocusOnOutsideTap(
     }
 }
 
+/**
+ * 底部工具栏的毛玻璃容器。
+ *
+ * @param tint 可选的覆盖底色（如无痕态传入紫色）；为 null 时用主题表面色
+ */
 @Composable
-private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+private fun GlassSurface(modifier: Modifier = Modifier, tint: Color? = null, content: @Composable RowScope.() -> Unit) {
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+        color = tint ?: MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
         tonalElevation = 3.dp,
         shape = MaterialTheme.shapes.extraLarge
     ) {
@@ -3241,34 +3266,47 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 0.dp)) {
-                AddressInput(
-                    value = input,
-                    onValueChange = { input = it },
-                    onSubmit = { viewModel.load(input) },
-                    onFocusChange = { inputFocused = it },
-                    showSuggestionsPanel = false,
-                    // 无痕标签下用专属紫，与普通标签一眼可分
-                    accentColor = if (incognitoActive) IncognitoAccentColor else null,
-                    // 浏览器地址栏比较缩：顶部紧贴状态栏，把高度让给网页与加载条；
-                    // 无痕提示条、进度条、网页内容都能多出一行可视区域
-                    compact = true,
-                    // 仅在已加载的 http(s) 页面上显示护盾，空白页/内部页不显示
-                    security = selectedTab?.risk?.takeIf {
-                        val u = selectedTab.url
-                        u.startsWith("http", ignoreCase = true)
-                    },
-                    onSecurityClick = {
-                        val tab = selectedTab
-                        if (tab != null) {
-                            securityDetail = Uri.parse(tab.url).host.orEmpty() to tab.risk
+            Column(Modifier.fillMaxWidth()) {
+                // An opaque inset supports light status icons in both themes.
+                Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars)
+                    .background(if (incognitoActive) IncognitoBarBackground else Color.Transparent))
+                Box(
+                    Modifier.fillMaxWidth()
+                        .background(if (incognitoActive) IncognitoAccentColor.copy(alpha = 0.22f) else Color.Transparent)
+                        .padding(horizontal = 10.dp)
+                ) {
+                    AddressInput(
+                        value = input,
+                        onValueChange = { input = it },
+                        onSubmit = { viewModel.load(input) },
+                        onFocusChange = { inputFocused = it },
+                        showSuggestionsPanel = false,
+                        // 无痕标签下用专属紫，与普通标签一眼可分
+                        accentColor = if (incognitoActive) IncognitoAccentColor else null,
+                        // 浏览器地址栏比较缩：顶部紧贴状态栏，把高度让给网页与加载条；
+                        // 无痕提示条、进度条、网页内容都能多出一行可视区域
+                        compact = true,
+                        // 仅在已加载的 http(s) 页面上显示护盾，空白页/内部页不显示
+                        security = selectedTab?.risk?.takeIf {
+                            val u = selectedTab.url
+                            u.startsWith("http", ignoreCase = true)
+                        },
+                        onSecurityClick = {
+                            val tab = selectedTab
+                            if (tab != null) {
+                                securityDetail = Uri.parse(tab.url).host.orEmpty() to tab.risk
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         },
         bottomBar = {
-            GlassSurface(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
+            GlassSurface(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp),
+                // 无痕时底栏也换成紫色调，与普通浏览区分
+                tint = if (incognitoActive) IncognitoAccentColor.copy(alpha = 0.28f) else null
+            ) {
                 IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
                 // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
@@ -3318,7 +3356,12 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             }
             if (selectedTab != null) {
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    WavyProgressBar(progress = selectedTab.progress / 100f, modifier = Modifier.fillMaxWidth())
+                    WavyProgressBar(
+                        progress = selectedTab.progress / 100f,
+                        modifier = Modifier.fillMaxWidth(),
+                        // 无痕时进度条也用专属紫，与顶底栏保持一致
+                        color = if (incognitoActive) IncognitoAccentColor else null
+                    )
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     // 视图销毁（切换硬件加速、离开浏览页）时清除挂载标记，
@@ -3453,9 +3496,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, incognitoOnly: Boolean, onIncognitoOnlyChange: (Boolean) -> Unit, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
-    var incognitoOnly by remember { mutableStateOf(initialIncognito) }
+    // 新建标签弹窗：跟浏览器页一致，让用户自己选普通还是无痕
+    var showNewTabDialog by remember { mutableStateOf(false) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
     Scaffold(
         topBar = {
@@ -3478,9 +3522,9 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                 }
             )
         },
-        // 右下角新建标签：新建后直接回首页（新标签是空白的，留在列表看不到内容）
+        // 右下角新建标签：先弹窗让用户选普通还是无痕，选完直接回首页
         floatingActionButton = {
-            FloatingActionButton(onClick = { onNewTab(incognitoOnly) }) {
+            FloatingActionButton(onClick = { showNewTabDialog = true }) {
                 Icon(Icons.Default.Add, stringResource(R.string.s113))
             }
         }
@@ -3491,7 +3535,7 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                 .padding(top = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
+            item { Row { AssistChip(onClick = { onIncognitoOnlyChange(false) }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { onIncognitoOnlyChange(true) }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
             if (displayedTabs.isEmpty()) item {
                 // 空态：给出图标与说明，而不是一行灰字，避免看起来像加载失败
                 Surface(
@@ -3532,13 +3576,37 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                         }
                         IconButton(onClick = {
                             viewModel.close(tab.id)
-                            // 关掉最后一个后标签列表为空，标签页已无内容可展示，直接回首页
-                            if (viewModel.tabs.value.isEmpty()) onBackToHome()
+                            // 关掉最后一个标签后直接回首页，不在标签页停留空列表；
+                            // 无痕页签下同样退出无痕并清 Cookie/缓存，不能落到普通标签页
+                            if (viewModel.tabs.value.isEmpty()) {
+                                if (incognitoOnly) onExitIncognito() else onBackToHome()
+                            } else if (incognitoOnly && viewModel.tabs.value.none { it.incognito }) {
+                                onExitIncognito()
+                            }
                         }) { Icon(Icons.Default.Close, stringResource(R.string.s079)) }
                     }
                 }
             }
         }
+    }
+    if (showNewTabDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewTabDialog = false },
+            title = { Text(stringResource(R.string.s113)) },
+            text = { Text(stringResource(R.string.s122)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNewTabDialog = false
+                    onNewTab(false)
+                }) { Text(stringResource(R.string.s123)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showNewTabDialog = false
+                    onNewTab(true)
+                }) { Text(stringResource(R.string.s124)) }
+            }
+        )
     }
 }
 
@@ -5489,15 +5557,29 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
 
 // 全局统一的波浪进度条：波长 24dp，振幅沿用官方规则（进度 10% 以下、95% 以上收平为直线，中段才起波），
 // 并对进度变化做平滑过渡，避免每次进度跳变时动效中断产生停顿感（LinearWavyProgressIndicator 默认不做进度过渡动画）
+/**
+ * 加载进度条（波形）。
+ *
+ * @param color 可选的波浪颜色；无痕页传专属紫，其余页面为 null（跟随主题 primary）
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
+private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier, color: Color? = null) {
     val animated by animateFloatAsState(
         targetValue = progress,
         animationSpec = WavyProgressIndicatorDefaults.ProgressAnimationSpec,
         label = "wavyProgress"
     )
-    LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, wavelength = 24.dp)
+    // 未指定颜色时沿用它自己的默认 token；指定时同色用于轨道，靠透明度避免抢眼
+    val barColor = color ?: WavyProgressIndicatorDefaults.indicatorColor
+    val barTrackColor = color?.copy(alpha = 0.24f) ?: WavyProgressIndicatorDefaults.trackColor
+    LinearWavyProgressIndicator(
+        progress = { animated },
+        modifier = modifier,
+        wavelength = 24.dp,
+        color = barColor,
+        trackColor = barTrackColor
+    )
 }
 
 

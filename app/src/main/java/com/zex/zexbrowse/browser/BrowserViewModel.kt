@@ -49,6 +49,12 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
+internal fun canReuseBlankTab(url: String, incognito: Boolean, requestedIncognito: Boolean, hasPendingLoad: Boolean): Boolean =
+    incognito == requestedIncognito && !hasPendingLoad && (url.isBlank() || url == "about:blank")
+
+internal fun <T> selectedOrSingleReusableTab(tabs: List<T>, selected: T?, isReusable: (T) -> Boolean): T? =
+    selected?.takeIf(isReusable) ?: tabs.singleOrNull(isReusable)
+
 data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
@@ -254,24 +260,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
 
-    /**
-     * 在无痕环境里加载地址：复用最后一个无痕标签，没有则返回 false 由调用方新建。
-     *
-     * 与 [loadExternalUrl] 的区别：这里不看当前页是否空白——无痕页的搜索框
-     * 就是一个新入口，用户希望在同一无痕标签里连续跳转，而不是每次堆一个新标签。
-     * 全程只碰 incognito 标签，绝不影响普通标签。
-     */
+    /** Reuse the selected blank private tab, or the only available blank private tab. */
     fun loadInIncognito(input: String): Boolean {
-        val tab = _tabs.value.lastOrNull { it.incognito } ?: return false
-        _selectedId.value = tab.id
         val target = normalize(input)
-        cancelPendingFailure(tab.id)
-        if (attachedSessions.contains(tab.id)) {
-            runCatching { tab.session.loadUri(target) }
+        val blankIncognito = selectedOrSingleReusableTab(_tabs.value, selected) {
+            canReuseBlankTab(it.url, it.incognito, requestedIncognito = true, hasPendingLoad = it.id in pendingInitialLoads)
+        } ?: return false
+        _selectedId.value = blankIncognito.id
+        cancelPendingFailure(blankIncognito.id)
+        if (attachedSessions.contains(blankIncognito.id)) {
+            runCatching { blankIncognito.session.loadUri(target) }
         } else {
-            pendingInitialLoads[tab.id] = target
-            pendingLoadAttempts.remove(tab.id)
-            mainHandler.postDelayed({ onSessionAttached(tab.id) }, 0)
+            pendingInitialLoads[blankIncognito.id] = target
+            pendingLoadAttempts.remove(blankIncognito.id)
+            mainHandler.postDelayed({ onSessionAttached(blankIncognito.id) }, 0)
         }
         return true
     }
@@ -585,13 +587,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
         blockedExternalUris.remove(id)
-        runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
+        val closing = _tabs.value.firstOrNull { it.id == id }
+        runCatching { closing?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
-        // 不再自动补空白标签：关完后标签列表真的为空，
-        // 由界面层根据空态回首页或停留在「暂无标签」页；
-        // 需要浏览时由 load / loadExternalUrl 按需新建。
-        _selectedId.value = _tabs.value.lastOrNull()?.id
+        // 选中项优先落在同类型标签上：无痕标签关完后不能直接跳到普通标签，
+        // 那会让用户以为「无痕标签变成了普通标签」。同类也没有后才回退到剩余任一标签。
+        val sameKind = _tabs.value.lastOrNull { it.incognito == (closing?.incognito ?: false) }
+        _selectedId.value = (sameKind ?: _tabs.value.lastOrNull())?.id
     }
     // 仅关闭普通标签，不动无痕标签。
     // 不再自动补空白标签：真的关空后由界面层展示「暂无标签」。
@@ -778,7 +781,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      */
     fun load(input: String, tab: BrowserTab? = selected) {
         val target = normalize(input)
-        // 标签已全部关完（界面仍可能停在空态页）时先补一个，避免搜索无反应
+        // An explicit navigation targets the selected session, including private sessions.
         val targetTab = tab ?: if (_tabs.value.isEmpty()) {
             newTab()
             selected
@@ -786,6 +789,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         targetTab ?: return
         cancelPendingFailure(targetTab.id)
         if (attachedSessions.contains(targetTab.id)) {
+            // Stop any earlier retry from replacing this explicit navigation.
+            clearPending(targetTab.id)
             runCatching { targetTab.session.loadUri(target) }
             return
         }
@@ -793,6 +798,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         pendingInitialLoads[targetTab.id] = target
         pendingLoadAttempts.remove(targetTab.id)
         mainHandler.postDelayed({ onSessionAttached(targetTab.id) }, 0)
+    }
+    /** Home searches use a normal blank tab or create a new normal tab. */
+    fun loadFromHome(input: String) {
+        val blankNormal = _tabs.value.singleOrNull {
+            canReuseBlankTab(it.url, it.incognito, requestedIncognito = false, hasPendingLoad = it.id in pendingInitialLoads)
+        }
+        val targetTab = if (blankNormal != null) {
+            _selectedId.value = blankNormal.id
+            blankNormal
+        } else {
+            newTab()
+            selected
+        }
+        load(input, targetTab)
     }
     fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
     fun reload() {
