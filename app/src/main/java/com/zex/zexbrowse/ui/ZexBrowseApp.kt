@@ -1504,16 +1504,20 @@ private fun PageContent(
  *
  * @param enabled 仅当搜索框处于输入态时为 true，其余时候完全不拦截事件
  * @param focusManager 用于清除焦点
+ * @param contentOutsideInput 容器不包含输入框时，在 Initial 阶段观察所有按下（包括网页消费的事件）
  */
 private fun Modifier.dismissFocusOnOutsideTap(
     enabled: Boolean,
-    focusManager: androidx.compose.ui.focus.FocusManager
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    contentOutsideInput: Boolean = false
 ): Modifier = if (!enabled) this else this.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
-            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Main)
+            val pass = if (contentOutsideInput) androidx.compose.ui.input.pointer.PointerEventPass.Initial
+                else androidx.compose.ui.input.pointer.PointerEventPass.Main
+            val event = awaitPointerEvent(pass)
             if (event.type != PointerEventType.Press) continue
-            if (event.changes.any { it.isConsumed }) continue
+            if (!contentOutsideInput && event.changes.any { it.isConsumed }) continue
             focusManager.clearFocus()
         }
     }
@@ -3100,14 +3104,12 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
     // 标签被全部关掉后不再自动补空白 about 标签，这里直接退回首页。
-    // 用“上一次的标签数量”判断，首次进入时为 null 不触发；
-    // 只关心已加载过内容后清空，避免首页→浏览页过渡期误判。
+    // 首次进入时没有标签或标签从非空变为空时，都返回首页。
     var previousTabCount by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(tabs.size) {
         val previous = previousTabCount
         previousTabCount = tabs.size
-        if (previous == null) return@LaunchedEffect
-        if (previous > 0 && tabs.isEmpty()) onAllTabsClosed()
+        if (tabs.isEmpty() && (previous == null || previous > 0)) onAllTabsClosed()
     }
     // 只展示与当前标签同类型的标签，避免无痕与普通标签在同一列混合
     val visibleTabs = tabs.filter { it.incognito == (selectedTab?.incognito ?: false) }
@@ -3298,7 +3300,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         Column(
             Modifier.fillMaxSize().padding(padding)
                 // 地址栏输入态下点页面其他位置即收起键盘与光晕
-                .dismissFocusOnOutsideTap(inputFocused, focusManager)
+                .dismissFocusOnOutsideTap(inputFocused, focusManager, contentOutsideInput = true)
         ) {
             LazyRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                 items(visibleTabs, key = { it.id }) { tab ->
