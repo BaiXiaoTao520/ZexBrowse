@@ -234,6 +234,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 否则返回 false，由调用方新建标签，避免覆盖用户正在浏览的网页。
      */
     fun loadExternalUrl(url: String): Boolean {
+        // 标签已全部关完时先补一个：外部链接总得有个标签承载
+        if (_tabs.value.isEmpty()) newTab()
         val tab = selected ?: return false
         val currentUrl = tab.url
         val isBlankTab = currentUrl.isBlank() || currentUrl == "about:blank"
@@ -587,17 +589,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         runCatching { _tabs.value.firstOrNull { it.id == id }?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
         clearIncognitoContextIfEmpty()
+        // 不再自动补空白标签：关完后标签列表真的为空，
+        // 由界面层根据空态回首页或停留在「暂无标签」页；
+        // 需要浏览时由 load / loadExternalUrl 按需新建。
         _selectedId.value = _tabs.value.lastOrNull()?.id
-        if (_tabs.value.isEmpty()) newTab()
     }
-    // 仅关闭普通标签，不动无痕标签
+    // 仅关闭普通标签，不动无痕标签。
+    // 不再自动补空白标签：真的关空后由界面层展示「暂无标签」。
     fun closeAllNormal() {
         _tabs.value.filter { !it.incognito }.forEach { tab ->
             attachedSessions.remove(tab.id)
             runCatching { tab.session.close() }
         }
         _tabs.value = _tabs.value.filter { it.incognito }
-        if (_tabs.value.isEmpty()) newTab() else _selectedId.value = _tabs.value.last().id
+        _selectedId.value = _tabs.value.lastOrNull()?.id
     }
     fun closeAllIncognito() {
         _tabs.value.filter { it.incognito }.forEach { tab ->
@@ -606,7 +611,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         _tabs.value = _tabs.value.filterNot { it.incognito }
         purgeIncognitoContext()
-        _selectedId.value = _tabs.value.lastOrNull()?.id ?: run { newTab(); _selectedId.value }
+        // 与前两处保持一致：不再自动补空白标签，由界面层按空态处理
+        _selectedId.value = _tabs.value.lastOrNull()?.id
     }
     // 退出无痕浏览：彻底关闭全部无痕标签并清除其 Cookie/缓存，普通标签不受影响
     fun exitIncognito() {
@@ -618,7 +624,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         _tabs.value = _tabs.value.filterNot { it.incognito }
         purgeIncognitoContext()
-        if (_tabs.value.isEmpty()) newTab() else _selectedId.value = _tabs.value.last().id
+        // 调用方（首页退出无痕、标签页退出全部）都会回首页，这里不再补空白标签
+        _selectedId.value = _tabs.value.lastOrNull()?.id
     }
 
     /**
@@ -769,6 +776,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      */
     fun load(input: String) {
         val target = normalize(input)
+        // 标签已全部关完（界面仍可能停在空态页）时先补一个，避免搜索无反应
+        if (_tabs.value.isEmpty()) newTab()
         val tab = selected ?: return
         cancelPendingFailure(tab.id)
         if (attachedSessions.contains(tab.id)) {

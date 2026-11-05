@@ -1284,7 +1284,8 @@ private fun PageContent(
             viewModel = browserViewModel,
             initialIncognito = tabsIncognito,
             onBack = goBack,
-            onExitIncognito = resetToHome
+            onExitIncognito = resetToHome,
+            onBackToHome = resetToHome
         )
         Page.SETTINGS -> SettingsScreen(
             settings = settings,
@@ -3057,17 +3058,15 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
-    // 关掉最后一个标签时 ViewModel 会自动补一个空白 about 标签；停留在空白页没有意义。
-    // 这里记住“上一次的标签数量”，仅在数量由 2 降为 1、且剩下的唯一标签尚未加载网址时
-    // 退回首页。首次进入时 previousTabCount 为 null，不会误触发。
+    // 标签被全部关掉后不再自动补空白 about 标签，这里直接退回首页。
+    // 用“上一次的标签数量”判断，首次进入时为 null 不触发；
+    // 只关心已加载过内容后清空，避免首页→浏览页过渡期误判。
     var previousTabCount by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(tabs.size) {
         val previous = previousTabCount
         previousTabCount = tabs.size
         if (previous == null) return@LaunchedEffect
-        val collapsedToSingle = previous > 1 && tabs.size == 1
-        val blank = viewModel.selected?.url.isNullOrBlank()
-        if (collapsedToSingle && blank) onAllTabsClosed()
+        if (previous > 0 && tabs.isEmpty()) onAllTabsClosed()
     }
     // 只展示与当前标签同类型的标签，避免无痕与普通标签在同一列混合
     val visibleTabs = tabs.filter { it.incognito == (selectedTab?.incognito ?: false) }
@@ -3431,7 +3430,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     var incognitoOnly by remember { mutableStateOf(initialIncognito) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
@@ -3449,6 +3448,8 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                             onExitIncognito()
                         } else {
                             viewModel.closeAllNormal()
+                            // 普通标签全部关完后直接回首页，不在标签页展示空列表
+                            if (viewModel.tabs.value.isEmpty()) onBackToHome()
                         }
                     }) { Text(stringResource(if (incognitoOnly) R.string.incognito_exit_all else R.string.s134)) }
                 }
@@ -3457,7 +3458,33 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
-            if (displayedTabs.isEmpty()) item { Text(stringResource(if (incognitoOnly) R.string.s135 else R.string.s136)) }
+            if (displayedTabs.isEmpty()) item {
+                // 空态：给出图标与说明，而不是一行灰字，避免看起来像加载失败
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 28.dp, horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.Tab,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            stringResource(if (incognitoOnly) R.string.s135 else R.string.s136),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
             items(displayedTabs, key = { it.id }) { tab ->
                 ElevatedCard(onClick = { viewModel.select(tab.id); onBack() }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3469,7 +3496,11 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                             Text(tab.title.ifBlank { stringResource(R.string.s107) }, maxLines = 1)
                             Text(tab.url.ifEmpty { stringResource(R.string.s107) }, maxLines = 1, style = MaterialTheme.typography.bodySmall)
                         }
-                        IconButton(onClick = { viewModel.close(tab.id) }) { Icon(Icons.Default.Close, stringResource(R.string.s079)) }
+                        IconButton(onClick = {
+                            viewModel.close(tab.id)
+                            // 关掉最后一个后标签列表为空，标签页已无内容可展示，直接回首页
+                            if (viewModel.tabs.value.isEmpty()) onBackToHome()
+                        }) { Icon(Icons.Default.Close, stringResource(R.string.s079)) }
                     }
                 }
             }
