@@ -1049,9 +1049,25 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         SideEffect {
             val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = if (incognitoDeepChrome) false else !useDarkTheme && !incognitoActive
-                // Browser and tab overview navigation insets use the theme surface.
-                isAppearanceLightNavigationBars = !useDarkTheme && page != Page.INCOGNITO
+                // 逐个列举底色，不用「取反」推导：
+                // - 无痕首页/标签页：深紫底 → 浅色图标
+                // - 无痕浏览页：淡紫底 → 深色图标
+                // - 其余页面：跟随主题深浅
+                isAppearanceLightStatusBars = when {
+                    incognitoDeepChrome -> false
+                    incognitoActive -> true
+                    else -> !useDarkTheme
+                }
+                // 导航栏区域（手势条）的底色：
+                // - 无痕首页：整页深紫 → 浅色图标
+                // - 无痕浏览页：底栏与手势条区都铺淡紫 → 深色图标
+                // - 无痕标签管理页：只给状态栏铺了深紫，手势条区仍是主题表面 → 跟随深浅
+                // - 其余页面：跟随深浅
+                isAppearanceLightNavigationBars = when {
+                    page == Page.BROWSER && incognitoActive -> true
+                    page == Page.INCOGNITO -> false
+                    else -> !useDarkTheme
+                }
             }
         }
     }
@@ -3326,9 +3342,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             }
         },
         bottomBar = {
-            // 导航栏（手势条）区域也铺同一档淡紫，否则底栏下方会露出一条背景色断层。
-            // 注意：navigationBarsPadding 加在内部的 GlassSurface 上，
-            // 外层 Column 只负责把那块内边距也染成同色，不再额外加内边距。
+            // 无痕时把导航栏（手势条）那条内边距也染成同色：
+            // navigationBarsPadding 加在内部 GlassSurface 上，它因此不伸到手势条区域，
+            // 这块空白就由外层 Column 的底色补上，否则会露出一条背景色断层。
+            // 普通浏览时外层是 Transparent，表现与改动前完全一致。
             Column(
                 Modifier.fillMaxWidth().background(
                     if (incognitoActive) IncognitoTopBarColor else Color.Transparent
