@@ -136,6 +136,7 @@ import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FloatingActionButton
@@ -3401,6 +3402,16 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 items(visibleTabs, key = { it.id }) { tab ->
                     AssistChip(
                         onClick = { viewModel.select(tab.id) },
+                        colors = if (incognitoActive) {
+                            AssistChipDefaults.assistChipColors(
+                                containerColor = Color.Transparent,
+                                labelColor = IncognitoBarBackground,
+                                leadingIconContentColor = IncognitoBarBackground,
+                                trailingIconContentColor = IncognitoBarBackground
+                            )
+                        } else {
+                            AssistChipDefaults.assistChipColors()
+                        },
                         label = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(tab.title.ifBlank { stringResource(R.string.s107) }, maxLines = 1)
