@@ -1297,11 +1297,11 @@ private fun PageContent(
             onBack = goBack,
             onExitIncognito = resetToHome,
             onBackToHome = resetToHome,
-            // 新建标签后直接回首页：新标签本身是空白的，停在标签列表看不到内容，
-            // 回首页才能立刻输入地址或搜索
+            // 与浏览器工具栏的「新建标签」弹窗行为保持一致：
+            // 选普通 → 新建空白标签并回到浏览页；选无痕 → 新建无痕标签并进入完整无痕页
             onNewTab = { incognito ->
                 browserViewModel.newTab(incognito = incognito)
-                resetToHome()
+                if (incognito) navigate(Page.INCOGNITO) else navigate(Page.BROWSER)
             }
         )
         Page.SETTINGS -> SettingsScreen(
@@ -3339,7 +3339,12 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             }
             if (selectedTab != null) {
                 if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    WavyProgressBar(progress = selectedTab.progress / 100f, modifier = Modifier.fillMaxWidth())
+                    WavyProgressBar(
+                        progress = selectedTab.progress / 100f,
+                        modifier = Modifier.fillMaxWidth(),
+                        // 无痕时进度条也用专属紫，与顶底栏保持一致
+                        color = if (incognitoActive) IncognitoAccentColor else null
+                    )
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     // 视图销毁（切换硬件加速、离开浏览页）时清除挂载标记，
@@ -5535,15 +5540,29 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
 
 // 全局统一的波浪进度条：波长 24dp，振幅沿用官方规则（进度 10% 以下、95% 以上收平为直线，中段才起波），
 // 并对进度变化做平滑过渡，避免每次进度跳变时动效中断产生停顿感（LinearWavyProgressIndicator 默认不做进度过渡动画）
+/**
+ * 加载进度条（波形）。
+ *
+ * @param color 可选的波浪颜色；无痕页传专属紫，其余页面为 null（跟随主题 primary）
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier) {
+private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier, color: Color? = null) {
     val animated by animateFloatAsState(
         targetValue = progress,
         animationSpec = WavyProgressIndicatorDefaults.ProgressAnimationSpec,
         label = "wavyProgress"
     )
-    LinearWavyProgressIndicator(progress = { animated }, modifier = modifier, wavelength = 24.dp)
+    // 未指定颜色时沿用它自己的默认 token；指定时同色用于轨道，靠透明度避免抢眼
+    val barColor = color ?: WavyProgressIndicatorDefaults.indicatorColor
+    val barTrackColor = color?.copy(alpha = 0.24f) ?: WavyProgressIndicatorDefaults.trackColor
+    LinearWavyProgressIndicator(
+        progress = { animated },
+        modifier = modifier,
+        wavelength = 24.dp,
+        color = barColor,
+        trackColor = barTrackColor
+    )
 }
 
 
