@@ -135,6 +135,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -1288,7 +1289,13 @@ private fun PageContent(
             initialIncognito = tabsIncognito,
             onBack = goBack,
             onExitIncognito = resetToHome,
-            onBackToHome = resetToHome
+            onBackToHome = resetToHome,
+            // 新建标签后直接回首页：新标签本身是空白的，停在标签列表看不到内容，
+            // 回首页才能立刻输入地址或搜索
+            onNewTab = { incognito ->
+                browserViewModel.newTab(incognito = incognito)
+                resetToHome()
+            }
         )
         Page.SETTINGS -> SettingsScreen(
             settings = settings,
@@ -3453,7 +3460,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     var incognitoOnly by remember { mutableStateOf(initialIncognito) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
@@ -3477,9 +3484,20 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                     }) { Text(stringResource(if (incognitoOnly) R.string.incognito_exit_all else R.string.s134)) }
                 }
             )
+        },
+        // 右下角新建标签：新建后直接回首页（新标签是空白的，留在列表看不到内容）
+        floatingActionButton = {
+            FloatingActionButton(onClick = { onNewTab(incognitoOnly) }) {
+                Icon(Icons.Default.Add, stringResource(R.string.s113))
+            }
         }
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
+                // 底部留出悬浮按钮的高度，避免最后一项被遮住
+                .padding(top = 16.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
             if (displayedTabs.isEmpty()) item {
                 // 空态：给出图标与说明，而不是一行灰字，避免看起来像加载失败
