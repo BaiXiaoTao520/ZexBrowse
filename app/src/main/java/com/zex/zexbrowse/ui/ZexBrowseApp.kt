@@ -919,6 +919,9 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 是否正在由侧滑手势完成返回：为 true 时不播放 AnimatedContent 自带的横向切换动画，
     // 否则会与整页位移叠加，出现「旧页面停留片刻再滑走」的双重动画。
     var predictivePop by remember { mutableStateOf(false) }
+    // Recreate the page transition when exiting the last private tab, so the
+    // outgoing browser cannot attach the normal session during its exit animation.
+    var browserExitReset by remember { mutableStateOf(0) }
     // 手势进行中：true 时下层渲染目标页，使页面滑走时露出的是真实的目标页而非空白
     var backActive by remember { mutableStateOf(false) }
     // 本次手势将要返回到的页面（无页面可退时为默认值，不参与渲染）
@@ -1095,6 +1098,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 onTabsIncognitoChange = { tabsIncognito = it },
                                 navigate = navigate,
                                 resetToHome = { navForward = false; navStack = listOf(Page.HOME) },
+                                resetToHomeImmediately = { browserExitReset++; navForward = false; navStack = listOf(Page.HOME) },
                                 goBack = goBack,
                                 onSponsor = { sponsorInfo = true }
                             )
@@ -1140,7 +1144,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     // 不会把旧页面作为「正在退出的内容」再绘制一帧。
                     // 这是消除「返回后停留一帧」最直接的手段：
                     // 不再依赖过渡时长是否为 0，也不依赖内部协程何时清理旧内容。
-                    key(predictivePop) {
+                    key(predictivePop, browserExitReset) {
                         AnimatedContent(
                             targetState = page,
                             transitionSpec = {
@@ -1168,6 +1172,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 onTabsIncognitoChange = { tabsIncognito = it },
                                 navigate = navigate,
                                 resetToHome = { navForward = false; navStack = listOf(Page.HOME) },
+                                resetToHomeImmediately = { browserExitReset++; navForward = false; navStack = listOf(Page.HOME) },
                                 goBack = goBack,
                                 onSponsor = { sponsorInfo = true }
                             )
@@ -1293,6 +1298,7 @@ private fun PageContent(
     onTabsIncognitoChange: (Boolean) -> Unit,
     navigate: (Page) -> Unit,
     resetToHome: () -> Unit,
+    resetToHomeImmediately: () -> Unit,
     goBack: () -> Unit,
     onSponsor: () -> Unit
 ) {
@@ -1346,9 +1352,10 @@ private fun PageContent(
             // 无痕环境同样回首页（首页会自动按当前模式进无痕入口）
             onAllTabsClosed = resetToHome,
             // 无痕标签被全部关掉：彻底退出无痕（清 Cookie/缓存）后回首页
-            onExitIncognito = {
+            onExitIncognito = { tabId ->
+                resetToHomeImmediately()
+                browserViewModel.close(tabId)
                 browserViewModel.exitIncognito()
-                resetToHome()
             }
         )
         Page.TABS -> TabOverview(
@@ -1588,10 +1595,12 @@ private fun Modifier.dismissFocusOnOutsideTap(
  * @param tint 可选的覆盖底色（如无痕态传入紫色）；为 null 时用主题表面色
  */
 @Composable
-private fun GlassSurface(modifier: Modifier = Modifier, tint: Color? = null, content: @Composable RowScope.() -> Unit) {
+private fun GlassSurface(modifier: Modifier = Modifier, tint: Color? = null, contentColor: Color? = null, content: @Composable RowScope.() -> Unit) {
+    val containerColor = tint ?: MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
     Surface(
         modifier = modifier,
-        color = tint ?: MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+        color = containerColor,
+        contentColor = contentColor ?: androidx.compose.material3.contentColorFor(containerColor),
         tonalElevation = 3.dp,
         shape = MaterialTheme.shapes.extraLarge
     ) {
@@ -3163,7 +3172,7 @@ private fun BookmarkDialog(initial: QuickSite? = null, onSubmit: (QuickSite) -> 
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit, onAllTabsClosed: () -> Unit, onExitIncognito: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit, onAllTabsClosed: () -> Unit, onExitIncognito: (String) -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -3353,7 +3362,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             ) {
                 GlassSurface(
                     Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp),
-                    tint = if (incognitoActive) IncognitoTopBarColor else null
+                    tint = if (incognitoActive) IncognitoTopBarColor else null,
+                    contentColor = if (incognitoActive) IncognitoBarBackground else null
                 ) {
                 IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
@@ -3399,10 +3409,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                                 Icon(Icons.Default.Close, stringResource(R.string.s119), Modifier.size(16.dp).clickable {
                                     // 关掉最后一个无痕标签时彻底退出无痕（清 Cookie/缓存）并回首页，
                                     // 不能落到剩下的普通标签上（那看起来像无痕变成了普通）
-                                    val wasIncognito = tab.incognito
-                                    viewModel.close(tab.id)
-                                    if (wasIncognito && viewModel.tabs.value.none { it.incognito }) {
-                                        onExitIncognito()
+                                    if (tab.incognito && viewModel.tabs.value.count { it.incognito } == 1) {
+                                        onExitIncognito(tab.id)
+                                    } else {
+                                        viewModel.close(tab.id)
                                     }
                                 })
                             }
