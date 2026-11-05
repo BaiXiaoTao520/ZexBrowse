@@ -322,7 +322,18 @@ private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse
  * 不受用户主题变化影响。
  */
 private val IncognitoAccentColor = Color(0xFF7B4DDB)
+
+/** 无痕深底：无痕首页整页背景 */
 private val IncognitoBarBackground = Color(0xFF2A1B45)
+
+/**
+ * 无痕浏览页的顶栏/状态栏底色。
+ *
+ * 直接给一个不透明的淡紫：与底栏（主色 28% 叠在浅色卡面上）观感接近，
+ * 状态栏与地址栏因此连成一片，不会出现「深色状态栏 + 浅紫工具栏」的断层。
+ * 用固定色而非半透明叠色，是为了不依赖下层的网页内容，避免浅色/深色网页下颜色飘。
+ */
+private val IncognitoTopBarColor = Color(0xFFEDE6FA)
 
 /** 联系我们的跳转地址 */
 private const val CONTACT_URL = "https://knocket.ai/u/zex"
@@ -1024,14 +1035,21 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
         else -> false
     }
 
-    // 应用内主题可能与系统深浅色不一致，需显式设置状态栏/导航栏图标明暗，避免深色下看不清；
-    // 无痕环境下背景是深紫，图标必须用浅色，与主题深浅无关
+    // 状态栏图标明暗必须跟实际底色一致，而不是只看深浅主题：
+    // - 无痕首页（Page.INCOGNITO）与无痕标签页：深紫底 → 浅色图标
+    // - 无痕浏览页：顶栏/状态栏是淡紫 IncognitoTopBarColor → 必须深色图标，
+    //   否则浅底配白图标会完全看不见（上一版就是这里错了）
+    val incognitoDeepChrome = when (page) {
+        Page.INCOGNITO -> true
+        Page.TABS -> tabsIncognito
+        else -> false
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !useDarkTheme && !incognitoActive
+                isAppearanceLightStatusBars = if (incognitoDeepChrome) false else !useDarkTheme && !incognitoActive
                 // Browser and tab overview navigation insets use the theme surface.
                 isAppearanceLightNavigationBars = !useDarkTheme && page != Page.INCOGNITO
             }
@@ -1310,7 +1328,12 @@ private fun PageContent(
             onSettings = { navigate(Page.SETTINGS) },
             // 关掉最后一个标签（或点叉号）后回首页，而不是停在新建的 about 空白页；
             // 无痕环境同样回首页（首页会自动按当前模式进无痕入口）
-            onAllTabsClosed = resetToHome
+            onAllTabsClosed = resetToHome,
+            // 无痕标签被全部关掉：彻底退出无痕（清 Cookie/缓存）后回首页
+            onExitIncognito = {
+                browserViewModel.exitIncognito()
+                resetToHome()
+            }
         )
         Page.TABS -> TabOverview(
             viewModel = browserViewModel,
@@ -3124,7 +3147,7 @@ private fun BookmarkDialog(initial: QuickSite? = null, onSubmit: (QuickSite) -> 
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit, onAllTabsClosed: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit, onAllTabsClosed: () -> Unit, onExitIncognito: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
@@ -3267,12 +3290,13 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             Column(Modifier.fillMaxWidth()) {
-                // An opaque inset supports light status icons in both themes.
+                // 状态栏区域：无痕时用与地址栏同一档淡紫，而不是深紫黑，
+                // 否则截图里会出现「深色状态栏 + 浅紫工具栏」的断层
                 Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars)
-                    .background(if (incognitoActive) IncognitoBarBackground else Color.Transparent))
+                    .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent))
                 Box(
                     Modifier.fillMaxWidth()
-                        .background(if (incognitoActive) IncognitoAccentColor.copy(alpha = 0.22f) else Color.Transparent)
+                        .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
                         .padding(horizontal = 10.dp)
                 ) {
                     AddressInput(
@@ -3302,11 +3326,18 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             }
         },
         bottomBar = {
-            GlassSurface(
-                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp),
-                // 无痕时底栏也换成紫色调，与普通浏览区分
-                tint = if (incognitoActive) IncognitoAccentColor.copy(alpha = 0.28f) else null
+            // 导航栏（手势条）区域也铺同一档淡紫，否则底栏下方会露出一条背景色断层。
+            // 注意：navigationBarsPadding 加在内部的 GlassSurface 上，
+            // 外层 Column 只负责把那块内边距也染成同色，不再额外加内边距。
+            Column(
+                Modifier.fillMaxWidth().background(
+                    if (incognitoActive) IncognitoTopBarColor else Color.Transparent
+                )
             ) {
+                GlassSurface(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp),
+                    tint = if (incognitoActive) IncognitoTopBarColor else null
+                ) {
                 IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
                 // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
@@ -3332,6 +3363,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                         DropdownMenuItem(text = { Text(stringResource(R.string.s118)) }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { showBrowserMenu = false; onSettings() })
                     }
                 }
+                }
             }
         }
     ) { padding ->
@@ -3347,7 +3379,15 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                         label = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(tab.title.ifBlank { stringResource(R.string.s107) }, maxLines = 1)
-                                Icon(Icons.Default.Close, stringResource(R.string.s119), Modifier.size(16.dp).clickable { viewModel.close(tab.id) })
+                                Icon(Icons.Default.Close, stringResource(R.string.s119), Modifier.size(16.dp).clickable {
+                                    // 关掉最后一个无痕标签时彻底退出无痕（清 Cookie/缓存）并回首页，
+                                    // 不能落到剩下的普通标签上（那看起来像无痕变成了普通）
+                                    val wasIncognito = tab.incognito
+                                    viewModel.close(tab.id)
+                                    if (wasIncognito && viewModel.tabs.value.none { it.incognito }) {
+                                        onExitIncognito()
+                                    }
+                                })
                             }
                         },
                         leadingIcon = { if (tab.id == selectedId) Icon(Icons.Default.Check, null) }
