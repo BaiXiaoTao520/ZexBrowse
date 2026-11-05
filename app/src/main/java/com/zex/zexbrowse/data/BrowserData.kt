@@ -11,10 +11,11 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Dao
+import androidx.room.ColumnInfo
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Insert
@@ -29,11 +30,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
-// DataStore 文件损坏兜底：异常退出/断电可能把偏好文件写坏，默认会抛 CorruptionException，
-// 若直接读取会让应用每次启动都闪退。这里改为遇到损坏直接重建为空偏好，保证应用可启动。
+// If settings cannot be recovered, keep cookie storage disabled until the user enables it.
+private val cookiesKey = booleanPreferencesKey("cookies")
+private fun safeFallbackPreferences() = mutablePreferencesOf(cookiesKey to false)
+
 private val Context.dataStore by preferencesDataStore(
     name = "zexbrowse_settings",
-    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+    corruptionHandler = ReplaceFileCorruptionHandler { safeFallbackPreferences() }
 )
 
 @Entity(tableName = "history")
@@ -66,6 +69,7 @@ data class DownloadEntity(
     val errorMessage: String = "",
     /** 服务器返回的 ETag：续传时用 If-Range 校验文件是否还是同一份 */
     val etag: String = "",
+    @ColumnInfo(defaultValue = "0") val ownsTarget: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -128,7 +132,7 @@ interface BrowserDao {
     suspend fun clearHistory()
 }
 
-@Database(entities = [HistoryEntity::class, BookmarkEntity::class, DownloadEntity::class], version = 3, exportSchema = false)
+@Database(entities = [HistoryEntity::class, BookmarkEntity::class, DownloadEntity::class], version = 4, exportSchema = false)
 abstract class BrowserDatabase : RoomDatabase() {
     abstract fun dao(): BrowserDao
     abstract fun downloadDao(): DownloadDao
@@ -148,11 +152,18 @@ abstract class BrowserDatabase : RoomDatabase() {
             }
         }
 
+        // Older downloads may have reused a user's file; their ownership is unknown.
+        private val migration3To4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE downloads ADD COLUMN ownsTarget INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var instance: BrowserDatabase? = null
 
         fun create(context: Context): BrowserDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, BrowserDatabase::class.java, "zexbrowse.db")
-                .addMigrations(migration1To2, migration2To3)
+                .addMigrations(migration1To2, migration2To3, migration3To4)
                 .build()
                 .also { instance = it }
         }
@@ -193,7 +204,7 @@ data class BrowserSettings(
     /** 硬件加速：开启时 GeckoView 使用 SurfaceView 后端（默认），关闭后改用 TextureView 以降低部分机型的渲染开销 */
     val hardwareAcceleration: Boolean = true,
     val sitePermissions: Map<String, String> = emptyMap(),
-    /** 麦克风权限的按站点记忆，格式同 [sitePermissions] */
+    /** 麦克风权限按来源记忆，格式同 [sitePermissions] */
     val siteMicPermissions: Map<String, String> = emptyMap(),
     /** 首页搜索框的搜索历史（新→旧，最多保留 10 条） */
     val searchHistory: List<String> = emptyList(),
@@ -249,7 +260,6 @@ fun resolveCustomSearchTemplate(settings: BrowserSettings): String {
 class SettingsStore(private val context: Context) {
     private val modeKey = stringPreferencesKey("theme_mode")
     private val forceDarkWebKey = booleanPreferencesKey("force_dark_web")
-    private val cookiesKey = booleanPreferencesKey("cookies")
     private val apkHashKey = booleanPreferencesKey("apk_hash")
     private val userAgentModeKey = stringPreferencesKey("user_agent_mode")
     private val customUserAgentTitleKey = stringPreferencesKey("custom_user_agent_title")
@@ -276,7 +286,8 @@ class SettingsStore(private val context: Context) {
     private val externalAppPolicyKey = stringPreferencesKey("external_app_policy")
     private val hardwareAccelerationKey = booleanPreferencesKey("hardware_acceleration")
     private val sitePermissionsKey = stringPreferencesKey("site_permissions")
-    private val siteMicPermissionsKey = stringPreferencesKey("site_mic_permissions")
+    // Host-only decisions cannot be safely assigned to an origin; ask again after upgrading.
+    private val siteMicPermissionsKey = stringPreferencesKey("origin_mic_permissions")
     private val searchHistoryKey = stringPreferencesKey("search_history")
     private val securityModeKey = stringPreferencesKey("security_mode")
     private val httpsOnlyEnabledKey = booleanPreferencesKey("https_only_enabled")
@@ -286,7 +297,7 @@ class SettingsStore(private val context: Context) {
     private val colorThemeKey = stringPreferencesKey("color_theme")
     private val customColorKey = stringPreferencesKey("custom_color")
 
-    val settings = context.dataStore.data.catch { emit(emptyPreferences()) }.map { preferences ->
+    val settings = context.dataStore.data.catch { emit(safeFallbackPreferences()) }.map { preferences ->
         BrowserSettings(
             darkMode = preferences[modeKey] ?: "system",
             forceDarkWeb = preferences[forceDarkWebKey] ?: true,
@@ -323,7 +334,7 @@ class SettingsStore(private val context: Context) {
             siteMicPermissions = (preferences[siteMicPermissionsKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() && it.contains('=') }
-                .associate { it.substringBefore('=') to it.substringAfter('=') },
+                .associate { it.substringBeforeLast('=') to it.substringAfterLast('=') },
             searchHistory = (preferences[searchHistoryKey] ?: "")
                 .split("\n")
                 .filter { it.isNotBlank() },
@@ -405,7 +416,7 @@ class SettingsStore(private val context: Context) {
     suspend fun clearSitePermissions() = update { it[sitePermissionsKey] = "" }
     suspend fun setSiteMicPermission(key: String, value: String) = update { preferences ->
         val current = preferences[siteMicPermissionsKey] ?: ""
-        val entries = current.split("\n").filter { it.isNotBlank() && it.substringBefore('=') != key }
+        val entries = current.split("\n").filter { it.isNotBlank() && it.substringBeforeLast('=') != key }
         preferences[siteMicPermissionsKey] = (entries + "$key=$value").joinToString("\n")
     }
     suspend fun clearSiteMicPermissions() = update { it[siteMicPermissionsKey] = "" }

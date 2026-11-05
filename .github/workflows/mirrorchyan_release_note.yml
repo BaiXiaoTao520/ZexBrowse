@@ -1,0 +1,31 @@
+name: mirrorchyan_release_note
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag (leave empty for the latest release)
+        default: ''
+        required: false
+        type: string
+  release:
+    types: [edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  mirrorchyan:
+    if: ${{ github.repository_owner == 'BaiXiaoTao520' }}
+    runs-on: macos-latest
+    steps:
+      - uses: MirrorChyan/release-note-action@v1
+        with:
+          mirrorchyan_rid: ZexBrowse
+          version_name: ${{ inputs.tag || github.event.release.tag_name }}
+
+          owner: BaiXiaoTao520
+          repo: ZexBrowse
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          upload_token: ${{ secrets.MirrorChyanUploadToken }}
