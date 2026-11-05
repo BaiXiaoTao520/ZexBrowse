@@ -1247,7 +1247,10 @@ private fun PageContent(
             },
             onHistory = { navigate(Page.HISTORY) },
             onSettings = { navigate(Page.SETTINGS) },
-            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
+            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) },
+            // 首页头部标签按钮：显示当前普通标签数量，点击进入标签管理
+            tabCount = browserViewModel.tabs.collectAsState().value.count { !it.incognito },
+            onTabs = { onTabsIncognitoChange(false); navigate(Page.TABS) }
         )
         Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
             browserViewModel = browserViewModel,
@@ -1512,13 +1515,20 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 /**
- * 首页头部：品牌名 + 时钟 + 历史/设置入口。
+ * 首页头部：品牌名 + 时钟 + 标签管理/历史/设置入口。
  *
  * 不用 TopAppBar：首页内容本身可以滚到它下面，悬浮的渐变头图能带来更强的层次感；
  * 这里只保留一条轻量标题行，把主要空间留给搜索与常用站点。
+ * 右侧三个按钮都是标准 IconButton（48dp 触控区）、同一抹 onSurfaceVariant 颜色，
+ * 等距排列，不单独设置尺寸与间距，保证三者视觉重量一致。
+ *
+ * @param tabCount 当前标签数量，为 0 时不显示徽标
+ * @param onTabs 进入标签管理
+ * @param onHistory 进入历史页
+ * @param onSettings 进入设置页
  */
 @Composable
-private fun HomeHeader(onHistory: () -> Unit, onSettings: () -> Unit) {
+private fun HomeHeader(tabCount: Int, onTabs: () -> Unit, onHistory: () -> Unit, onSettings: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(top = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1532,6 +1542,17 @@ private fun HomeHeader(onHistory: () -> Unit, onSettings: () -> Unit) {
             )
             Spacer(Modifier.height(2.dp))
             ClockText()
+        }
+        // 标签管理：与浏览器页底部工具栏的标签按钮同源（Tab 图标 + 数量徽标），
+        // 让用户不用先进网页就能看到/管理已开的标签
+        IconButton(onClick = onTabs) {
+            if (tabCount > 0) {
+                BadgedBox(badge = { Badge { Text(tabCount.toString()) } }) {
+                    Icon(Icons.Default.Tab, stringResource(R.string.s114), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Icon(Icons.Default.Tab, stringResource(R.string.s114), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         IconButton(onClick = onHistory) { Icon(Icons.Default.History, stringResource(R.string.s058), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, stringResource(R.string.s059), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -1563,9 +1584,11 @@ private fun ClockText() {
  * @param onHistory 进入历史页
  * @param onSettings 进入设置页
  * @param onAppRecommendations 进入应用推荐页
+ * @param tabCount 当前标签数量，用于头部标签按钮的徽标
+ * @param onTabs 从首页进入标签管理
  */
 @Composable
-private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
+private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit, tabCount: Int = 0, onTabs: () -> Unit = {}) {
     var query by rememberSaveable { mutableStateOf("") }
     val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
     var showQuickSiteDialog by remember { mutableStateOf(false) }
@@ -1630,7 +1653,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            HomeHeader(onHistory = onHistory, onSettings = onSettings)
+            HomeHeader(tabCount = tabCount, onTabs = onTabs, onHistory = onHistory, onSettings = onSettings)
 
             // 搜索框：毛玻璃卡片样式（半透明底 + 描边 + 聚焦发光环）。
             // 点击输入框之外的任意位置会先清掉焦点，光晕随之熄灭。
