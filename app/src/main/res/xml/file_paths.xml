@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅暴露应用自己产生的文件：私有 downloads 目录、缓存、外部私有目录。
+         不声明 external-path（整个共享存储）：那会让下载到的任意文件
+         都能通过 content:// 被其它应用读取，而实际只需要覆盖应用自己的文件。
+         用户自选下载目录走 SAF 的 content:// 授权，不经过 FileProvider。 -->
     <files-path name="app_files" path="." />
     <cache-path name="app_cache" path="." />
     <external-files-path name="external_files" path="." />
-    <external-path name="external_storage" path="." />
 </paths>

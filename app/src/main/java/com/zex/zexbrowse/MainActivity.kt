@@ -8,7 +8,6 @@ package com.zex.zexbrowse
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -194,7 +193,9 @@ class MainActivity : ComponentActivity() {
     private fun consumeViewIntent(intent: Intent?) {
         if (intent == null) return
         val candidate = extractUrl(intent)
-        Log.d(TAG, "consumeViewIntent action=${intent.action} data=${intent.data} extras=${intent.extras?.keySet()} extracted=$candidate")
+        // 不把网址写进 logcat：logcat 对其它应用与本机调试工具可读，
+        // 用户打开的链接（可能含 token、会话参数）不该落到系统日志里。
+        // 需要排查时用设置里的外部链接诊断（仅本应用可见）。
         recordDiagnostics(intent, candidate)
         if (candidate == null) return
         incomingUrl.value = UriRequest(++uriSeq, candidate)
@@ -269,9 +270,5 @@ class MainActivity : ComponentActivity() {
     private fun extractHttpUrl(text: String): String? {
         Regex("https?://[^\\s]+").find(text)?.value?.let { return normalizeScheme(it) }
         return normalizeScheme(text)
-    }
-
-    private companion object {
-        const val TAG = "ZexIntent"
     }
 }

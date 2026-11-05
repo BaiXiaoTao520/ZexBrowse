@@ -135,6 +135,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -355,8 +356,14 @@ private fun IncognitoHomeScreen(
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     var searchTop by remember { mutableStateOf(0) }
+    // 无痕搜索框的输入态：用于在页面根容器上接管“点空白处收起”
+    var searchFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
-    Box(Modifier.fillMaxSize().background(deep)) {
+    Box(
+        Modifier.fillMaxSize().background(deep)
+            .dismissFocusOnOutsideTap(searchFocused, focusManager)
+    ) {
         // 顶部光晕：深紫底色上铺一层同色系渐变，避免整屏纯色显得死板
         Box(
             Modifier
@@ -451,6 +458,7 @@ private fun IncognitoHomeScreen(
                         searchTop = coords.positionInParent().y.toInt()
                     }
                     .onFocusChanged { focus ->
+                        searchFocused = focus.isFocused
                         // 聚焦时主动把输入框滚到可视区：键盘弹出后页面高度会缩，
                         // 不滚上去的话输入框会被压在键盘下方。
                         // 仅在已测量出位置时滚动，避免首帧 searchTop=0 把页面跳回顶部
@@ -1239,6 +1247,7 @@ private fun PageContent(
             onRemoveSearchHistory = { scope.launch { settingsStore.removeSearchHistory(it) } },
             setQuickSites = { scope.launch { settingsStore.quickSites(it) } },
             onOpen = { address ->
+                if (browserViewModel.tabs.value.isEmpty()) browserViewModel.newTab()
                 val tab = browserViewModel.selected
                 // 只为目标普通标签记录搜索历史（网址也一并记下，便于重复访问）
                 if (tab != null && !tab.incognito) {
@@ -1248,7 +1257,10 @@ private fun PageContent(
             },
             onHistory = { navigate(Page.HISTORY) },
             onSettings = { navigate(Page.SETTINGS) },
-            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) }
+            onAppRecommendations = { navigate(Page.APP_RECOMMENDATIONS) },
+            // 首页头部标签按钮：显示当前普通标签数量，点击进入标签管理
+            tabCount = browserViewModel.tabs.collectAsState().value.count { !it.incognito },
+            onTabs = { onTabsIncognitoChange(false); navigate(Page.TABS) }
         )
         Page.APP_RECOMMENDATIONS -> AppRecommendationsScreen(
             browserViewModel = browserViewModel,
@@ -1276,13 +1288,23 @@ private fun PageContent(
             onTabs = { incognito -> onTabsIncognitoChange(incognito); navigate(Page.TABS) },
             onIncognitoHome = { navigate(Page.INCOGNITO) },
             onDownloads = { navigate(Page.DOWNLOADS) },
-            onSettings = { navigate(Page.SETTINGS) }
+            onSettings = { navigate(Page.SETTINGS) },
+            // 关掉最后一个标签（或点叉号）后回首页，而不是停在新建的 about 空白页；
+            // 无痕环境同样回首页（首页会自动按当前模式进无痕入口）
+            onAllTabsClosed = resetToHome
         )
         Page.TABS -> TabOverview(
             viewModel = browserViewModel,
             initialIncognito = tabsIncognito,
             onBack = goBack,
-            onExitIncognito = resetToHome
+            onExitIncognito = resetToHome,
+            onBackToHome = resetToHome,
+            // 新建标签后直接回首页：新标签本身是空白的，停在标签列表看不到内容，
+            // 回首页才能立刻输入地址或搜索
+            onNewTab = { incognito ->
+                browserViewModel.newTab(incognito = incognito)
+                resetToHome()
+            }
         )
         Page.SETTINGS -> SettingsScreen(
             settings = settings,
@@ -1473,6 +1495,34 @@ private fun PageContent(
     }
 }
 
+/**
+ * 输入态下点击页面空白处就清除焦点（键盘、光晕、下拉面板一并收起）。
+ *
+ * 必须挂在页面根容器上：挂在输入框自身时，框外区域的点击根本不会派发到它。
+ * 用 Main 阶段判定——输入框、卡片、按钮这些子节点会先把本次按下标记为已消费，
+ * 剩下未消费的按下才算点了空白处，因此不会误伤控件。
+ *
+ * @param enabled 仅当搜索框处于输入态时为 true，其余时候完全不拦截事件
+ * @param focusManager 用于清除焦点
+ * @param contentOutsideInput 容器不包含输入框时，在 Initial 阶段观察所有按下（包括网页消费的事件）
+ */
+private fun Modifier.dismissFocusOnOutsideTap(
+    enabled: Boolean,
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    contentOutsideInput: Boolean = false
+): Modifier = if (!enabled) this else this.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val pass = if (contentOutsideInput) androidx.compose.ui.input.pointer.PointerEventPass.Initial
+                else androidx.compose.ui.input.pointer.PointerEventPass.Main
+            val event = awaitPointerEvent(pass)
+            if (event.type != PointerEventType.Press) continue
+            if (!contentOutsideInput && event.changes.any { it.isConsumed }) continue
+            focusManager.clearFocus()
+        }
+    }
+}
+
 @Composable
 private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
     Surface(
@@ -1486,13 +1536,20 @@ private fun GlassSurface(modifier: Modifier = Modifier, content: @Composable Row
 }
 
 /**
- * 首页头部：品牌名 + 时钟 + 历史/设置入口。
+ * 首页头部：品牌名 + 时钟 + 标签管理/历史/设置入口。
  *
  * 不用 TopAppBar：首页内容本身可以滚到它下面，悬浮的渐变头图能带来更强的层次感；
  * 这里只保留一条轻量标题行，把主要空间留给搜索与常用站点。
+ * 右侧三个按钮都是标准 IconButton（48dp 触控区）、同一抹 onSurfaceVariant 颜色，
+ * 等距排列，不单独设置尺寸与间距，保证三者视觉重量一致。
+ *
+ * @param tabCount 当前标签数量，为 0 时不显示徽标
+ * @param onTabs 进入标签管理
+ * @param onHistory 进入历史页
+ * @param onSettings 进入设置页
  */
 @Composable
-private fun HomeHeader(onHistory: () -> Unit, onSettings: () -> Unit) {
+private fun HomeHeader(tabCount: Int, onTabs: () -> Unit, onHistory: () -> Unit, onSettings: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(top = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1506,6 +1563,17 @@ private fun HomeHeader(onHistory: () -> Unit, onSettings: () -> Unit) {
             )
             Spacer(Modifier.height(2.dp))
             ClockText()
+        }
+        // 标签管理：与浏览器页底部工具栏的标签按钮同源（Tab 图标 + 数量徽标），
+        // 让用户不用先进网页就能看到/管理已开的标签
+        IconButton(onClick = onTabs) {
+            if (tabCount > 0) {
+                BadgedBox(badge = { Badge { Text(tabCount.toString()) } }) {
+                    Icon(Icons.Default.Tab, stringResource(R.string.s114), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Icon(Icons.Default.Tab, stringResource(R.string.s114), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         IconButton(onClick = onHistory) { Icon(Icons.Default.History, stringResource(R.string.s058), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, stringResource(R.string.s059), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -1537,9 +1605,11 @@ private fun ClockText() {
  * @param onHistory 进入历史页
  * @param onSettings 进入设置页
  * @param onAppRecommendations 进入应用推荐页
+ * @param tabCount 当前标签数量，用于头部标签按钮的徽标
+ * @param onTabs 从首页进入标签管理
  */
 @Composable
-private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit) {
+private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, onRemoveSearchHistory: (String) -> Unit, setQuickSites: (String) -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit, onAppRecommendations: () -> Unit, tabCount: Int = 0, onTabs: () -> Unit = {}) {
     // 首页可能复用无痕标签；输入内容不能写入 Activity 的 savedInstanceState。
     var query by remember { mutableStateOf("") }
     val bookmarks = remember(settings.quickSites) { decodeBookmarks(settings.quickSites) }
@@ -1565,21 +1635,8 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     Box(
         Modifier
             .fillMaxSize()
-            // 输入态下点页面其他位置即退出输入。必须挂在页面根节点：
-            // 挂在输入框自己身上时，框外区域的点击根本不会派发到它。
-            // 用 Main 阶段判定：输入框、卡片、按钮这些子节点会先把本次按下标记为已消费，
-            // 剩下未消费的按下才算“点了空白处”，不会误伤控件。
-            .pointerInput(searchFocused) {
-                if (!searchFocused) return@pointerInput
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Main)
-                        if (event.type != PointerEventType.Press) continue
-                        if (event.changes.any { it.isConsumed }) continue
-                        focusManager.clearFocus()
-                    }
-                }
-            }
+            // 输入态下点页面其他位置即退出输入
+            .dismissFocusOnOutsideTap(searchFocused, focusManager)
     ) {
         // 首页氛围色：整屏竖向渐变，起于主色、终于页面背景色。
         // 三个关键点：
@@ -1618,7 +1675,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            HomeHeader(onHistory = onHistory, onSettings = onSettings)
+            HomeHeader(tabCount = tabCount, onTabs = onTabs, onHistory = onHistory, onSettings = onSettings)
 
             // 搜索框：毛玻璃卡片样式（半透明底 + 描边 + 聚焦发光环）。
             // 点击输入框之外的任意位置会先清掉焦点，光晕随之熄灭。
@@ -2599,6 +2656,7 @@ private fun RiskySiteDialog(
  * @param onSecurityClick 点击护盾查看详情
  * @param compact 紧凑模式：浏览器页用更矮的高度
  * @param onSearchFocusChange 输入态变化，供页面层接管「点空白处收起」
+ * @param accentColor 强调色；无痕页传入专属紫，为 null 时跟随主题主色
  */
 @Composable
 private fun AddressInput(
@@ -2616,8 +2674,10 @@ private fun AddressInput(
     onSecurityClick: () -> Unit = {},
     // 紧凑模式：浏览器页地址栏用更矮的输入框，把竖向空间留给网页内容与加载条
     compact: Boolean = false,
-    // 输入态变化通知：首页用它决定是否在页面根节点接管“点空白处收起输入”
-    onSearchFocusChange: (Boolean) -> Unit = {}
+    // 输入态变化通知：页面层可用它在根节点接管“点空白处收起输入”
+    onSearchFocusChange: (Boolean) -> Unit = {},
+    // 强调色：无痕页传入专属紫，其余页面为 null（跟随主题主色）
+    accentColor: Color? = null
 ) {
     var focused by remember { mutableStateOf(false) }
     // 交互源只为了在点击输入框内部时不把这次点击当成「点外面」
@@ -2634,7 +2694,7 @@ private fun AddressInput(
     // 颜色必须先在组合阶段取好，再给绘制块使用。
     val glassColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f)
     val borderColor = MaterialTheme.colorScheme.outline
-    val focusColor = MaterialTheme.colorScheme.primary
+    val focusColor = accentColor ?: MaterialTheme.colorScheme.primary
     // 远程联想结果；每次输入变化后由防抖效应刷新
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     // 本地过滤后的搜索历史（仅在无远程建议或未输入时展示）
@@ -3039,14 +3099,25 @@ private fun BookmarkDialog(initial: QuickSite? = null, onSubmit: (QuickSite) -> 
 }
 
 @Composable
-private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit) {
+private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings, settingsStore: SettingsStore, onTabs: (Boolean) -> Unit, onDownloads: () -> Unit, onSettings: () -> Unit, onIncognitoHome: () -> Unit, onAllTabsClosed: () -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     val selectedId by viewModel.selectedId.collectAsState()
     val selectedTab = tabs.firstOrNull { it.id == selectedId }
+    // 标签被全部关掉后不再自动补空白 about 标签，这里直接退回首页。
+    // 首次进入时没有标签或标签从非空变为空时，都返回首页。
+    var previousTabCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(tabs.size) {
+        val previous = previousTabCount
+        previousTabCount = tabs.size
+        if (tabs.isEmpty() && (previous == null || previous > 0)) onAllTabsClosed()
+    }
     // 只展示与当前标签同类型的标签，避免无痕与普通标签在同一列混合
     val visibleTabs = tabs.filter { it.incognito == (selectedTab?.incognito ?: false) }
     var input by remember(selectedTab?.id) { mutableStateOf(selectedTab?.url.orEmpty()) }
     var inputFocused by remember { mutableStateOf(false) }
+    // 无痕标签下地址栏用专属紫，不跟随主题；普通浏览仍用主题主色
+    val incognitoActive = selectedTab?.incognito == true
+    val focusManager = LocalFocusManager.current
     var downloadUrl by remember { mutableStateOf<String?>(null) }
     var expectedHash by remember { mutableStateOf("") }
     var hashResult by remember { mutableStateOf<String?>(null) }
@@ -3177,6 +3248,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     onSubmit = { viewModel.load(input) },
                     onFocusChange = { inputFocused = it },
                     showSuggestionsPanel = false,
+                    // 无痕标签下用专属紫，与普通标签一眼可分
+                    accentColor = if (incognitoActive) IncognitoAccentColor else null,
                     // 浏览器地址栏比较缩：顶部紧贴状态栏，把高度让给网页与加载条；
                     // 无痕提示条、进度条、网页内容都能多出一行可视区域
                     compact = true,
@@ -3208,18 +3281,6 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 IconButton(onClick = { onTabs(selectedTab?.incognito == true) }) {
                     BadgedBox(badge = { Badge { Text(visibleTabs.size.toString()) } }) { Icon(Icons.Default.Tab, stringResource(R.string.s114)) }
                 }
-                // 无痕标签标识：标签栏里无痕与普通两个 chip 外观一致，
-                // 不标一下用户分不清当前在看哪种标签。不跨标签切换时永远显示，
-                // 颜色走主题色（tertiary）而不是专属紫，不干扰用户的配色设置
-                if (selectedTab?.incognito == true) {
-                    Icon(
-                        Icons.Rounded.VisibilityOff,
-                        stringResource(R.string.s124),
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.tertiary
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
                 Box {
                     IconButton(onClick = { showBrowserMenu = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.s115)) }
                     DropdownMenu(expanded = showBrowserMenu, onDismissRequest = { showBrowserMenu = false }, offset = androidx.compose.ui.unit.DpOffset(0.dp, 48.dp)) {
@@ -3236,7 +3297,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(
+            Modifier.fillMaxSize().padding(padding)
+                // 地址栏输入态下点页面其他位置即收起键盘与光晕
+                .dismissFocusOnOutsideTap(inputFocused, focusManager, contentOutsideInput = true)
+        ) {
             LazyRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                 items(visibleTabs, key = { it.id }) { tab ->
                     AssistChip(
@@ -3388,7 +3453,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
 }
 
 @Composable
-private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit) {
+private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean = false, onBack: () -> Unit, onExitIncognito: () -> Unit, onBackToHome: () -> Unit, onNewTab: (Boolean) -> Unit) {
     val tabs by viewModel.tabs.collectAsState()
     var incognitoOnly by remember { mutableStateOf(initialIncognito) }
     val displayedTabs = tabs.filter { it.incognito == incognitoOnly }
@@ -3406,15 +3471,54 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                             onExitIncognito()
                         } else {
                             viewModel.closeAllNormal()
+                            // 普通标签全部关完后直接回首页，不在标签页展示空列表
+                            if (viewModel.tabs.value.isEmpty()) onBackToHome()
                         }
                     }) { Text(stringResource(if (incognitoOnly) R.string.incognito_exit_all else R.string.s134)) }
                 }
             )
+        },
+        // 右下角新建标签：新建后直接回首页（新标签是空白的，留在列表看不到内容）
+        floatingActionButton = {
+            FloatingActionButton(onClick = { onNewTab(incognitoOnly) }) {
+                Icon(Icons.Default.Add, stringResource(R.string.s113))
+            }
         }
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
+                // 底部留出悬浮按钮的高度，避免最后一项被遮住
+                .padding(top = 16.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             item { Row { AssistChip(onClick = { incognitoOnly = false }, label = { Text(stringResource(R.string.s123)) }, leadingIcon = { if (!incognitoOnly) Icon(Icons.Default.Check, null) }); Spacer(Modifier.width(8.dp)); AssistChip(onClick = { incognitoOnly = true }, label = { Text(stringResource(R.string.s124)) }, leadingIcon = { if (incognitoOnly) Icon(Icons.Default.Check, null) }) } }
-            if (displayedTabs.isEmpty()) item { Text(stringResource(if (incognitoOnly) R.string.s135 else R.string.s136)) }
+            if (displayedTabs.isEmpty()) item {
+                // 空态：给出图标与说明，而不是一行灰字，避免看起来像加载失败
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 28.dp, horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.Tab,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            stringResource(if (incognitoOnly) R.string.s135 else R.string.s136),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
             items(displayedTabs, key = { it.id }) { tab ->
                 ElevatedCard(onClick = { viewModel.select(tab.id); onBack() }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3426,7 +3530,11 @@ private fun TabOverview(viewModel: BrowserViewModel, initialIncognito: Boolean =
                             Text(tab.title.ifBlank { stringResource(R.string.s107) }, maxLines = 1)
                             Text(tab.url.ifEmpty { stringResource(R.string.s107) }, maxLines = 1, style = MaterialTheme.typography.bodySmall)
                         }
-                        IconButton(onClick = { viewModel.close(tab.id) }) { Icon(Icons.Default.Close, stringResource(R.string.s079)) }
+                        IconButton(onClick = {
+                            viewModel.close(tab.id)
+                            // 关掉最后一个后标签列表为空，标签页已无内容可展示，直接回首页
+                            if (viewModel.tabs.value.isEmpty()) onBackToHome()
+                        }) { Icon(Icons.Default.Close, stringResource(R.string.s079)) }
                     }
                 }
             }
@@ -3620,6 +3728,9 @@ private fun SettingsScreen(
     val context = LocalContext.current
     // 设置搜索：按关键词过滤上方入口卡片
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    // 设置页搜索框的输入态：用于在页面根容器上接管“点空白处收起”
+    var searchFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     // 搜索索引：子选项 -> 所属页面。搜索命中后直接展示子选项，点击即跳转到对应页面。
     // 不用 remember：内部需调用 stringResource，而 remember 的 lambda 不是组合上下文。
     // 条目只有十几个，每次重组重建的开销可忽略。
@@ -3720,13 +3831,24 @@ private fun SettingsScreen(
         }
     }
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s059)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+      Box(
+          Modifier.fillMaxSize().padding(padding)
+              .dismissFocusOnOutsideTap(searchFocused, focusManager)
+      ) {
+        LazyColumn(Modifier.fillMaxSize()) {
             // 设置搜索框
             item {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    // 紧凑化：M3 文本框自然高度是 56dp，这里压到 52dp（安全下限：16+20+16），
+                    // 并把上下留白收紧到 6dp，让搜索框离顶栏更近；
+                    // 它在 LazyColumn 的第一个 item 里，后续入口卡片会随之整体上移，
+                    // 不会像固定头部那样在下方留下空白。
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .height(52.dp)
+                        .onFocusChanged { searchFocused = it.isFocused },
                     placeholder = { Text(stringResource(R.string.s302)) },
                     singleLine = true,
                     shape = MaterialTheme.shapes.extraLarge,
@@ -3778,6 +3900,7 @@ private fun SettingsScreen(
                 }
             }
         }
+    }
     }
     if (showLinkDiagnostics) {
         val info by ExternalLinkDiagnostics.last.collectAsState()

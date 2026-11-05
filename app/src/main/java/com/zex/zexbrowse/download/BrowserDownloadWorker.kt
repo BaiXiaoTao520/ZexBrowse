@@ -138,8 +138,9 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
                     // 本地捕获文件是完整文件，不能与历史偏移叠加
                     startOffset = 0L
                 } else if (failFile.exists()) {
-                    // 捕获失败（例如拿到的是验证页而不是文件）：立即回退网络下载，不再等超时
-                    android.util.Log.d("ZexDownload", "capture failed, fallback to network: $url")
+                    // 捕获失败（例如拿到的是验证页而不是文件）：立即回退网络下载，不再等超时。
+                    // 不打印 url：下载地址常带一次性令牌，logcat 对其它应用可读。
+                    android.util.Log.d("ZexDownload", "capture failed, fallback to network")
                 }
             }
 
