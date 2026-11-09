@@ -664,7 +664,9 @@
     <string name="ad_block_tip_title">提示</string>
     <string name="ad_block_tip">攔截可能導致極少數網站內容顯示異常，如遇問題可暫時關閉。</string>
     <string name="ad_block_count_value">%1$s 次攔截</string>
+    <string name="ad_block_count_unit">次攔截</string>
     <string name="ad_block_count_loading">正在讀取…</string>
+    <string name="ad_block_count_error">讀取失敗</string>
     <string name="ad_block_count_hint">累計攔截的廣告與追蹤請求次數，資料來自核心的攔截記錄</string>
     <string name="ad_block_count_hint_off">攔截已關閉，這裡是先前的累計記錄</string>
     <string name="notice_appshare_title">AppShare 下載說明</string>

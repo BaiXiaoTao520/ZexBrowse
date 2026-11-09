@@ -755,11 +755,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * Gecko 会记一条事件，这里只做汇总读取，不自己计数——否则刷新页面、撤销拦截等
      * 情形都会让自己维护的计数器失真。
      */
-    fun loadBlockedCount(onResult: (Long) -> Unit) {
+    fun loadBlockedCount(onResult: (Result<Long>) -> Unit) {
         runCatching {
             runtime.contentBlockingController.sumAllTrackingDbEvents()
-                .accept({ total: Int? -> onResult((total ?: 0).toLong()) }, { onResult(0L) })
-        }.onFailure { onResult(0L) }
+                .accept({ total: Int? ->
+                    onResult(
+                        if (total != null) Result.success(total.toLong())
+                        else Result.failure(IllegalStateException("Missing blocked count"))
+                    )
+                }, { error ->
+                    onResult(Result.failure(error ?: IllegalStateException("Blocked count query failed")))
+                })
+        }.onFailure { onResult(Result.failure(it)) }
     }
 
     fun applyCurrentUserAgentToSelected() {
