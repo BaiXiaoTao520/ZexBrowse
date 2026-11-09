@@ -188,6 +188,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -3431,7 +3432,13 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                 }
             }
             if (selectedTab != null) {
-                if (selectedTab.loading) Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                if (selectedTab.loading) Box(
+                    Modifier.fillMaxWidth()
+                        // 进度条这一行的背景默认是主题色，无痕时补上与上下栏同一档淡紫，
+                        // 否则标签条与网页之间会夹一条浅色横带（截图所示）
+                        .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
                     WavyProgressBar(
                         progress = selectedTab.progress / 100f,
                         modifier = Modifier.fillMaxWidth(),
@@ -4793,9 +4800,14 @@ private fun adBlockSubtitle(context: Context, settings: BrowserSettings): String
 /**
  * 广告拦截设置页。
  *
- * 单开关：开启后由 GeckoView 原生追踪保护在请求层拦截广告/追踪域请求，
+ * 版式：顶部一张主状态卡（大号拦截次数 + 开关），下面两张说明卡。
+ * 拦截次数是用户最关心的「到底有没有用」的直接证据，因此单独做成大卡片，
+ * 而不是混在一行设置项里。
+ *
+ * 功能不变：开启后由 GeckoView 原生跟踪保护在请求层拦截，
  * 同时启用内置 zex_adblock 扩展隐藏页面内常见广告位；关闭则完全放行。
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AdBlockScreen(
     settings: BrowserSettings,
@@ -4803,56 +4815,134 @@ private fun AdBlockScreen(
     blockedCount: Long?,
     onBack: () -> Unit
 ) {
+    val enabled = settings.adBlockEnabled
+    // 开启时用主色强调，关闭时用中性容器色，避免"关了还一片高亮"的误导
+    val statsContainer = if (enabled) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh
+    val statsContent = if (enabled) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant
+    val countText = when {
+        blockedCount == null -> "--"
+        else -> blockedCount.toString()
+    }
+
     SelectionScreen(stringResource(R.string.ad_block_title), onBack) {
+        // 主状态卡：拦截次数 + 开关
         item {
-            SwitchRow(
-                title = stringResource(R.string.ad_block_switch_title),
-                subtitle = stringResource(R.string.ad_block_switch_sub),
-                checked = settings.adBlockEnabled,
-                onCheckedChange = setAdBlock,
-                leading = Icons.Rounded.Block
-            )
-        }
-        // 拦截次数紧跟在开关下方：这是用户最关心的「到底有没有用」的直接证据，
-        // 放在开关旁可见即得，不用再往下找
-        item {
-            val count = blockedCount
-            val countText = if (count == null) {
-                stringResource(R.string.ad_block_count_loading)
-            } else {
-                stringResource(R.string.ad_block_count_value, count)
-            }
-            ListItem(
-                headlineContent = {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = CardDefaults.cardColors(containerColor = statsContainer, contentColor = statsContent)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (enabled) Icons.Rounded.GppGood else Icons.Rounded.GppBad,
+                            null,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.ad_block_switch_title),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Switch(checked = enabled, onCheckedChange = setAdBlock)
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    // 大号计数：数值本身用大字号突出，数值过长时省略而不换行
                     Text(
                         text = countText,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                },
-                supportingContent = {
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        if (settings.adBlockEnabled) stringResource(R.string.ad_block_count_hint)
-                        else stringResource(R.string.ad_block_count_hint_off)
+                        // 加载中显示「正在读取」，否则显示纯单位，避免「正在读取…次拦截」这种拼接
+                        stringResource(
+                            if (blockedCount == null) R.string.ad_block_count_loading
+                            else R.string.ad_block_count_unit
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = statsContent.copy(alpha = 0.8f)
                     )
-                },
-                leadingContent = { Icon(Icons.Rounded.VerifiedUser, null) }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        stringResource(
+                            if (enabled) R.string.ad_block_count_hint else R.string.ad_block_count_hint_off
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = statsContent.copy(alpha = 0.72f)
+                    )
+                }
+            }
+        }
+        // 说明卡片
+        item {
+            AdBlockInfoCard(
+                icon = Icons.Rounded.VerifiedUser,
+                title = stringResource(R.string.ad_block_switch_title),
+                body = stringResource(R.string.ad_block_switch_sub),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
-        item { HorizontalDivider() }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.s364)) },
-                supportingContent = { Text(stringResource(R.string.ad_block_how_it_works)) },
-                leadingContent = { Icon(Icons.Rounded.GppGood, null) }
+            AdBlockInfoCard(
+                icon = Icons.Rounded.Policy,
+                title = stringResource(R.string.s364),
+                body = stringResource(R.string.ad_block_how_it_works),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.ad_block_tip_title)) },
-                supportingContent = { Text(stringResource(R.string.ad_block_tip)) },
-                leadingContent = { Icon(Icons.Rounded.Policy, null) }
+            AdBlockInfoCard(
+                icon = Icons.Rounded.Info,
+                title = stringResource(R.string.ad_block_tip_title),
+                body = stringResource(R.string.ad_block_tip),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
+        }
+        // 底部留白，最后一张卡片不贴屏幕底边
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+/** 广告拦截页的说明卡片：图标在左，标题与正文在右 */
+@Composable
+private fun AdBlockInfoCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    body: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp)) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    body,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
