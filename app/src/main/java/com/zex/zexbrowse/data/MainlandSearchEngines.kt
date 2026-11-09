@@ -25,9 +25,11 @@ object MainlandSearchEngines {
      * 裸域名（如 `baidu.com` 本身）同样命中。
      */
     private val restrictedHosts: List<String> = listOf(
-        // 百度
-        "baidu.com",
-        "baidu.cn",
+        // 百度搜索：只拦搜索主机。baidu.com 下还有网盘（pan.baidu.com）、
+        // 地图、文库等独立产品，整域拦截会把这些一并干掉，属于误伤。
+        // 搜索入口只有 www.baidu.com；m.baidu.com 是移动端搜索页，同属受限。
+        "www.baidu.com",
+        "m.baidu.com",
         // 搜狗
         "sogou.com",
         "sogou.cn",
