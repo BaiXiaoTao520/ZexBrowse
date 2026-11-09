@@ -121,4 +121,45 @@ class ZexBrowseApplication : Application() {
             }
         }
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // 合规拦截扩展（zex_compliance）
+    //
+    // 为什么需要它：GeckoView 没有 "shouldInterceptRequest" 这类原生钩子，
+    // NavigationDelegate 只在导航层生效——iframe、图片、脚本、XHR 这些资源请求
+    // 根本不经过它。仅靠导航拦截，页面仍可能向受限域名发出请求（白白跑流量）。
+    // 因此用 WebExtension 的 declarativeNetRequest 在网络层直接阻断，
+    // 规则见 assets/web_extensions/zex_compliance/rules.json。
+    //
+    // 与广告拦截无关，始终启用，不提供开关。
+    // ────────────────────────────────────────────────────────────────
+    private var complianceExtension: WebExtension? = null
+
+    fun ensureComplianceExtension(onReady: () -> Unit, onFailure: (Throwable) -> Unit) {
+        fun fail(error: Throwable?) {
+            val failure = error ?: IllegalStateException("Compliance extension unavailable")
+            CrashReporter.record(this, failure)
+            onFailure(failure)
+        }
+        runCatching {
+            runtime.webExtensionController
+                .ensureBuiltIn("resource://android/assets/web_extensions/zex_compliance/", "zex-compliance@zexbrowse")
+                .accept({ extension: WebExtension? ->
+                    if (extension == null) {
+                        fail(null)
+                    } else {
+                        runCatching {
+                            runtime.webExtensionController
+                                .enable(extension, WebExtensionController.EnableSource.APP)
+                                .accept({ enabled: WebExtension? ->
+                                    if (enabled?.metaData?.enabled != true) fail(null) else {
+                                        complianceExtension = enabled
+                                        onReady()
+                                    }
+                                }, { error: Throwable? -> fail(error) })
+                        }.onFailure { fail(it) }
+                    }
+                }, { error: Throwable? -> fail(error) })
+        }.onFailure { fail(it) }
+    }
 }

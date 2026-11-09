@@ -22,6 +22,7 @@ import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.LemwoodMirror
+import com.zex.zexbrowse.data.MainlandSearchEngines
 import com.zex.zexbrowse.data.SecurityScanner
 import com.zex.zexbrowse.data.SettingsStore
 import com.zex.zexbrowse.data.resolveCustomSearchTemplate
@@ -55,7 +56,7 @@ internal fun canReuseBlankTab(url: String, incognito: Boolean, requestedIncognit
 internal fun <T> selectedOrSingleReusableTab(tabs: List<T>, selected: T?, isReusable: (T) -> Boolean): T? =
     selected?.takeIf(isReusable) ?: tabs.singleOrNull(isReusable)
 
-data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment())
+data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment(), /** 命中受限的大陆搜索引擎时记录主域名，非空则展示合规提示页 */ val restrictedEngine: String? = null, val beforeRestrictedUrl: String = "")
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
@@ -407,7 +408,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 update(id) { tab ->
                     // 加载失败后 Gecko 会导航到 about:blank 之类的内部页；
                     // 此时必须保留 failed 与失败网址，否则错误页会被冲掉、变成空白页。
-                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true, risk = connectionSecurity.onPageStart(tab.url))
+                    if (tab.restrictedEngine != null) tab
+                    else if (url.startsWith("about:") && tab.failed) tab.copy(loading = true, risk = connectionSecurity.onPageStart(tab.url))
                     else tab.copy(url = url, risk = connectionSecurity.onPageStart(url), loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
                 }
             }
@@ -525,7 +527,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 if (url != null) {
                     android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url")
                     update(id) { tab ->
-                        if (url.startsWith("about:") && tab.failed) tab
+                        if (tab.restrictedEngine != null || (url.startsWith("about:") && tab.failed)) tab
                         else tab.copy(url = url, risk = connectionSecurity.onLocationChange(url))
                     }
                 }
@@ -546,6 +548,25 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
 
+                // 受限的大陆搜索引擎：一律拒绝，并把标签置为合规提示态。
+                // 覆盖点链接、重定向、脚本跳转等不走地址栏的路径，
+                // 避免用户从其他页面绕到受限站点而看到真实网页。
+                MainlandSearchEngines.match(uri)?.let { hit ->
+                    if (pendingInitialLoads[id] == uri) clearPending(id)
+                    update(id) {
+                        it.copy(
+                            url = uri,
+                            loading = false,
+                            progress = 0,
+                            failed = false,
+                            failedUrl = "",
+                            beforeRestrictedUrl = if (it.restrictedEngine == null) it.url else it.beforeRestrictedUrl,
+                            restrictedEngine = hit
+                        )
+                    }
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+
                 // 风险站点拦截：检查所有顶层导航，包括自动跳转和重定向，不拦子帧。
                 if (riskyNavigationGate.shouldBlock(id, uri, true, securityMode)) {
                     // A denied initial load must not be retried while the warning is pending.
@@ -564,9 +585,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     if (userInitiated) requestExternalApp(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
+                if (userInitiated) update(id) { it.copy(restrictedEngine = null, beforeRestrictedUrl = "") }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
+                // 子帧也不能放：受限搜索引擎可能被以 iframe 形式嵌入，
+                // 就算资源层已由扩展阻断，这里再拒一次，避免任何漏网
+                if (MainlandSearchEngines.match(request.uri) != null) {
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
                 return null
             }
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) = update(id) { it.copy(canGoBack = canGoBack) }
@@ -799,7 +826,27 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             selected
         } else null
         targetTab ?: return
+        // 受限的大陆搜索引擎：不发请求，直接把标签置为合规提示态。
+        // 放在发请求之前，保证即使是直链也不会先发出一轮请求再拦下。
+        MainlandSearchEngines.match(target)?.let { hit ->
+            clearPending(targetTab.id)
+            cancelPendingFailure(targetTab.id)
+            update(targetTab.id) {
+                it.copy(
+                    url = target,
+                    loading = false,
+                    progress = 0,
+                    failed = false,
+                    failedUrl = "",
+                    beforeRestrictedUrl = if (it.restrictedEngine == null) it.url else it.beforeRestrictedUrl,
+                    restrictedEngine = hit
+                )
+            }
+            return
+        }
         cancelPendingFailure(targetTab.id)
+        // 正常导航时清掉旧的合规提示态，否则旧提示会盖在新页面上
+        update(targetTab.id) { if (it.restrictedEngine != null) it.copy(restrictedEngine = null, beforeRestrictedUrl = "") else it }
         if (attachedSessions.contains(targetTab.id)) {
             // Stop any earlier retry from replacing this explicit navigation.
             clearPending(targetTab.id)
@@ -825,9 +872,22 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         load(input, targetTab)
     }
-    fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
+    fun back(onHome: () -> Unit) {
+        val tab = selected ?: return
+        if (tab.restrictedEngine != null) {
+            val previousUrl = tab.beforeRestrictedUrl
+            update(tab.id) { it.copy(url = previousUrl, restrictedEngine = null, beforeRestrictedUrl = "") }
+            if (previousUrl.isBlank() || previousUrl == "about:blank") onHome()
+        } else tab.session.goBack()
+    }; fun forward() { selected?.session?.goForward() }
     fun reload() {
         val tab = selected ?: return
+        // 受限搜索引擎：不能走 session.reload()（会把被拒绝的地址重新发一次），
+        // 而是重新走 load，由它再次判为受限并保持提示页，防止刷新绕过。
+        if (tab.restrictedEngine != null) {
+            load(tab.url, tab)
+            return
+        }
         // 手动重试时先清掉待确认失败，避免旧计时器在新一次加载过程中再次弹出错误页
         cancelPendingFailure(tab.id)
         val pending = pendingDownloads[tab.id]
@@ -1063,7 +1123,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 自定义搜索引擎统一以「custom:<标题>」形式保存，可添加多个、各自独立生效；
         // 旧版只有单个自定义搜索（custom），此时回退到 customSearchUrl 以兼容已有配置。
         val template = when {
-            browserSettings.searchEngine == "baidu" -> "https://www.baidu.com/s?wd={query}"
+            // 百度已下架：旧配置里仍可能是 "baidu"，此时回退到 Google，
+            // 否则模板会因匹配不到而落到默认分支（行为一致，但显式列出便于阅读）
+            browserSettings.searchEngine == "baidu" -> "https://www.google.com/search?q={query}"
             browserSettings.searchEngine == "bing" -> "https://www.bing.com/search?q={query}"
             browserSettings.searchEngine == "duckduckgo" -> "https://duckduckgo.com/?q={query}"
             browserSettings.searchEngine.startsWith(CUSTOM_SEARCH_PREFIX) -> resolveCustomSearchTemplate(browserSettings)

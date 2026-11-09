@@ -1,0 +1,80 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^(https?|wss?)://(www\\.baidu\\.com|m\\.baidu\\.com)\\.*(:[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^(https?|wss?)://(www\\.sogou\\.com)\\.*(:[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^(https?|wss?)://(so\\.com|www\\.so\\.com|m\\.so\\.com|360\\.so|www\\.360\\.so)\\.*(:[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^(https?|wss?)://(sm\\.cn|www\\.sm\\.cn|m\\.sm\\.cn)\\.*(:[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^(https?|wss?)://(quark\\.sm\\.cn)\\.*(:[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
+      ]
+    }
+  },
+  {
+    "id": 6,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^(https?|wss?)://(so\\.toutiao\\.com|so\\.douyin\\.com)\\.*(:[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
+      ]
+    }
+  }
+]

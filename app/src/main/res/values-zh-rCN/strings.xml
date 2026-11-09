@@ -1,6 +1,11 @@
 <resources>
     <string name="app_name">ZexBrowse</string>
     <string name="s000">无法访问此网站</string>
+    <string name="compliance_title">服务调整说明</string>
+    <string name="compliance_body">根据相关法律法规及合规要求，ZexBrowse 暂时停止对大陆提供服务，部分国内搜索引擎将暂时不可用。恢复时间我们会另行通知，由此给您带来不便，敬请谅解。</string>
+    <string name="compliance_hint">期间你可以尝试使用其他搜索引擎（如必应、Google、DuckDuckGo），也可直接在地址栏输入完整网址访问。</string>
+    <string name="compliance_host">受限站点：%1$s</string>
+    <string name="compliance_back_home">返回首页</string>
     <string name="s001">重新加载</string>
     <string name="s002">域名解析失败，可能是网址拼写有误或该网站已停止服务</string>
     <string name="s003">设备当前未连接到网络</string>
@@ -541,7 +546,6 @@
     <string name="sub_sec_enhanced">增强模式 · 可疑与危险网站均拦截</string>
     <string name="sub_sec_basic">基础模式 · 仅提示不拦截</string>
     <string name="sub_sec_standard">标准模式 · 拦截危险网站</string>
-    <string name="label_baidu">百度</string>
     <string name="label_bing">必应</string>
     <string name="label_desktop_chrome">桌面 Chrome</string>
     <string name="label_desktop_firefox">桌面 Firefox</string>
@@ -672,7 +676,6 @@
     <string name="notice_appshare_title">AppShare 下载说明</string>
     <string name="notice_coolmonitor_title">CoolMonitor 网盘下载</string>
     <string name="notice_pan_download">网盘下载</string>
-    <string name="engine_baidu">百度</string>
     <string name="engine_bing">必应</string>
     <string name="notification_title">通知设置</string>
     <string name="notification_sub">实时通知与状态栏展示</string>

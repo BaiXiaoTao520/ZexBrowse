@@ -1,6 +1,11 @@
 <resources>
     <string name="app_name">ZexBrowse</string>
     <string name="s000">This site cannot be reached</string>
+    <string name="compliance_title">Service Notice</string>
+    <string name="compliance_body">In accordance with applicable laws and compliance requirements, ZexBrowse has temporarily suspended service to mainland China. Some mainland Chinese search engines are temporarily unavailable. We will announce the restoration date separately. We apologize for the inconvenience.</string>
+    <string name="compliance_hint">In the meantime you can use other search engines (such as Bing, Google or DuckDuckGo), or type a full address in the address bar.</string>
+    <string name="compliance_host">Restricted site: %1$s</string>
+    <string name="compliance_back_home">Back to home</string>
     <string name="s001">Reload</string>
     <string name="s002">Domain lookup failed. The URL may be misspelled or the site is no longer available.</string>
     <string name="s003">Your device is not connected to the network</string>
@@ -541,7 +546,6 @@
     <string name="sub_sec_enhanced">Enhanced: blocks suspicious and dangerous sites</string>
     <string name="sub_sec_basic">Basic: warns only, never blocks</string>
     <string name="sub_sec_standard">Standard: blocks dangerous sites</string>
-    <string name="label_baidu">Baidu</string>
     <string name="label_bing">Bing</string>
     <string name="label_desktop_chrome">Desktop Chrome</string>
     <string name="label_desktop_firefox">Desktop Firefox</string>
@@ -672,7 +676,6 @@
     <string name="notice_appshare_title">How to download AppShare</string>
     <string name="notice_coolmonitor_title">Download CoolMonitor from a file host</string>
     <string name="notice_pan_download">Open file host</string>
-    <string name="engine_baidu">Baidu</string>
     <string name="engine_bing">Bing</string>
     <string name="notification_title">Notifications</string>
     <string name="notification_sub">Live updates and status bar</string>
