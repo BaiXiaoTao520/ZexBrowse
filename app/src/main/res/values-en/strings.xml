@@ -546,7 +546,6 @@
     <string name="sub_sec_enhanced">Enhanced: blocks suspicious and dangerous sites</string>
     <string name="sub_sec_basic">Basic: warns only, never blocks</string>
     <string name="sub_sec_standard">Standard: blocks dangerous sites</string>
-    <string name="label_baidu">Baidu</string>
     <string name="label_bing">Bing</string>
     <string name="label_desktop_chrome">Desktop Chrome</string>
     <string name="label_desktop_firefox">Desktop Firefox</string>

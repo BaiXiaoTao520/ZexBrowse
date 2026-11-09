@@ -4048,6 +4048,8 @@ private fun SettingsScreen(
         SettingSearchItem(stringResource(R.string.s194), SearchGroup.GENERAL, listOf("路径", "保存位置", "存储", "目录", "下载位置", "下载路径", "path", "folder", "storage", "directory"), onGeneralSettings),
         SettingSearchItem(stringResource(R.string.s201), SearchGroup.GENERAL, listOf("校验", "哈希", "SHA", "APK", "安全", "完整性", "sha256", "hash", "verify", "integrity"), onGeneralSettings),
         SettingSearchItem(stringResource(R.string.s206), SearchGroup.SITE, listOf("深色", "黑暗", "夜间", "网页", "暗色", "适配", "网页渲染", "网页深色", "dark", "web", "page", "render"), onSiteSettings),
+        // 关键词保留「百度」：用户可能想找这个设置项，命中后能直接看到百度已下架；
+        // 但不能让搜索索引把它当成可用引擎的暗示
         SettingSearchItem(stringResource(R.string.s213), SearchGroup.SITE, listOf("搜索", "引擎", "百度", "必应", "DuckDuckGo", "谷歌", "搜索引擎", "search", "engine", "google", "baidu", "bing"), onSiteSettings),
         SettingSearchItem(stringResource(R.string.s219), SearchGroup.SITE, listOf("浏览器标识", "UA", "User-Agent", "桌面", "标识", "网页标识", "桌面模式", "user agent", "desktop"), onSiteSettings),
         SettingSearchItem(stringResource(R.string.s224), SearchGroup.PRIVACY, listOf("Cookie", "追踪", "隐私", "数据", "Cookies", "tracking", "privacy", "data"), onCookieSettings),
@@ -4334,7 +4336,9 @@ private fun ConfirmDialog(title: String, message: String, confirm: () -> Unit, d
 }
 
 private fun searchEngineLabel(context: Context, settings: BrowserSettings) = when {
-    settings.searchEngine == "baidu" -> context.getString(R.string.label_baidu)
+    // 百度已下架：旧配置仍为 baidu 时，引擎实际回退到 Google，
+    // 这里也跟着显示 Google，避免「设置里写着百度、实际用着 Google」的不一致
+    settings.searchEngine == "baidu" -> "Google"
     settings.searchEngine == "bing" -> context.getString(R.string.label_bing)
     settings.searchEngine == "duckduckgo" -> "DuckDuckGo"
     // 自定义搜索引擎的选中值是「custom:<标题>」，显示时去掉前缀只留标题

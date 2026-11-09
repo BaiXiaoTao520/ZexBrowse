@@ -546,7 +546,6 @@
     <string name="sub_sec_enhanced">增强模式 · 可疑与危险网站均拦截</string>
     <string name="sub_sec_basic">基础模式 · 仅提示不拦截</string>
     <string name="sub_sec_standard">标准模式 · 拦截危险网站</string>
-    <string name="label_baidu">百度</string>
     <string name="label_bing">必应</string>
     <string name="label_desktop_chrome">桌面 Chrome</string>
     <string name="label_desktop_firefox">桌面 Firefox</string>

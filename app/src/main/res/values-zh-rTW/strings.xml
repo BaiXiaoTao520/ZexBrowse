@@ -546,7 +546,6 @@
     <string name="sub_sec_enhanced">增強模式 · 可疑與危險網站皆封鎖</string>
     <string name="sub_sec_basic">基礎模式 · 僅提示不封鎖</string>
     <string name="sub_sec_standard">標準模式 · 封鎖危險網站</string>
-    <string name="label_baidu">百度</string>
     <string name="label_bing">Bing</string>
     <string name="label_desktop_chrome">桌面 Chrome</string>
     <string name="label_desktop_firefox">桌面 Firefox</string>
