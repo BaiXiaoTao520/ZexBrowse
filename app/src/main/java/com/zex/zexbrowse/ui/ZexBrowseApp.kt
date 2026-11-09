@@ -1463,9 +1463,12 @@ private fun PageContent(
         Page.ADBLOCK -> {
             // 进入页面时读一次累计拦截次数；开关变化后再读一次——刚切换时计数不会立刻跳，
             // 真正的增量来自之后的页面加载，所以这里不做轮询，避免无意义的后台查询
-            var blockedCount by remember { mutableStateOf<Long?>(null) }
-            LaunchedEffect(settings.adBlockEnabled) {
-                browserViewModel.loadBlockedCount { blockedCount = it }
+            var blockedCount by remember { mutableStateOf<Result<Long>?>(null) }
+            DisposableEffect(settings.adBlockEnabled) {
+                var active = true
+                blockedCount = null
+                browserViewModel.loadBlockedCount { if (active) blockedCount = it }
+                onDispose { active = false }
             }
             AdBlockScreen(
                 settings = settings,
@@ -4812,7 +4815,7 @@ private fun adBlockSubtitle(context: Context, settings: BrowserSettings): String
 private fun AdBlockScreen(
     settings: BrowserSettings,
     setAdBlock: (Boolean) -> Unit,
-    blockedCount: Long?,
+    blockedCount: Result<Long>?,
     onBack: () -> Unit
 ) {
     val enabled = settings.adBlockEnabled
@@ -4821,10 +4824,7 @@ private fun AdBlockScreen(
         else MaterialTheme.colorScheme.surfaceContainerHigh
     val statsContent = if (enabled) MaterialTheme.colorScheme.onPrimaryContainer
         else MaterialTheme.colorScheme.onSurfaceVariant
-    val countText = when {
-        blockedCount == null -> "--"
-        else -> blockedCount.toString()
-    }
+    val countText = blockedCount?.getOrNull()?.toString() ?: "--"
 
     SelectionScreen(stringResource(R.string.ad_block_title), onBack) {
         // 主状态卡：拦截次数 + 开关
@@ -4860,10 +4860,13 @@ private fun AdBlockScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        // 加载中显示「正在读取」，否则显示纯单位，避免「正在读取…次拦截」这种拼接
+                        // 查询失败与加载中分别显示状态，只有成功时显示计数单位
                         stringResource(
-                            if (blockedCount == null) R.string.ad_block_count_loading
-                            else R.string.ad_block_count_unit
+                            when {
+                                blockedCount == null -> R.string.ad_block_count_loading
+                                blockedCount.isFailure -> R.string.ad_block_count_error
+                                else -> R.string.ad_block_count_unit
+                            }
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = statsContent.copy(alpha = 0.8f)

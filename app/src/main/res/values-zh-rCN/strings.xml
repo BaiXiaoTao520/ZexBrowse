@@ -666,6 +666,7 @@
     <string name="ad_block_count_value">%1$s 次拦截</string>
     <string name="ad_block_count_unit">次拦截</string>
     <string name="ad_block_count_loading">正在读取…</string>
+    <string name="ad_block_count_error">读取失败</string>
     <string name="ad_block_count_hint">累计拦截的广告与追踪请求次数，数据来自内核的拦截记录</string>
     <string name="ad_block_count_hint_off">拦截已关闭，这里是此前的累计记录</string>
     <string name="notice_appshare_title">AppShare 下载说明</string>

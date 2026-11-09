@@ -666,6 +666,7 @@
     <string name="ad_block_count_value">%1$s blocked</string>
     <string name="ad_block_count_unit">blocked</string>
     <string name="ad_block_count_loading">Loading…</string>
+    <string name="ad_block_count_error">Unable to read count</string>
     <string name="ad_block_count_hint">Total ad and tracker requests blocked, taken from the engine\'s blocking records</string>
     <string name="ad_block_count_hint_off">Blocking is off; this is the previous total</string>
     <string name="notice_appshare_title">How to download AppShare</string>
