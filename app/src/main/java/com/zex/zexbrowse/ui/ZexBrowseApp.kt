@@ -174,6 +174,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -1464,7 +1465,8 @@ private fun PageContent(
             // 进入页面时读一次累计拦截次数；开关变化后再读一次——刚切换时计数不会立刻跳，
             // 真正的增量来自之后的页面加载，所以这里不做轮询，避免无意义的后台查询
             var blockedCount by remember { mutableStateOf<Result<Long>?>(null) }
-            DisposableEffect(settings.adBlockEnabled) {
+            var countRetry by remember { mutableIntStateOf(0) }
+            DisposableEffect(settings.adBlockEnabled, countRetry) {
                 var active = true
                 blockedCount = null
                 browserViewModel.loadBlockedCount { if (active) blockedCount = it }
@@ -1474,6 +1476,7 @@ private fun PageContent(
                 settings = settings,
                 setAdBlock = { enabled -> scope.launch { settingsStore.adBlock(enabled) } },
                 blockedCount = blockedCount,
+                onRetryCount = { countRetry++ },
                 onBack = goBack
             )
         }
@@ -4816,6 +4819,7 @@ private fun AdBlockScreen(
     settings: BrowserSettings,
     setAdBlock: (Boolean) -> Unit,
     blockedCount: Result<Long>?,
+    onRetryCount: () -> Unit,
     onBack: () -> Unit
 ) {
     val enabled = settings.adBlockEnabled
@@ -4850,13 +4854,12 @@ private fun AdBlockScreen(
                         Switch(checked = enabled, onCheckedChange = setAdBlock)
                     }
                     Spacer(Modifier.height(18.dp))
-                    // 大号计数：数值本身用大字号突出，数值过长时省略而不换行
+                    // 大号计数：允许换行，窄屏或大字体下仍能读到完整数值
                     Text(
                         text = countText,
+                        modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -4871,6 +4874,11 @@ private fun AdBlockScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = statsContent.copy(alpha = 0.8f)
                     )
+                    if (blockedCount?.isFailure == true) {
+                        TextButton(onClick = onRetryCount) {
+                            Text(stringResource(R.string.s437))
+                        }
+                    }
                     Spacer(Modifier.height(10.dp))
                     Text(
                         stringResource(
