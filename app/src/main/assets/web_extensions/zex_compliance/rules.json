@@ -56,7 +56,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
-      "requestDomains": ["quark.cn"],
+      "requestDomains": ["quark.sm.cn"],
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
         "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
@@ -69,7 +69,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
-      "requestDomains": ["toutiao.com", "douyin.com"],
+      "requestDomains": ["so.toutiao.com", "so.douyin.com"],
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
         "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",

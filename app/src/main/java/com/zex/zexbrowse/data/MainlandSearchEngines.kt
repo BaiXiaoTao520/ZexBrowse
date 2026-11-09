@@ -36,12 +36,13 @@ object MainlandSearchEngines {
         "360.so",
         // 神马搜索
         "sm.cn",
-        // 夸克
-        "quark.cn",
-        // 头条搜索
-        "toutiao.com",
-        // 抖音
-        "douyin.com",
+        // 夸克搜索：只拦搜索子域。quark.cn 是夸克浏览器官网，
+        // 整域拦截会把官网一起干掉，属于误伤
+        "quark.sm.cn",
+        // 头条搜索：只拦搜索子域，不影响 toutiao.com 官网
+        "so.toutiao.com",
+        // 抖音搜索：只拦搜索子域，不影响 douyin.com 官网
+        "so.douyin.com",
         // 必应国内站明确放行，不在此列
     )
 
@@ -64,10 +65,12 @@ object MainlandSearchEngines {
         if (host.isBlank()) return null
         if (allowedHosts.any { host == it || host.endsWith(".$it") }) return null
 
-        val hit = restrictedHosts.firstOrNull { base ->
-            host == base || host.endsWith(".$base")
-        } ?: return null
-        return hit
+        // 取最长匹配：名单里存在父子关系（如 sm.cn 与 quark.sm.cn），
+        // 若用 firstOrNull，quark.sm.cn 会被更靠前的 sm.cn 匹配，
+        // 提示页于是显示成错误的域名。最长匹配才能命中真正被拦的那一项。
+        return restrictedHosts
+            .filter { base -> host == base || host.endsWith(".$base") }
+            .maxByOrNull { it.length }
     }
 
     /** 从地址中取出小写主机名；解析不了返回 null */
