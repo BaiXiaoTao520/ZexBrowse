@@ -207,7 +207,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -376,11 +376,18 @@ private fun IncognitoHomeScreen(
     var searchTop by remember { mutableStateOf(0) }
     // 无痕搜索框的输入态：用于在页面根容器上接管“点空白处收起”
     var searchFocused by remember { mutableStateOf(false) }
+    // 搜索框在根坐标系中的纵向范围：点中框内时保留焦点
+    var searchTopPx by remember { mutableStateOf(0f) }
+    var searchBottomPx by remember { mutableStateOf(0f) }
     val focusManager = LocalFocusManager.current
 
     Box(
         Modifier.fillMaxSize().background(deep)
-            .dismissFocusOnOutsideTap(searchFocused, focusManager)
+            .dismissFocusOnOutsideTap(
+                searchFocused,
+                focusManager,
+                inputYRange = if (searchBottomPx > searchTopPx) searchTopPx..searchBottomPx else null
+            )
     ) {
         // 顶部光晕：深紫底色上铺一层同色系渐变，避免整屏纯色显得死板
         Box(
@@ -473,7 +480,11 @@ private fun IncognitoHomeScreen(
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
                     .onGloballyPositioned { coords ->
-                        searchTop = coords.positionInParent().y.toInt()
+                        val pos = coords.positionInRoot()
+                        searchTopPx = pos.y
+                        searchBottomPx = pos.y + coords.size.height
+                        // 聚焦时用于滚动定位，仍需一个整数偏移
+                        searchTop = pos.y.toInt()
                     }
                     .onFocusChanged { focus ->
                         searchFocused = focus.isFocused
@@ -519,6 +530,97 @@ private fun IncognitoHomeScreen(
             }
 
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * 受限搜索引擎的合规提示页。
+ *
+ * 与普通加载错误页刻意区分：用警示色图标 + 完整说明，并不提供「重试」按钮——
+ * 重试只会再次命中同一限制，给了按钮反而让用户反复点击却毫无变化。
+ * 改提供「返回首页」，给出一条真的能继续用的路径。
+ *
+ * @param url 被拦截的地址
+ * @param host 命中的受限主域名
+ * @param onBackHome 返回首页
+ */
+@Composable
+private fun ComplianceBlockedView(
+    url: String,
+    host: String,
+    onBackHome: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp, vertical = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Rounded.GppBad,
+                null,
+                modifier = Modifier.size(52.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                stringResource(R.string.compliance_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.compliance_host, host),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                stringResource(R.string.compliance_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(16.dp))
+            // 替代方案单独成块，既不与正文混为一谈，也不显碍眼
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Rounded.Info,
+                        null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        stringResource(R.string.compliance_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                url,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(24.dp))
+            // 不提供重试：重试只会被同一条规则再次拦下
+            Button(onClick = onBackHome) {
+                Icon(Icons.Default.ArrowBack, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.compliance_back_home))
+            }
         }
     }
 }
@@ -1565,25 +1667,31 @@ private fun PageContent(
  * 输入态下点击页面空白处就清除焦点（键盘、光晕、下拉面板一并收起）。
  *
  * 必须挂在页面根容器上：挂在输入框自身时，框外区域的点击根本不会派发到它。
- * 用 Main 阶段判定——输入框、卡片、按钮这些子节点会先把本次按下标记为已消费，
- * 剩下未消费的按下才算点了空白处，因此不会误伤控件。
+ *
+ * 用 Initial 阶段 + 坐标判定：子节点（LazyColumn、可点卡片）会在 Main 阶段
+ * 把按下标为已消费，若靠 `isConsumed` 判定就永远收不到空白处的点击。
+ * 因此在 Initial 阶段先拿到按下位置，落在输入框纵向范围内就不收起。
  *
  * @param enabled 仅当搜索框处于输入态时为 true，其余时候完全不拦截事件
- * @param focusManager 用于清除焦点
- * @param contentOutsideInput 容器不包含输入框时，在 Initial 阶段观察所有按下（包括网页消费的事件）
+ * @param inputYRange 输入框在根容器坐标系中的纵向范围；为 null 时退回事件消费判定
  */
 private fun Modifier.dismissFocusOnOutsideTap(
     enabled: Boolean,
     focusManager: androidx.compose.ui.focus.FocusManager,
-    contentOutsideInput: Boolean = false
+    inputYRange: ClosedFloatingPointRange<Float>? = null
 ): Modifier = if (!enabled) this else this.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
-            val pass = if (contentOutsideInput) androidx.compose.ui.input.pointer.PointerEventPass.Initial
-                else androidx.compose.ui.input.pointer.PointerEventPass.Main
-            val event = awaitPointerEvent(pass)
+            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
             if (event.type != PointerEventType.Press) continue
-            if (!contentOutsideInput && event.changes.any { it.isConsumed }) continue
+            if (inputYRange != null) {
+                // 有输入框范围：按坐标判定，落在框内就不收起
+                val y = event.changes.firstOrNull()?.position?.y ?: continue
+                if (y in inputYRange) continue
+            } else if (event.changes.any { it.isConsumed }) {
+                // 无范围信息：退回事件消费判定
+                continue
+            }
             focusManager.clearFocus()
         }
     }
@@ -1692,6 +1800,10 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     val focusManager = LocalFocusManager.current
     // 搜索框是否处于输入态：用于决定要不要在页面级别接管“点空白处”
     var searchFocused by remember { mutableStateOf(false) }
+    // 搜索框纵向范围：点中框内时保留焦点，否则才收起。
+    // 搜索框横向铺满，纵向命中就代表点中了它。
+    var searchTop by remember { mutableStateOf(0f) }
+    var searchBottom by remember { mutableStateOf(0f) }
 
     // 无限循环的相位：驱动顶部色的色相缓慢往复（14 秒一趟）
     val gradientTransition = rememberInfiniteTransition(label = "homeHeaderGradient")
@@ -1708,8 +1820,12 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     Box(
         Modifier
             .fillMaxSize()
-            // 输入态下点页面其他位置即退出输入
-            .dismissFocusOnOutsideTap(searchFocused, focusManager)
+            // 输入态下点页面其他位置即退出输入；点中搜索框本身则保留焦点
+            .dismissFocusOnOutsideTap(
+                searchFocused,
+                focusManager,
+                inputYRange = if (searchBottom > searchTop) searchTop..searchBottom else null
+            )
     ) {
         // 首页氛围色：整屏竖向渐变，起于主色、终于页面背景色。
         // 三个关键点：
@@ -1760,6 +1876,11 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
                 onRemoveHistory = onRemoveSearchHistory,
                 onSearchFocusChange = { searchFocused = it },
                 modifier = Modifier.padding(top = 18.dp)
+                    .onGloballyPositioned { coords ->
+                        val pos = coords.positionInRoot()
+                        searchTop = pos.y
+                        searchBottom = pos.y + coords.size.height
+                    }
             )
 
             Spacer(Modifier.height(20.dp))
@@ -3188,6 +3309,9 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
     val visibleTabs = tabs.filter { it.incognito == (selectedTab?.incognito ?: false) }
     var input by remember(selectedTab?.id) { mutableStateOf(selectedTab?.url.orEmpty()) }
     var inputFocused by remember { mutableStateOf(false) }
+    // 地址栏在根坐标系中的纵向范围：点中它时保留焦点，否则才收起
+    var barTop by remember { mutableStateOf(0f) }
+    var barBottom by remember { mutableStateOf(0f) }
     // 无痕标签下地址栏用专属紫，不跟随主题；普通浏览仍用主题主色
     val incognitoActive = selectedTab?.incognito == true
     val focusManager = LocalFocusManager.current
@@ -3323,6 +3447,12 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     Modifier.fillMaxWidth()
                         .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
                         .padding(horizontal = 10.dp)
+                        // 记录地址栏纵向范围，供「点空白处收起输入」判断
+                        .onGloballyPositioned { coords ->
+                            val pos = coords.positionInRoot()
+                            barTop = pos.y
+                            barBottom = pos.y + coords.size.height
+                        }
                 ) {
                     AddressInput(
                         value = input,
@@ -3397,7 +3527,11 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
         Column(
             Modifier.fillMaxSize().padding(padding)
                 // 地址栏输入态下点页面其他位置即收起键盘与光晕
-                .dismissFocusOnOutsideTap(inputFocused, focusManager, contentOutsideInput = true)
+                .dismissFocusOnOutsideTap(
+                    inputFocused,
+                    focusManager,
+                    inputYRange = if (barBottom > barTop) barTop..barBottom else null
+                )
         ) {
             // 标签条这一行位于地址栏与网页之间，默认透出主题背景色。
             // 无痕时补上与上下栏同一档淡紫，否则中间会露出一条主题色断层（截图 1）。
@@ -3483,7 +3617,17 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     // 错误页盖在 GeckoView 之上：失败时页面本身已无内容，
                     // 但下层仍需保留渲染层，用户重试后无需重建视图。
                     // 必须写在 Box 内部才能使用 matchParentSize 铺满整个网页区域。
-                    if (selectedTab.failed) {
+                    // 合规提示页优先于普通错误页：受限搜索引擎不发请求，
+                    // 此时 failed 为 false，两页不会同时出现
+                    val restricted = selectedTab.restrictedEngine
+                    if (restricted != null) {
+                        ComplianceBlockedView(
+                            url = selectedTab.url,
+                            host = restricted,
+                            onBackHome = onAllTabsClosed,
+                            modifier = Modifier.matchParentSize()
+                        )
+                    } else if (selectedTab.failed) {
                         PageErrorView(
                             url = selectedTab.failedUrl.ifBlank { selectedTab.url },
                             errorCode = selectedTab.errorCode,
@@ -3887,6 +4031,10 @@ private fun SettingsScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     // 设置页搜索框的输入态：用于在页面根容器上接管“点空白处收起”
     var searchFocused by remember { mutableStateOf(false) }
+    // 搜索框在页面坐标系中的纵向范围：判断按下是否落在输入框内。
+    // 搜索框横向铺满，只需看纵向就能确认有没有点中它。
+    var searchTop by remember { mutableStateOf(0f) }
+    var searchBottom by remember { mutableStateOf(0f) }
     val focusManager = LocalFocusManager.current
     // 搜索索引：子选项 -> 所属页面。搜索命中后直接展示子选项，点击即跳转到对应页面。
     // 不用 remember：内部需调用 stringResource，而 remember 的 lambda 不是组合上下文。
@@ -3990,7 +4138,12 @@ private fun SettingsScreen(
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s059)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }) }) { padding ->
       Box(
           Modifier.fillMaxSize().padding(padding)
-              .dismissFocusOnOutsideTap(searchFocused, focusManager)
+              // 传入搜索框的纵向范围，点中它时保留焦点，点空白处才收起
+              .dismissFocusOnOutsideTap(
+                  searchFocused,
+                  focusManager,
+                  inputYRange = if (searchBottom > searchTop) searchTop..searchBottom else null
+              )
       ) {
         LazyColumn(Modifier.fillMaxSize()) {
             // 设置搜索框
@@ -4005,6 +4158,12 @@ private fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                         .height(52.dp)
+                        // 记录搜索框在页面坐标系中的纵向范围，供点外检测用
+                        .onGloballyPositioned { coords ->
+                            val pos = coords.positionInRoot()
+                            searchTop = pos.y
+                            searchBottom = pos.y + coords.size.height
+                        }
                         .onFocusChanged { searchFocused = it.isFocused },
                     placeholder = { Text(stringResource(R.string.s302)) },
                     singleLine = true,
@@ -4234,7 +4393,6 @@ private fun SearchEngineScreen(
 ) {
     val engines = listOf(
         "google" to "Google",
-        "baidu" to stringResource(R.string.engine_baidu),
         "bing" to stringResource(R.string.engine_bing),
         "duckduckgo" to "DuckDuckGo"
     )

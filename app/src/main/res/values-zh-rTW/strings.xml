@@ -1,6 +1,11 @@
 <resources>
     <string name="app_name">ZexBrowse</string>
     <string name="s000">無法存取此網站</string>
+    <string name="compliance_title">服務調整說明</string>
+    <string name="compliance_body">根據相關法律法規及合規要求，ZexBrowse 暫時停止對大陸提供服務，部分國內搜尋引擎將暫時不可用。恢復時間我們會另行通知，由此給您帶來不便，敬請諒解。</string>
+    <string name="compliance_hint">期間你可以嘗試使用其他搜尋引擎（如 Bing、Google、DuckDuckGo），也可直接在網址列輸入完整網址存取。</string>
+    <string name="compliance_host">受限站點：%1$s</string>
+    <string name="compliance_back_home">返回首頁</string>
     <string name="s001">重新載入</string>
     <string name="s002">網域名稱解析失敗，可能是網址拼寫有誤或該網站已停止服務</string>
     <string name="s003">裝置目前未連線至網路</string>
@@ -672,7 +677,6 @@
     <string name="notice_appshare_title">AppShare 下載說明</string>
     <string name="notice_coolmonitor_title">CoolMonitor 網盤下載</string>
     <string name="notice_pan_download">網盤下載</string>
-    <string name="engine_baidu">百度</string>
     <string name="engine_bing">Bing</string>
     <string name="notification_title">通知設定</string>
     <string name="notification_sub">即時通知與狀態列顯示</string>
