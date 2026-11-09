@@ -30,9 +30,10 @@ object MainlandSearchEngines {
         // 搜索入口只有 www.baidu.com；m.baidu.com 是移动端搜索页，同属受限。
         "www.baidu.com",
         "m.baidu.com",
-        // 搜狗
-        "sogou.com",
-        "sogou.cn",
+        // 搜狗搜索：只拦搜索入口 www.sogou.com。
+        // sogou.com 下还有输入法（pinyin / shurufa）、微信搜索等产品，
+        // 整域拦截会误伤；sogou.cn 非搜索入口，一并去掉。
+        "www.sogou.com",
         // 360 搜索
         "so.com",
         "360.so",
