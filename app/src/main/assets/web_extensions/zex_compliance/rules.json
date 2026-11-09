@@ -1,0 +1,80 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["baidu.com", "baidu.cn"],
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
+        "webtransport", "webbundle", "web_manifest", "other"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["sogou.com", "sogou.cn"],
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
+        "webtransport", "webbundle", "web_manifest", "other"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["so.com", "360.so"],
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
+        "webtransport", "webbundle", "web_manifest", "other"
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["sm.cn"],
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
+        "webtransport", "webbundle", "web_manifest", "other"
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["quark.cn"],
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
+        "webtransport", "webbundle", "web_manifest", "other"
+      ]
+    }
+  },
+  {
+    "id": 6,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["toutiao.com", "douyin.com"],
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
+        "webtransport", "webbundle", "web_manifest", "other"
+      ]
+    }
+  }
+]

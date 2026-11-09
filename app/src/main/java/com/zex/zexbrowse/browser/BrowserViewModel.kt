@@ -586,6 +586,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
+                // 子帧也不能放：受限搜索引擎可能被以 iframe 形式嵌入，
+                // 就算资源层已由扩展阻断，这里再拒一次，避免任何漏网
+                if (MainlandSearchEngines.match(request.uri) != null) {
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
                 return null
             }
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) = update(id) { it.copy(canGoBack = canGoBack) }
