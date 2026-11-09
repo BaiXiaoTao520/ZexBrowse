@@ -19,10 +19,10 @@ package com.zex.zexbrowse.data
 object MainlandSearchEngines {
 
     /**
-     * 受限主机及其子域。
+     * 受限搜索主机（精确匹配，不包含独立产品子域）。
      *
-     * 匹配规则：主机名等于名单项，或以 `.名单项` 结尾（覆盖 www. / m. / wap. 等子域）。
-     * 裸域名（如 `baidu.com` 本身）同样命中。
+     * 匹配规则：主机名必须等于名单项；移动入口单独列出。
+     * 未列出的产品主机保持可访问。
      */
     private val restrictedHosts: List<String> = listOf(
         // 百度搜索：只拦搜索主机。baidu.com 下还有网盘（pan.baidu.com）、
@@ -36,9 +36,14 @@ object MainlandSearchEngines {
         "www.sogou.com",
         // 360 搜索
         "so.com",
+        "www.so.com",
+        "m.so.com",
         "360.so",
+        "www.360.so",
         // 神马搜索
         "sm.cn",
+        "m.sm.cn",
+        "www.sm.cn",
         // 夸克搜索：只拦搜索子域。quark.cn 是夸克浏览器官网，
         // 整域拦截会把官网一起干掉，属于误伤
         "quark.sm.cn",
@@ -68,12 +73,7 @@ object MainlandSearchEngines {
         if (host.isBlank()) return null
         if (allowedHosts.any { host == it || host.endsWith(".$it") }) return null
 
-        // 取最长匹配：名单里存在父子关系（如 sm.cn 与 quark.sm.cn），
-        // 若用 firstOrNull，quark.sm.cn 会被更靠前的 sm.cn 匹配，
-        // 提示页于是显示成错误的域名。最长匹配才能命中真正被拦的那一项。
-        return restrictedHosts
-            .filter { base -> host == base || host.endsWith(".$base") }
-            .maxByOrNull { it.length }
+        return restrictedHosts.firstOrNull { it == host }
     }
 
     /** 从地址中取出小写主机名；解析不了返回 null */
@@ -81,7 +81,8 @@ object MainlandSearchEngines {
         val trimmed = url.trim()
         if (trimmed.isBlank()) return null
         return runCatching {
-            val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+            val address = trimmed.substringBefore('?').substringBefore('#')
+            val withScheme = if (address.contains("://")) address else "https://$address"
             java.net.URI(withScheme).host?.lowercase()
         }.getOrNull()?.substringBefore(':')
     }

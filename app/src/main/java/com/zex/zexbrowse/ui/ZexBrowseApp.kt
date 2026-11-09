@@ -207,6 +207,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.composed
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -1033,12 +1034,12 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     var backTarget by remember { mutableStateOf(Page.HOME) }
     // 返回是否可以拦截：有可退的页面栈，或浏览器可后退。
     // 侧滑手势与实体返回键共用同一套判定。
-    val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true)
+    val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null))
     // 浏览器（搜索结果）页不启用侧滑跟手动画：退出搜索页时保持原有的页面切换动画，
     // 由 BackHandler 接管即可，其余页面不受影响。
     val predictiveEnabled = canHandleBack && page != Page.BROWSER
     val performBack: () -> Unit = {
-        if (page == Page.BROWSER && browserViewModel.selected?.canGoBack == true) {
+        if (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null)) {
             browserViewModel.back()
         } else {
             goBack()
@@ -1049,7 +1050,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 而 GeckoView 不允许同一 session 同时挂到两个 View，否则会崩溃或黑屏。
     // 浏览器页需要预渲染时改为显示纯色背景，同样比空白自然。
     val beginBack: () -> Unit = {
-        val browserCanGoBack = page == Page.BROWSER && browserViewModel.selected?.canGoBack == true
+        val browserCanGoBack = page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null)
         if (!browserCanGoBack && navStack.size > 1) {
             backTarget = navStack[navStack.size - 2]
             backActive = true
@@ -1058,7 +1059,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 下层是否可安全预渲染真实页面
     val canPreviewTarget = backTarget != Page.BROWSER
 
-    BackHandler(enabled = navStack.size > 1) {
+    BackHandler(enabled = canHandleBack) {
         // 实体/三键返回不走整页跟手动画，确保标志处于关闭状态，避免影响常规页面切换动画
         predictivePop = false
         performBack()
@@ -1679,20 +1680,25 @@ private fun Modifier.dismissFocusOnOutsideTap(
     enabled: Boolean,
     focusManager: androidx.compose.ui.focus.FocusManager,
     inputYRange: ClosedFloatingPointRange<Float>? = null
-): Modifier = if (!enabled) this else this.pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-            if (event.type != PointerEventType.Press) continue
-            if (inputYRange != null) {
-                // 有输入框范围：按坐标判定，落在框内就不收起
-                val y = event.changes.firstOrNull()?.position?.y ?: continue
-                if (y in inputYRange) continue
-            } else if (event.changes.any { it.isConsumed }) {
-                // 无范围信息：退回事件消费判定
-                continue
+): Modifier = this.composed {
+    var coordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    if (!enabled) this else this.onGloballyPositioned { coordinates = it }.pointerInput(inputYRange, focusManager) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                if (event.type != PointerEventType.Press) continue
+                if (inputYRange != null) {
+                    // 有输入框范围：按坐标判定，落在框内就不收起
+                    val position = event.changes.firstOrNull()?.position ?: continue
+                    val layout = coordinates?.takeIf { it.isAttached } ?: continue
+                    val y = layout.localToRoot(position).y
+                    if (y in inputYRange) continue
+                } else if (event.changes.any { it.isConsumed }) {
+                    // 无范围信息：退回事件消费判定
+                    continue
+                }
+                focusManager.clearFocus()
             }
-            focusManager.clearFocus()
         }
     }
 }
@@ -3495,7 +3501,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     tint = if (incognitoActive) IncognitoTopBarColor else null,
                     contentColor = if (incognitoActive) IncognitoBarBackground else null
                 ) {
-                IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
+                IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true || selectedTab?.restrictedEngine != null) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
                 // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
                 if (selectedTab?.loading == true) {

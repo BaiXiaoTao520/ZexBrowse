@@ -63,18 +63,35 @@ class MainActivity : ComponentActivity() {
             requestMaxRefreshRate()
             // 真正进入组合前才打启动标记：未受支持系统提前 return 时不会留下标记
             CrashReporter.markBoot(this)
-            setContent {
-                val request by incomingUrl.collectAsState()
-                ZexBrowseApp(
-                    incomingUrl = request?.url,
-                    incomingUrlSeq = request?.seq ?: 0L,
-                    onIncomingUrlHandled = { incomingUrl.value = null }
-                )
-            }
-            (application as ZexBrowseApplication).ensureDarkExtension()
-            (application as ZexBrowseApplication).ensureAdBlockExtension()
-            // 合规拦截：在网络层阻断受限搜索引擎的全部请求，始终启用
-            (application as ZexBrowseApplication).ensureComplianceExtension()
+            // Do not compose the browser or open sessions before filtering is enabled.
+            (application as ZexBrowseApplication).ensureComplianceExtension(
+                onReady = {
+                    if (!isFinishing && !isDestroyed) {
+                        try {
+                            setContent {
+                                val request by incomingUrl.collectAsState()
+                                ZexBrowseApp(
+                                    incomingUrl = request?.url,
+                                    incomingUrlSeq = request?.seq ?: 0L,
+                                    onIncomingUrlHandled = { incomingUrl.value = null }
+                                )
+                            }
+                            (application as ZexBrowseApplication).ensureDarkExtension()
+                            (application as ZexBrowseApplication).ensureAdBlockExtension()
+                        } catch (t: Throwable) {
+                            CrashReporter.record(this, t)
+                            CrashReporter.markStarted(this)
+                            showStartupCrash(t)
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    if (!isFinishing && !isDestroyed) {
+                        CrashReporter.markStarted(this)
+                        showStartupCrash(error)
+                    }
+                }
+            )
         } catch (t: Throwable) {
             // 兜底：记录完整栈并展示错误卡片，避免「打开即闪退」且看不到任何原因
             CrashReporter.record(this, t)

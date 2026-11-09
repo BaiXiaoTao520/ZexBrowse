@@ -583,6 +583,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     if (userInitiated) requestExternalApp(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
+                update(id) { it.copy(restrictedEngine = null) }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
@@ -868,7 +869,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         load(input, targetTab)
     }
-    fun back() { selected?.session?.goBack() }; fun forward() { selected?.session?.goForward() }
+    fun back() {
+        val tab = selected ?: return
+        if (tab.restrictedEngine != null) {
+            update(tab.id) { it.copy(restrictedEngine = null) }
+        } else tab.session.goBack()
+    }; fun forward() { selected?.session?.goForward() }
     fun reload() {
         val tab = selected ?: return
         // 受限搜索引擎：不能走 session.reload()（会把被拒绝的地址重新发一次），

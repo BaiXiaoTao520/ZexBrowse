@@ -135,21 +135,31 @@ class ZexBrowseApplication : Application() {
     // ────────────────────────────────────────────────────────────────
     private var complianceExtension: WebExtension? = null
 
-    fun ensureComplianceExtension() {
+    fun ensureComplianceExtension(onReady: () -> Unit, onFailure: (Throwable) -> Unit) {
+        fun fail(error: Throwable?) {
+            val failure = error ?: IllegalStateException("Compliance extension unavailable")
+            CrashReporter.record(this, failure)
+            onFailure(failure)
+        }
         runCatching {
             runtime.webExtensionController
                 .ensureBuiltIn("resource://android/assets/web_extensions/zex_compliance/", "zex-compliance@zexbrowse")
                 .accept({ extension: WebExtension? ->
-                    complianceExtension = extension
-                    // 注册后立即启用：合规限制不依赖用户设置
-                    if (extension != null) {
+                    if (extension == null) {
+                        fail(null)
+                    } else {
                         runCatching {
                             runtime.webExtensionController
                                 .enable(extension, WebExtensionController.EnableSource.APP)
-                                .accept({ _: WebExtension? -> }, { _: Throwable? -> })
-                        }
+                                .accept({ enabled: WebExtension? ->
+                                    if (enabled?.metaData?.enabled != true) fail(null) else {
+                                        complianceExtension = enabled
+                                        onReady()
+                                    }
+                                }, { error: Throwable? -> fail(error) })
+                        }.onFailure { fail(it) }
                     }
-                }, { _: Throwable? -> })
-        }
+                }, { error: Throwable? -> fail(error) })
+        }.onFailure { fail(it) }
     }
 }

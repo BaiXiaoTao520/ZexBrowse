@@ -5,10 +5,11 @@
     "action": { "type": "block" },
     "condition": {
       "requestDomains": ["www.baidu.com", "m.baidu.com"],
+      "regexFilter": "^(https?|wss?)://(www\\.baidu\\.com|m\\.baidu\\.com)(:[0-9]+)?/",
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
-        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
-        "webtransport", "webbundle", "web_manifest", "other"
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
       ]
     }
   },
@@ -18,10 +19,11 @@
     "action": { "type": "block" },
     "condition": {
       "requestDomains": ["www.sogou.com"],
+      "regexFilter": "^(https?|wss?)://(www\\.sogou\\.com)(:[0-9]+)?/",
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
-        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
-        "webtransport", "webbundle", "web_manifest", "other"
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
       ]
     }
   },
@@ -30,11 +32,12 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
-      "requestDomains": ["so.com", "360.so"],
+      "requestDomains": ["so.com", "www.so.com", "m.so.com", "360.so", "www.360.so"],
+      "regexFilter": "^(https?|wss?)://(so\\.com|www\\.so\\.com|m\\.so\\.com|360\\.so|www\\.360\\.so)(:[0-9]+)?/",
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
-        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
-        "webtransport", "webbundle", "web_manifest", "other"
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
       ]
     }
   },
@@ -43,11 +46,12 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
-      "requestDomains": ["sm.cn"],
+      "requestDomains": ["sm.cn", "www.sm.cn", "m.sm.cn"],
+      "regexFilter": "^(https?|wss?)://(sm\\.cn|www\\.sm\\.cn|m\\.sm\\.cn)(:[0-9]+)?/",
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
-        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
-        "webtransport", "webbundle", "web_manifest", "other"
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
       ]
     }
   },
@@ -57,10 +61,11 @@
     "action": { "type": "block" },
     "condition": {
       "requestDomains": ["quark.sm.cn"],
+      "regexFilter": "^(https?|wss?)://(quark\\.sm\\.cn)(:[0-9]+)?/",
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
-        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
-        "webtransport", "webbundle", "web_manifest", "other"
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
       ]
     }
   },
@@ -70,10 +75,11 @@
     "action": { "type": "block" },
     "condition": {
       "requestDomains": ["so.toutiao.com", "so.douyin.com"],
+      "regexFilter": "^(https?|wss?)://(so\\.toutiao\\.com|so\\.douyin\\.com)(:[0-9]+)?/",
       "resourceTypes": [
         "main_frame", "sub_frame", "stylesheet", "script", "image", "font", "object",
-        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket",
-        "webtransport", "webbundle", "web_manifest", "other"
+        "xmlhttprequest", "ping", "beacon", "csp_report", "media", "websocket", "web_manifest",
+        "other", "xslt", "xml_dtd", "imageset", "speculative", "json"
       ]
     }
   }
