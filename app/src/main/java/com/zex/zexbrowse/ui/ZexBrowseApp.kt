@@ -1040,7 +1040,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     val predictiveEnabled = canHandleBack && page != Page.BROWSER
     val performBack: () -> Unit = {
         if (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null)) {
-            browserViewModel.back()
+            browserViewModel.back { navForward = false; navStack = listOf(Page.HOME) }
         } else {
             goBack()
         }
@@ -3501,7 +3501,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     tint = if (incognitoActive) IncognitoTopBarColor else null,
                     contentColor = if (incognitoActive) IncognitoBarBackground else null
                 ) {
-                IconButton(onClick = viewModel::back, enabled = selectedTab?.canGoBack == true || selectedTab?.restrictedEngine != null) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
+                IconButton(onClick = { viewModel.back(onAllTabsClosed) }, enabled = selectedTab?.canGoBack == true || selectedTab?.restrictedEngine != null) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
                 // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
                 if (selectedTab?.loading == true) {

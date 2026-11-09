@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "ZexBrowse Compliance Guard",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Blocks requests to restricted mainland search engines at the network layer.",
   "browser_specific_settings": {
     "gecko": {

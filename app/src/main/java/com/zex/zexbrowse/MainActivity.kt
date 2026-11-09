@@ -31,6 +31,26 @@ class MainActivity : ComponentActivity() {
     private data class UriRequest(val seq: Long, val url: String)
 
     private var uriSeq = 0L
+    private val startupHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var startupAttempt = 0
+    private var startupTimeout: Runnable? = null
+
+    private fun finishStartupAttempt(attempt: Int): Boolean {
+        if (attempt != startupAttempt || isFinishing || isDestroyed) return false
+        startupAttempt++
+        startupTimeout?.let(startupHandler::removeCallbacks)
+        startupTimeout = null
+        return true
+    }
+
+    override fun onDestroy() {
+        startupAttempt++
+        startupTimeout?.let(startupHandler::removeCallbacks)
+        startupTimeout = null
+        // A replacement activity in this process is a normal startup retry.
+        if (isChangingConfigurations) CrashReporter.markStarted(this)
+        super.onDestroy()
+    }
 
     /** 应用语言在 Activity 创建前生效，避免首帧用错语言再跳变 */
     override fun attachBaseContext(newBase: android.content.Context) {
@@ -64,36 +84,52 @@ class MainActivity : ComponentActivity() {
             // 真正进入组合前才打启动标记：未受支持系统提前 return 时不会留下标记
             CrashReporter.markBoot(this)
             // Do not compose the browser or open sessions before filtering is enabled.
+            val attempt = ++startupAttempt
+            startupTimeout = Runnable {
+                if (finishStartupAttempt(attempt)) {
+                    val error = java.util.concurrent.TimeoutException("Compliance filtering did not become ready within 30 seconds")
+                    CrashReporter.record(this, error)
+                    CrashReporter.markStarted(this)
+                    showStartupCrash(error)
+                }
+            }.also { startupHandler.postDelayed(it, 30_000L) }
             (application as ZexBrowseApplication).ensureComplianceExtension(
                 onReady = {
-                    if (!isFinishing && !isDestroyed) {
-                        try {
-                            setContent {
-                                val request by incomingUrl.collectAsState()
-                                ZexBrowseApp(
-                                    incomingUrl = request?.url,
-                                    incomingUrlSeq = request?.seq ?: 0L,
-                                    onIncomingUrlHandled = { incomingUrl.value = null }
-                                )
+                    runOnUiThread {
+                        if (finishStartupAttempt(attempt)) {
+                            try {
+                                setContent {
+                                    val request by incomingUrl.collectAsState()
+                                    ZexBrowseApp(
+                                        incomingUrl = request?.url,
+                                        incomingUrlSeq = request?.seq ?: 0L,
+                                        onIncomingUrlHandled = { incomingUrl.value = null }
+                                    )
+                                }
+                                (application as ZexBrowseApplication).ensureDarkExtension()
+                                (application as ZexBrowseApplication).ensureAdBlockExtension()
+                            } catch (t: Throwable) {
+                                CrashReporter.record(this, t)
+                                CrashReporter.markStarted(this)
+                                showStartupCrash(t)
                             }
-                            (application as ZexBrowseApplication).ensureDarkExtension()
-                            (application as ZexBrowseApplication).ensureAdBlockExtension()
-                        } catch (t: Throwable) {
-                            CrashReporter.record(this, t)
-                            CrashReporter.markStarted(this)
-                            showStartupCrash(t)
                         }
                     }
                 },
                 onFailure = { error ->
-                    if (!isFinishing && !isDestroyed) {
-                        CrashReporter.markStarted(this)
-                        showStartupCrash(error)
+                    runOnUiThread {
+                        if (finishStartupAttempt(attempt)) {
+                            CrashReporter.markStarted(this)
+                            showStartupCrash(error)
+                        }
                     }
                 }
             )
         } catch (t: Throwable) {
             // 兜底：记录完整栈并展示错误卡片，避免「打开即闪退」且看不到任何原因
+            startupAttempt++
+            startupTimeout?.let(startupHandler::removeCallbacks)
+            startupTimeout = null
             CrashReporter.record(this, t)
             CrashReporter.markStarted(this)
             showStartupCrash(t)
@@ -163,7 +199,17 @@ class MainActivity : ComponentActivity() {
             setTextColor(android.graphics.Color.DKGRAY)
         }
         val scroll = android.widget.ScrollView(this).apply { addView(textView) }
-        setContentView(scroll)
+        val retry = android.widget.Button(this).apply {
+            text = getString(R.string.boot_crash_retry)
+            setOnClickListener { recreate() }
+        }
+        setContentView(android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(scroll, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            ))
+            addView(retry)
+        })
     }
 
     /**

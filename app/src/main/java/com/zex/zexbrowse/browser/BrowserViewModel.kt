@@ -56,7 +56,7 @@ internal fun canReuseBlankTab(url: String, incognito: Boolean, requestedIncognit
 internal fun <T> selectedOrSingleReusableTab(tabs: List<T>, selected: T?, isReusable: (T) -> Boolean): T? =
     selected?.takeIf(isReusable) ?: tabs.singleOrNull(isReusable)
 
-data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment(), /** 命中受限的大陆搜索引擎时记录主域名，非空则展示合规提示页 */ val restrictedEngine: String? = null)
+data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment(), /** 命中受限的大陆搜索引擎时记录主域名，非空则展示合规提示页 */ val restrictedEngine: String? = null, val beforeRestrictedUrl: String = "")
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
@@ -408,7 +408,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 update(id) { tab ->
                     // 加载失败后 Gecko 会导航到 about:blank 之类的内部页；
                     // 此时必须保留 failed 与失败网址，否则错误页会被冲掉、变成空白页。
-                    if (url.startsWith("about:") && tab.failed) tab.copy(loading = true, risk = connectionSecurity.onPageStart(tab.url))
+                    if (tab.restrictedEngine != null) tab
+                    else if (url.startsWith("about:") && tab.failed) tab.copy(loading = true, risk = connectionSecurity.onPageStart(tab.url))
                     else tab.copy(url = url, risk = connectionSecurity.onPageStart(url), loading = true, failed = false, failedUrl = "", errorCode = 0, errorCategory = 0, progress = 0)
                 }
             }
@@ -526,7 +527,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 if (url != null) {
                     android.util.Log.d("ZexIntent", "onLocationChange id=$id url=$url")
                     update(id) { tab ->
-                        if (url.startsWith("about:") && tab.failed) tab
+                        if (tab.restrictedEngine != null || (url.startsWith("about:") && tab.failed)) tab
                         else tab.copy(url = url, risk = connectionSecurity.onLocationChange(url))
                     }
                 }
@@ -559,6 +560,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                             progress = 0,
                             failed = false,
                             failedUrl = "",
+                            beforeRestrictedUrl = if (it.restrictedEngine == null) it.url else it.beforeRestrictedUrl,
                             restrictedEngine = hit
                         )
                     }
@@ -583,7 +585,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     if (userInitiated) requestExternalApp(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                update(id) { it.copy(restrictedEngine = null) }
+                if (userInitiated) update(id) { it.copy(restrictedEngine = null, beforeRestrictedUrl = "") }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
@@ -836,6 +838,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     progress = 0,
                     failed = false,
                     failedUrl = "",
+                    beforeRestrictedUrl = if (it.restrictedEngine == null) it.url else it.beforeRestrictedUrl,
                     restrictedEngine = hit
                 )
             }
@@ -843,7 +846,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         cancelPendingFailure(targetTab.id)
         // 正常导航时清掉旧的合规提示态，否则旧提示会盖在新页面上
-        update(targetTab.id) { if (it.restrictedEngine != null) it.copy(restrictedEngine = null) else it }
+        update(targetTab.id) { if (it.restrictedEngine != null) it.copy(restrictedEngine = null, beforeRestrictedUrl = "") else it }
         if (attachedSessions.contains(targetTab.id)) {
             // Stop any earlier retry from replacing this explicit navigation.
             clearPending(targetTab.id)
@@ -869,10 +872,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         load(input, targetTab)
     }
-    fun back() {
+    fun back(onHome: () -> Unit) {
         val tab = selected ?: return
         if (tab.restrictedEngine != null) {
-            update(tab.id) { it.copy(restrictedEngine = null) }
+            val previousUrl = tab.beforeRestrictedUrl
+            update(tab.id) { it.copy(url = previousUrl, restrictedEngine = null, beforeRestrictedUrl = "") }
+            if (previousUrl.isBlank() || previousUrl == "about:blank") onHome()
         } else tab.session.goBack()
     }; fun forward() { selected?.session?.goForward() }
     fun reload() {

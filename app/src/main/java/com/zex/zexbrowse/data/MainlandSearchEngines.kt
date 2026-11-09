@@ -83,7 +83,7 @@ object MainlandSearchEngines {
         return runCatching {
             val address = trimmed.substringBefore('?').substringBefore('#')
             val withScheme = if (address.contains("://")) address else "https://$address"
-            java.net.URI(withScheme).host?.lowercase()
+            java.net.URI(withScheme).host?.lowercase()?.trimEnd('.')
         }.getOrNull()?.substringBefore(':')
     }
 }
