@@ -22,6 +22,7 @@ import com.zex.zexbrowse.download.DownloadFileName
 import com.zex.zexbrowse.download.DownloadScheduler
 import com.zex.zexbrowse.data.BrowserSettings
 import com.zex.zexbrowse.data.LemwoodMirror
+import com.zex.zexbrowse.data.FakeSites
 import com.zex.zexbrowse.data.MainlandSearchEngines
 import com.zex.zexbrowse.data.SecurityScanner
 import com.zex.zexbrowse.data.SettingsStore
@@ -56,7 +57,7 @@ internal fun canReuseBlankTab(url: String, incognito: Boolean, requestedIncognit
 internal fun <T> selectedOrSingleReusableTab(tabs: List<T>, selected: T?, isReusable: (T) -> Boolean): T? =
     selected?.takeIf(isReusable) ?: tabs.singleOrNull(isReusable)
 
-data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment(), /** 命中受限的大陆搜索引擎时记录主域名，非空则展示合规提示页 */ val restrictedEngine: String? = null, val beforeRestrictedUrl: String = "")
+data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session: GeckoSession, val incognito: Boolean, val title: String = "", val url: String = "", val progress: Int = 0, val loading: Boolean = false, val failed: Boolean = false, val failedUrl: String = "", val errorCode: Int = 0, val errorCategory: Int = 0, val preview: Bitmap? = null, val canGoBack: Boolean = false, val canGoForward: Boolean = false, val risk: SecurityScanner.RiskAssessment = SecurityScanner.RiskAssessment(), /** 命中受限的大陆搜索引擎时记录主域名，非空则展示二次确认页 */ val restrictedEngine: String? = null, val beforeRestrictedUrl: String = "", /** 命中假冒站点时记录主机名，非空则展示禁止访问页（不给继续访问） */ val fakeSite: String? = null)
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
@@ -172,6 +173,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 拒绝一个 sogou:// 之类的 scheme 时 Gecko 会回 onLoadError（UNKNOWN_PROTOCOL），
     // 若照常处理，用户会从正常的结果页被踢到完整错误页。
     private val blockedExternalUris = HashMap<String, MutableSet<String>>()
+    // 用户已二次确认过的受限搜索引擎地址：
+    // 确认后只对「这一次导航」放行，导航完成即从集合移除，
+    // 不做会话级永久放行，避免用户之后再点同一个链接时不经提示直接进入。
+    private val confirmedRestrictedUris = HashSet<String>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     // 下载响应体捕获：Gecko 在 onExternalResponse 时已把响应体拉了下来，body 流只在回调期间有效，
     // 必须当场读走存成临时文件。之后下载直接从本地文件落盘，不再用 URL 第二次请求，
@@ -548,10 +553,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
 
-                // 受限的大陆搜索引擎：一律拒绝，并把标签置为合规提示态。
+                // 受限的大陆搜索引擎：一律拒绝，并把标签置为二次确认态。
                 // 覆盖点链接、重定向、脚本跳转等不走地址栏的路径，
                 // 避免用户从其他页面绕到受限站点而看到真实网页。
-                MainlandSearchEngines.match(uri)?.let { hit ->
+                // 用户已在确认页选择继续的地址放行一次（取后即失效）。
+                if (!confirmedRestrictedUris.remove(uri)) MainlandSearchEngines.match(uri)?.let { hit ->
                     if (pendingInitialLoads[id] == uri) clearPending(id)
                     update(id) {
                         it.copy(
@@ -562,6 +568,25 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                             failedUrl = "",
                             beforeRestrictedUrl = if (it.restrictedEngine == null) it.url else it.beforeRestrictedUrl,
                             restrictedEngine = hit
+                        )
+                    }
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+
+                // 假冒站点：同样是硬拦截，且优先于受限引擎判定，
+                // 避免 micyou.cn 这类站被当成普通网页加载。
+                FakeSites.match(uri)?.let { hit ->
+                    if (pendingInitialLoads[id] == uri) clearPending(id)
+                    update(id) {
+                        it.copy(
+                            url = uri,
+                            loading = false,
+                            progress = 0,
+                            failed = false,
+                            failedUrl = "",
+                            restrictedEngine = null,
+                            beforeRestrictedUrl = "",
+                            fakeSite = hit
                         )
                     }
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
@@ -585,13 +610,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     if (userInitiated) requestExternalApp(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                if (userInitiated) update(id) { it.copy(restrictedEngine = null, beforeRestrictedUrl = "") }
+                // 正常导航时清掉旧的受限/假冒提示态，否则旧提示会盖在新页面上
+                if (userInitiated) update(id) {
+                    if (it.restrictedEngine != null || it.fakeSite != null) {
+                        it.copy(restrictedEngine = null, beforeRestrictedUrl = "", fakeSite = null)
+                    } else it
+                }
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
-                // 子帧也不能放：受限搜索引擎可能被以 iframe 形式嵌入，
+                // 子帧也不能放：受限搜索引擎或假冒站点可能被以 iframe 形式嵌入，
                 // 就算资源层已由扩展阻断，这里再拒一次，避免任何漏网
-                if (MainlandSearchEngines.match(request.uri) != null) {
+                if (MainlandSearchEngines.match(request.uri) != null || FakeSites.match(request.uri) != null) {
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -826,9 +856,31 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             selected
         } else null
         targetTab ?: return
-        // 受限的大陆搜索引擎：不发请求，直接把标签置为合规提示态。
+        // 假冒站点：硬拦截，不发请求。优先于其它判定，
+        // 因为这类站点不管从哪个入口进入都不应该被加载。
+        FakeSites.match(target)?.let { hit ->
+            clearPending(targetTab.id)
+            cancelPendingFailure(targetTab.id)
+            update(targetTab.id) {
+                it.copy(
+                    url = target,
+                    loading = false,
+                    progress = 0,
+                    failed = false,
+                    failedUrl = "",
+                    restrictedEngine = null,
+                    beforeRestrictedUrl = "",
+                    fakeSite = hit
+                )
+            }
+            return
+        }
+        // 受限的大陆搜索引擎：不发请求，直接把标签置为二次确认态。
         // 放在发请求之前，保证即使是直链也不会先发出一轮请求再拦下。
-        MainlandSearchEngines.match(target)?.let { hit ->
+        // 用户已确认过的同一条地址：不在 load 阶段消费放行标记，
+        // 而是交给 onLoadRequest 判断（那是真正的网请求入口），
+        // 否则两边各取一次会把标记吃掉，导致确认后又被拦下。
+        if (!confirmedRestrictedUris.contains(target)) MainlandSearchEngines.match(target)?.let { hit ->
             clearPending(targetTab.id)
             cancelPendingFailure(targetTab.id)
             update(targetTab.id) {
@@ -845,8 +897,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         cancelPendingFailure(targetTab.id)
-        // 正常导航时清掉旧的合规提示态，否则旧提示会盖在新页面上
-        update(targetTab.id) { if (it.restrictedEngine != null) it.copy(restrictedEngine = null, beforeRestrictedUrl = "") else it }
+        // 正常导航时清掉旧的提示态（受限/假冒），否则旧提示会盖在新页面上
+        update(targetTab.id) {
+            if (it.restrictedEngine != null || it.fakeSite != null) {
+                it.copy(restrictedEngine = null, beforeRestrictedUrl = "", fakeSite = null)
+            } else it
+        }
         if (attachedSessions.contains(targetTab.id)) {
             // Stop any earlier retry from replacing this explicit navigation.
             clearPending(targetTab.id)
@@ -878,12 +934,34 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             val previousUrl = tab.beforeRestrictedUrl
             update(tab.id) { it.copy(url = previousUrl, restrictedEngine = null, beforeRestrictedUrl = "") }
             if (previousUrl.isBlank() || previousUrl == "about:blank") onHome()
+        } else if (tab.fakeSite != null) {
+            // 禁止访问页没有“上一条真实页面”可回（它可能在首屏就被拦），
+            // 统一交给调用方回首页，避免停在被拦地址上
+            update(tab.id) { it.copy(fakeSite = null) }
+            onHome()
         } else tab.session.goBack()
     }; fun forward() { selected?.session?.goForward() }
+
+    /**
+     * 用户在二次确认页选择「继续访问」。
+     *
+     * 只放行这一次：地址先入一次性放行集合，再走正常 load；
+     * load 与 onLoadRequest 会各自取一次并立即移除，
+     * 因此用户下次再访问同一地址仍会重新提示。
+     * 若直接 loadUri 而不登记，会被拦截逻辑再次挡回，确认按钮就形同虚设。
+     */
+    fun continueToRestricted(url: String) {
+        val tab = selected ?: return
+        confirmedRestrictedUris.add(url)
+        update(tab.id) { it.copy(restrictedEngine = null, beforeRestrictedUrl = "") }
+        load(url, tab)
+    }
     fun reload() {
         val tab = selected ?: return
+        // 假冒站点：刷新不重发，保持禁止访问页
+        if (tab.fakeSite != null) return
         // 受限搜索引擎：不能走 session.reload()（会把被拒绝的地址重新发一次），
-        // 而是重新走 load，由它再次判为受限并保持提示页，防止刷新绕过。
+        // 而是重新走 load，由它再次判为受限并保持二次确认页，防止刷新绕过。
         if (tab.restrictedEngine != null) {
             load(tab.url, tab)
             return

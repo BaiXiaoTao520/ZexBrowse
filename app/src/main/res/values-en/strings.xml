@@ -1,11 +1,15 @@
 <resources>
     <string name="app_name">ZexBrowse</string>
     <string name="s000">This site cannot be reached</string>
-    <string name="compliance_title">Service Notice</string>
-    <string name="compliance_body">In accordance with applicable laws and compliance requirements, ZexBrowse has temporarily suspended service to mainland China. Some mainland Chinese search engines are temporarily unavailable. We will announce the restoration date separately. We apologize for the inconvenience.</string>
-    <string name="compliance_hint">In the meantime you can use other search engines (such as Bing, Google or DuckDuckGo), or type a full address in the address bar.</string>
-    <string name="compliance_host">Restricted site: %1$s</string>
+    <string name="compliance_title">You are about to enter a mainland search engine</string>
+    <string name="compliance_body">In accordance with applicable laws and compliance requirements, ZexBrowse has temporarily suspended service to mainland China, and some mainland Chinese search engines are temporarily unavailable. If you choose to continue, the request is made at your own discretion.</string>
+    <string name="compliance_hint">Please protect your privacy and be cautious. Search engines record your queries and device information. Never enter passwords, ID numbers, bank card numbers, or other sensitive data, and do not trust download or advertising links in search results.</string>
+    <string name="compliance_host">Target site: %1$s</string>
     <string name="compliance_back_home">Back to home</string>
+    <string name="compliance_continue">Continue</string>
+    <string name="fake_title">Access blocked</string>
+    <string name="fake_body">This site is a known fake and poses risks such as deceptive downloads and credential theft, so access has been blocked. Do not try to reach it through other means, and never enter personal information.</string>
+    <string name="fake_host">Blocked: %1$s</string>
     <string name="s001">Reload</string>
     <string name="s002">Domain lookup failed. The URL may be misspelled or the site is no longer available.</string>
     <string name="s003">Your device is not connected to the network</string>

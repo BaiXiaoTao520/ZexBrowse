@@ -1,11 +1,15 @@
 <resources>
     <string name="app_name">ZexBrowse</string>
     <string name="s000">无法访问此网站</string>
-    <string name="compliance_title">服务调整说明</string>
-    <string name="compliance_body">根据相关法律法规及合规要求，ZexBrowse 暂时停止对大陆提供服务，部分国内搜索引擎将暂时不可用。恢复时间我们会另行通知，由此给您带来不便，敬请谅解。</string>
-    <string name="compliance_hint">期间你可以尝试使用其他搜索引擎（如必应、Google、DuckDuckGo），也可直接在地址栏输入完整网址访问。</string>
-    <string name="compliance_host">受限站点：%1$s</string>
+    <string name="compliance_title">您即将进入大陆搜索引擎</string>
+    <string name="compliance_body">根据相关法律法规及合规要求，ZexBrowse 暂时停止对大陆提供服务，部分国内搜索引擎将暂时不可用。若您确认继续，相关请求将由您自行承担。</string>
+    <string name="compliance_hint">请注意隐私安全，切勿轻易相信！搜索引擎会记录搜索内容与设备信息，请勿在其中输入账号密码、身份证号、银行卡等敏感信息，也不要轻信搜索结果中的下载与广告链接。</string>
+    <string name="compliance_host">目标站点：%1$s</string>
     <string name="compliance_back_home">返回首页</string>
+    <string name="compliance_continue">继续访问</string>
+    <string name="fake_title">禁止访问</string>
+    <string name="fake_body">该网站为已知假冒站点，存在诱导下载、窃取账号等风险，已阻止访问。请勿通过其他渠道访问，也不要输入任何个人信息。</string>
+    <string name="fake_host">已拦截：%1$s</string>
     <string name="s001">重新加载</string>
     <string name="s002">域名解析失败，可能是网址拼写有误或该网站已停止服务</string>
     <string name="s003">设备当前未连接到网络</string>
