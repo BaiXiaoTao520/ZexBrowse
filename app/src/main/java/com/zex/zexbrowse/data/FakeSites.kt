@@ -47,8 +47,9 @@ object FakeSites {
         val trimmed = url.trim()
         if (trimmed.isBlank()) return null
         return runCatching {
-            val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
-            java.net.URI(withScheme).host?.lowercase()
+            val address = trimmed.substringBefore('?').substringBefore('#')
+            val withScheme = if (address.contains("://")) address else "https://$address"
+            java.net.URI(withScheme).host?.lowercase()?.trimEnd('.')
         }.getOrNull()?.substringBefore(':')
     }
 }
