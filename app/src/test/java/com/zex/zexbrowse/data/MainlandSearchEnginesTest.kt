@@ -2,8 +2,6 @@ package com.zex.zexbrowse.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class MainlandSearchEnginesTest {
@@ -13,22 +11,15 @@ class MainlandSearchEnginesTest {
         }
     }
 
-    @Test fun trailingDotsMatchInNavigationAndNetworkRules() {
-        val rules = java.io.File("src/main/assets/web_extensions/zex_compliance/rules.json").readText()
-        val filters = Regex("\"regexFilter\": \"([^\"]+)\"").findAll(rules).map {
-            // JSON's escaped backslashes become regex escapes.
-            Regex(it.groupValues[1].replace("\\\\", "\\"), RegexOption.IGNORE_CASE)
-        }.toList()
+    @Test fun trailingDotsMatchInNavigation() {
         for (host in listOf("www.baidu.com", "m.baidu.com", "www.sogou.com", "so.com", "www.so.com", "m.so.com", "360.so", "www.360.so", "sm.cn", "www.sm.cn", "m.sm.cn", "quark.sm.cn", "so.toutiao.com", "so.douyin.com")) {
             for (dot in listOf("", ".")) {
                 assertEquals(host, MainlandSearchEngines.match("https://${host.uppercase()}$dot:443/s?q=a b"))
                 assertEquals(host, MainlandSearchEngines.match("$host$dot/s"))
-                assertTrue(filters.any { it.containsMatchIn("https://$host$dot:443/s") })
             }
         }
         for (host in listOf("pan.baidu.com.", "cn.bing.com.", "www.baidu.com.example.com.", "www.baidu.com.evil")) {
             assertNull(MainlandSearchEngines.match("https://$host/"))
-            assertFalse(filters.any { it.containsMatchIn("https://$host/") })
         }
     }
 

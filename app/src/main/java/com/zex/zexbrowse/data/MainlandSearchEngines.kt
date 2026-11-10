@@ -7,32 +7,32 @@
 package com.zex.zexbrowse.data
 
 /**
- * 大陆搜索引擎停止服务的合规识别。
+ * 国内搜索引擎的隐私提醒名单。
  *
- * 按合规要求，ZexBrowse 暂不向大陆提供部分国内搜索引擎的访问服务。
+ * 对这批搜索引擎不再做拦截，而是在进入前给出二次确认：
+ * 它们会记录搜索内容与设备信息，用户知情后自行决定是否继续。
  * 这里只做「主机名精确匹配」，不做关键词模糊判断：
  * 模糊匹配会把 `baidu.com.example.com`（用户自建域名）、
- * 或搜索词里恰好含「百度」的普通网页误判成违规，属于不可接受的误伤。
+ * 或搜索词里恰好含「百度」的普通网页误判成需要提醒的对象，属于不可接受的误伤。
  *
- * 必应（bing.com / cn.bing.com）不在受限范围内，明确排除，不受影响。
+ * 必应（bing.com / cn.bing.com）不在名单内，不会触发提醒。
  */
 object MainlandSearchEngines {
 
     /**
-     * 受限搜索主机（精确匹配，不包含独立产品子域）。
+     * 需要隐私提醒的搜索主机（精确匹配，不包含独立产品子域）。
      *
      * 匹配规则：主机名必须等于名单项；移动入口单独列出。
-     * 未列出的产品主机保持可访问。
+     * 未列出的产品主机不会触发提醒，正常访问。
      */
     private val restrictedHosts: List<String> = listOf(
-        // 百度搜索：只拦搜索主机。baidu.com 下还有网盘（pan.baidu.com）、
-        // 地图、文库等独立产品，整域拦截会把这些一并干掉，属于误伤。
-        // 搜索入口只有 www.baidu.com；m.baidu.com 是移动端搜索页，同属受限。
+        // 百度搜索：只列搜索主机。baidu.com 下还有网盘（pan.baidu.com）、
+        // 地图、文库等独立产品，不必对它们弹提示。
+        // 搜索入口只有 www.baidu.com；m.baidu.com 是移动端搜索页，同属此列。
         "www.baidu.com",
         "m.baidu.com",
-        // 搜狗搜索：只拦搜索入口 www.sogou.com。
-        // sogou.com 下还有输入法（pinyin / shurufa）、微信搜索等产品，
-        // 整域拦截会误伤；sogou.cn 非搜索入口，一并去掉。
+        // 搜狗搜索：只列搜索入口 www.sogou.com。
+        // sogou.com 下还有输入法（pinyin / shurufa）、微信搜索等产品，不应打扰。
         "www.sogou.com",
         // 360 搜索
         "so.com",

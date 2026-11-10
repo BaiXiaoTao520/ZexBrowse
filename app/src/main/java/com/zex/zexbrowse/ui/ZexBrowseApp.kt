@@ -536,18 +536,117 @@ private fun IncognitoHomeScreen(
 }
 
 /**
- * 受限搜索引擎的合规提示页。
+ * 国内搜索引擎的隐私确认页。
  *
- * 与普通加载错误页刻意区分：用警示色图标 + 完整说明，并不提供「重试」按钮——
- * 重试只会再次命中同一限制，给了按钮反而让用户反复点击却毫无变化。
- * 改提供「返回首页」，给出一条真的能继续用的路径。
+ * 不做拦截，而是在进入前给出提示：这类引擎会记录搜索内容与设备信息，
+ * 用户确认后即可正常访问。
  *
- * @param url 被拦截的地址
- * @param host 命中的受限主域名
+ * 视觉上刻意与「禁止访问」区分：用橙黄色感叹号而非红色禁止图标，
+ * 因为这是「需要你知情后自行决定」而非「绝对不行」。
+ *
+ * @param url 目标地址
+ * @param host 命中的搜索主机
  * @param onBackHome 返回首页
+ * @param onContinue 确认继续访问
  */
 @Composable
-private fun ComplianceBlockedView(
+private fun ComplianceConfirmView(
+    url: String,
+    host: String,
+    onBackHome: () -> Unit,
+    onContinue: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // 橙黄色：介于警告与阻止之间，不作红色以免与「禁止访问」混淆
+    val warnColor = Color(0xFFF0A020)
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp, vertical = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 感叹号图标：用 WarningAmber 配合橙黄，语义比 GppBad（禁止）更贴合「提醒确认」
+            Icon(
+                Icons.Rounded.WarningAmber,
+                null,
+                modifier = Modifier.size(56.dp),
+                tint = warnColor
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                stringResource(R.string.compliance_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.compliance_host, host),
+                style = MaterialTheme.typography.labelMedium,
+                color = warnColor,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                stringResource(R.string.compliance_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(16.dp))
+            // 隐私提醒单独成卡，用橙黄边框强调：这是本页最需要被读到的信息
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = warnColor.copy(alpha = 0.10f),
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ) {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Rounded.Security,
+                        null,
+                        modifier = Modifier.size(18.dp),
+                        tint = warnColor
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        stringResource(R.string.compliance_hint),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                url,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(24.dp))
+            // 两个出口：默认安全项（返回首页）为主按钮，继续访问为次要按钮，
+            // 避免误触；两个都做成明确可点的按钮而非容易误点的大片区域
+            Button(onClick = onBackHome, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.ArrowBack, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.compliance_back_home))
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.compliance_continue))
+            }
+        }
+    }
+}
+
+/**
+ * 假冒站点的禁止访问页。
+ *
+ * 与隐私确认页不同：这里**没有「继续访问」**。
+ * 假冒站点是直接侵害用户的操作，不存在「知情后自行决定」的正当理由，
+ * 因此只保留一个出口（返回首页）。
+ */
+@Composable
+private fun FakeSiteBlockedView(
     url: String,
     host: String,
     onBackHome: () -> Unit,
@@ -562,52 +661,30 @@ private fun ComplianceBlockedView(
             Icon(
                 Icons.Rounded.GppBad,
                 null,
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(56.dp),
                 tint = MaterialTheme.colorScheme.error
             )
             Spacer(Modifier.height(18.dp))
             Text(
-                stringResource(R.string.compliance_title),
+                stringResource(R.string.fake_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                stringResource(R.string.compliance_host, host),
+                stringResource(R.string.fake_host, host),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(18.dp))
             Text(
-                stringResource(R.string.compliance_body),
+                stringResource(R.string.fake_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(16.dp))
-            // 替代方案单独成块，既不与正文混为一谈，也不显碍眼
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerLow
-            ) {
-                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.Top) {
-                    Icon(
-                        Icons.Rounded.Info,
-                        null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        stringResource(R.string.compliance_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
             Spacer(Modifier.height(14.dp))
             Text(
                 url,
@@ -616,8 +693,8 @@ private fun ComplianceBlockedView(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(24.dp))
-            // 不提供重试：重试只会被同一条规则再次拦下
-            Button(onClick = onBackHome) {
+            // 只给一个出口：不提供继续访问
+            Button(onClick = onBackHome, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.ArrowBack, null)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.compliance_back_home))
@@ -1034,12 +1111,12 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     var backTarget by remember { mutableStateOf(Page.HOME) }
     // 返回是否可以拦截：有可退的页面栈，或浏览器可后退。
     // 侧滑手势与实体返回键共用同一套判定。
-    val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null))
+    val canHandleBack = navStack.size > 1 || (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null || browserViewModel.selected?.fakeSite != null))
     // 浏览器（搜索结果）页不启用侧滑跟手动画：退出搜索页时保持原有的页面切换动画，
     // 由 BackHandler 接管即可，其余页面不受影响。
     val predictiveEnabled = canHandleBack && page != Page.BROWSER
     val performBack: () -> Unit = {
-        if (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null)) {
+        if (page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null || browserViewModel.selected?.fakeSite != null)) {
             browserViewModel.back { navForward = false; navStack = listOf(Page.HOME) }
         } else {
             goBack()
@@ -1050,7 +1127,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     // 而 GeckoView 不允许同一 session 同时挂到两个 View，否则会崩溃或黑屏。
     // 浏览器页需要预渲染时改为显示纯色背景，同样比空白自然。
     val beginBack: () -> Unit = {
-        val browserCanGoBack = page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null)
+        val browserCanGoBack = page == Page.BROWSER && (browserViewModel.selected?.canGoBack == true || browserViewModel.selected?.restrictedEngine != null || browserViewModel.selected?.fakeSite != null)
         if (!browserCanGoBack && navStack.size > 1) {
             backTarget = navStack[navStack.size - 2]
             backActive = true
@@ -1669,12 +1746,15 @@ private fun PageContent(
  *
  * 必须挂在页面根容器上：挂在输入框自身时，框外区域的点击根本不会派发到它。
  *
- * 用 Initial 阶段 + 坐标判定：子节点（LazyColumn、可点卡片）会在 Main 阶段
- * 把按下标为已消费，若靠 `isConsumed` 判定就永远收不到空白处的点击。
- * 因此在 Initial 阶段先拿到按下位置，落在输入框纵向范围内就不收起。
+ * 用 Final 阶段 + 坐标判定：
+ * - 不能靠 Main/Initial 的 isConsumed（LazyColumn 与可点卡片会先消费事件，
+ *   且输入框自身的点击也会被消费），否则要么收不起、要么误收起；
+ * - Final 是所有子节点处理完的最后阶段，这里只看坐标：
+ *   按下位置落在输入框外才 clearFocus。
+ * 这样点搜索框内部时坐标命中范围而直接跳过，不会先把焦点清掉再拿回（避免光晕闪一下）。
  *
  * @param enabled 仅当搜索框处于输入态时为 true，其余时候完全不拦截事件
- * @param inputYRange 输入框在根容器坐标系中的纵向范围；为 null 时退回事件消费判定
+ * @param inputYRange 输入框在根坐标系中的纵向范围；为 null 时退回事件消费判定
  */
 private fun Modifier.dismissFocusOnOutsideTap(
     enabled: Boolean,
@@ -1685,7 +1765,7 @@ private fun Modifier.dismissFocusOnOutsideTap(
     if (!enabled) this else this.onGloballyPositioned { coordinates = it }.pointerInput(inputYRange, focusManager) {
         awaitPointerEventScope {
             while (true) {
-                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
                 if (event.type != PointerEventType.Press) continue
                 if (inputYRange != null) {
                     // 有输入框范围：按坐标判定，落在框内就不收起
@@ -3501,7 +3581,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     tint = if (incognitoActive) IncognitoTopBarColor else null,
                     contentColor = if (incognitoActive) IncognitoBarBackground else null
                 ) {
-                IconButton(onClick = { viewModel.back(onAllTabsClosed) }, enabled = selectedTab?.canGoBack == true || selectedTab?.restrictedEngine != null) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
+                IconButton(onClick = { viewModel.back(onAllTabsClosed) }, enabled = selectedTab?.canGoBack == true || selectedTab?.restrictedEngine != null || selectedTab?.fakeSite != null) { Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back)) }
                 IconButton(onClick = viewModel::forward, enabled = selectedTab?.canGoForward == true) { Icon(Icons.Default.ArrowForward, stringResource(R.string.action_forward)) }
                 // 加载中时变为「停止」：避免用户在卡住的页面无法中断加载；加载完成后恢复为「刷新」
                 if (selectedTab?.loading == true) {
@@ -3623,14 +3703,26 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     // 错误页盖在 GeckoView 之上：失败时页面本身已无内容，
                     // 但下层仍需保留渲染层，用户重试后无需重建视图。
                     // 必须写在 Box 内部才能使用 matchParentSize 铺满整个网页区域。
-                    // 合规提示页优先于普通错误页：受限搜索引擎不发请求，
-                    // 此时 failed 为 false，两页不会同时出现
+                    // 提示页优先级：假冒站点 > 受限引擎 > 普通错误页。
+                    // 三者不会同时出现：命中的那个会先 return，不会走到发请求，
+                    // 因此 failed 在拦截时恒为 false。
+                    val fakeSite = selectedTab.fakeSite
                     val restricted = selectedTab.restrictedEngine
-                    if (restricted != null) {
-                        ComplianceBlockedView(
+                    if (fakeSite != null) {
+                        // 假冒站点：只有返回首页，没有继续访问
+                        FakeSiteBlockedView(
+                            url = selectedTab.url,
+                            host = fakeSite,
+                            onBackHome = onAllTabsClosed,
+                            modifier = Modifier.matchParentSize()
+                        )
+                    } else if (restricted != null) {
+                        // 受限搜索引擎：二次确认，确认后只放行这一次
+                        ComplianceConfirmView(
                             url = selectedTab.url,
                             host = restricted,
                             onBackHome = onAllTabsClosed,
+                            onContinue = { viewModel.continueToRestricted(selectedTab.url) },
                             modifier = Modifier.matchParentSize()
                         )
                     } else if (selectedTab.failed) {
@@ -4156,24 +4248,29 @@ private fun SettingsScreen(
         LazyColumn(Modifier.fillMaxSize()) {
             // 设置搜索框
             item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    // 紧凑化：M3 文本框自然高度是 56dp，这里压到 52dp（安全下限：16+20+16），
-                    // 并把上下留白收紧到 6dp，让搜索框离顶栏更近；
-                    // 它在 LazyColumn 的第一个 item 里，后续入口卡片会随之整体上移，
-                    // 不会像固定头部那样在下方留下空白。
-                    modifier = Modifier.fillMaxWidth()
+                // 外层 Box 只负责留白；输入框自身不写死 height。
+                // 之前把 padding 与 height 写在同一串修饰符上，
+                // 固定的 52dp 把上下留白也算进去，内部内容区被压窄，
+                // 放大镜图标与占位文字就与输入框中心线错位。
+                Box(
+                    Modifier.fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .height(52.dp)
-                        // 记录搜索框在页面坐标系中的纵向范围，供点外检测用
+                        // 记录输入框在根坐标系中的纵向范围，供点外检测用。
+                        // 必须与 dismissFocusOnOutsideTap 里的 localToRoot 同一基准。
                         .onGloballyPositioned { coords ->
                             val pos = coords.positionInRoot()
                             searchTop = pos.y
                             searchBottom = pos.y + coords.size.height
                         }
+                ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    // 不写 height：让 M3 用自然高度（56dp）并在内部垂直居中，
+                    // leadingIcon 与占位文字才会与输入框中心线对齐
+                    modifier = Modifier.fillMaxWidth()
                         .onFocusChanged { searchFocused = it.isFocused },
-                    placeholder = { Text(stringResource(R.string.s302)) },
+                    placeholder = { Text(stringResource(R.string.s302), style = MaterialTheme.typography.bodyMedium) },
                     singleLine = true,
                     shape = MaterialTheme.shapes.extraLarge,
                     leadingIcon = { Icon(Icons.Default.Search, stringResource(R.string.s214)) },
@@ -4187,6 +4284,7 @@ private fun SettingsScreen(
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
+                }
             }
             if (searchQuery.isBlank()) {
                 // 默认展示入口卡片

@@ -123,14 +123,16 @@ class ZexBrowseApplication : Application() {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // 合规拦截扩展（zex_compliance）
+    // 假冒站点网络层拦截扩展（zex_compliance）
     //
     // 为什么需要它：GeckoView 没有 "shouldInterceptRequest" 这类原生钩子，
     // NavigationDelegate 只在导航层生效——iframe、图片、脚本、XHR 这些资源请求
-    // 根本不经过它。仅靠导航拦截，页面仍可能向受限域名发出请求（白白跑流量）。
+    // 根本不经过它。仅靠导航拦截，页面仍可能向假冒域名发出请求（白白跑流量）。
     // 因此用 WebExtension 的 declarativeNetRequest 在网络层直接阻断，
     // 规则见 assets/web_extensions/zex_compliance/rules.json。
     //
+    // 已恢复对大陆服务：受限搜索引擎不再在网络层硬拦（否则二次确认的
+    // 「继续访问」会永远加载不出来），这里只保留假冒站点的阻断。
     // 与广告拦截无关，始终启用，不提供开关。
     // ────────────────────────────────────────────────────────────────
     private var complianceExtension: WebExtension? = null
