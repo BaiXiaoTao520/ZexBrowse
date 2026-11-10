@@ -536,17 +536,18 @@ private fun IncognitoHomeScreen(
 }
 
 /**
- * 受限搜索引擎的二次确认页。
+ * 国内搜索引擎的隐私确认页。
  *
- * 进入前仍处于阻断状态：这里不会预先发请求，只有用户点「继续访问」才放行一次。
+ * 不做拦截，而是在进入前给出提示：这类引擎会记录搜索内容与设备信息，
+ * 用户确认后即可正常访问。
  *
  * 视觉上刻意与「禁止访问」区分：用橙黄色感叹号而非红色禁止图标，
  * 因为这是「需要你知情后自行决定」而非「绝对不行」。
  *
- * @param url 被拦截的地址
- * @param host 命中的受限主机
+ * @param url 目标地址
+ * @param host 命中的搜索主机
  * @param onBackHome 返回首页
- * @param onContinue 确认继续访问（放行一次）
+ * @param onContinue 确认继续访问
  */
 @Composable
 private fun ComplianceConfirmView(
@@ -640,7 +641,7 @@ private fun ComplianceConfirmView(
 /**
  * 假冒站点的禁止访问页。
  *
- * 与受限引擎的确认页不同：这里**没有「继续访问」**。
+ * 与隐私确认页不同：这里**没有「继续访问」**。
  * 假冒站点是直接侵害用户的操作，不存在「知情后自行决定」的正当理由，
  * 因此只保留一个出口（返回首页）。
  */

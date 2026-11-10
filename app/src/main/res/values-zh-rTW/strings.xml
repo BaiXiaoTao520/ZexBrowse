@@ -2,7 +2,7 @@
     <string name="app_name">ZexBrowse</string>
     <string name="s000">無法存取此網站</string>
     <string name="compliance_title">您即將進入大陸搜尋引擎</string>
-    <string name="compliance_body">根據相關法律法規及合規要求，ZexBrowse 暫時停止對大陸提供服務，部分國內搜尋引擎將暫時不可用。若您確認繼續，相關請求將由您自行承擔。</string>
+    <string name="compliance_body">該搜尋引擎會記錄您的搜尋內容與裝置資訊。若您確認繼續，相關請求將由您自行發起與承擔。</string>
     <string name="compliance_hint">請注意隱私安全，切勿輕易相信！搜尋引擎會記錄搜尋內容與裝置資訊，請勿在其中輸入帳號密碼、身分證號、銀行卡等敏感資訊，也不要輕信搜尋結果中的下載與廣告連結。</string>
     <string name="compliance_host">目標站點：%1$s</string>
     <string name="compliance_back_home">返回首頁</string>

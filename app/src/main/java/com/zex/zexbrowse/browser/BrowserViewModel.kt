@@ -173,7 +173,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 拒绝一个 sogou:// 之类的 scheme 时 Gecko 会回 onLoadError（UNKNOWN_PROTOCOL），
     // 若照常处理，用户会从正常的结果页被踢到完整错误页。
     private val blockedExternalUris = HashMap<String, MutableSet<String>>()
-    // 用户已二次确认过的受限搜索引擎地址：
+    // 用户已确认过的国内搜索引擎地址：
     // 确认后只对「这一次导航」放行，导航完成即从集合移除，
     // 不做会话级永久放行，避免用户之后再点同一个链接时不经提示直接进入。
     private val confirmedRestrictedUris = HashSet<String>()
@@ -553,9 +553,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 很多站点的下载地址先 302 到验证/登录页，按后缀提前拒绝会让验证页根本加载不出来。
                 val uri = request.uri
 
-                // 受限的大陆搜索引擎：一律拒绝，并把标签置为二次确认态。
-                // 覆盖点链接、重定向、脚本跳转等不走地址栏的路径，
-                // 避免用户从其他页面绕到受限站点而看到真实网页。
+                // 国内搜索引擎：先拦下来做隐私确认，用户确认后才放行。
+                // 覆盖点链接、重定向、脚本跳转等不走地址栏的路径。
                 // 用户已在确认页选择继续的地址放行一次（取后即失效）。
                 if (!confirmedRestrictedUris.remove(uri)) MainlandSearchEngines.match(uri)?.let { hit ->
                     if (pendingInitialLoads[id] == uri) clearPending(id)
@@ -610,7 +609,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     if (userInitiated) requestExternalApp(uri)
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                // 正常导航时清掉旧的受限/假冒提示态，否则旧提示会盖在新页面上
+                // 正常导航时清掉旧的提示态（搜索引擎/假冒），否则旧提示会盖在新页面上
                 if (userInitiated) update(id) {
                     if (it.restrictedEngine != null || it.fakeSite != null) {
                         it.copy(restrictedEngine = null, beforeRestrictedUrl = "", fakeSite = null)
@@ -619,9 +618,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 return null
             }
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
-                // 子帧也不能放：受限搜索引擎或假冒站点可能被以 iframe 形式嵌入，
-                // 就算资源层已由扩展阻断，这里再拒一次，避免任何漏网
-                if (MainlandSearchEngines.match(request.uri) != null || FakeSites.match(request.uri) != null) {
+                // 假冒站点：子帧也一律拒，无法通过 iframe 嵌入绕过
+                if (FakeSites.match(request.uri) != null) {
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+                // 国内搜索引擎：子帧同样要弹确认，而子帧没有界面可弹，
+                // 因此只能拒绝；不拒就无法做到「进页面前先确认」。
+                // 但用户已确认过的地址放行，否则确认后页面里的搜索框（常为 iframe）
+                // 会加载不出来，看起来像确认按钮无效。
+                if (!confirmedRestrictedUris.contains(request.uri) && MainlandSearchEngines.match(request.uri) != null) {
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -875,8 +880,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
             return
         }
-        // 受限的大陆搜索引擎：不发请求，直接把标签置为二次确认态。
-        // 放在发请求之前，保证即使是直链也不会先发出一轮请求再拦下。
+        // 国内搜索引擎：不发请求，先把标签置为隐私确认态。
+        // 放在发请求之前，保证在用户确认前不会先发出一轮请求。
         // 用户已确认过的同一条地址：不在 load 阶段消费放行标记，
         // 而是交给 onLoadRequest 判断（那是真正的网请求入口），
         // 否则两边各取一次会把标记吃掉，导致确认后又被拦下。
@@ -960,8 +965,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val tab = selected ?: return
         // 假冒站点：刷新不重发，保持禁止访问页
         if (tab.fakeSite != null) return
-        // 受限搜索引擎：不能走 session.reload()（会把被拒绝的地址重新发一次），
-        // 而是重新走 load，由它再次判为受限并保持二次确认页，防止刷新绕过。
+        // 国内搜索引擎：不能走 session.reload()（会把地址重新发一次而绕过确认），
+        // 而是重新走 load，由它再次弹确认页。
         if (tab.restrictedEngine != null) {
             load(tab.url, tab)
             return
