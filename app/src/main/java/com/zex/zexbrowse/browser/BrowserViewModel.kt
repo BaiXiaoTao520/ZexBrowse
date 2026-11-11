@@ -173,12 +173,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 拒绝一个 sogou:// 之类的 scheme 时 Gecko 会回 onLoadError（UNKNOWN_PROTOCOL），
     // 若照常处理，用户会从正常的结果页被踢到完整错误页。
     private val blockedExternalUris = HashMap<String, MutableSet<String>>()
-    // 用户已确认过的国内搜索引擎（按引擎归并，如 so360 / baidu）。
-    // 一次确认后，同引擎下的后续导航全部放行：
-    // 搜索页翻页、360 这类动态跟随的结果页会不断产生新 URL，
-    // 若按完整 URL 匹配，每翻一页都弹一次确认，体验很糟。
-    // 归并到引擎级别，既能避免翻页重复提醒，也不会阻止其他引擎再次提醒。
-    private val confirmedSearchHosts = HashSet<String>()
+    // 已在哪个标签里确认过哪些搜索引擎（标签 id -> 引擎归并键集合）。
+    //
+    // 作用域刻意限定为「当前标签的一次浏览」：
+    // - 同一标签内翻页、360 这类动态跟随的结果页不断产生新 URL，
+    //   不按引擎归并就会每翻一页弹一次确认；
+    // - 但不做全局永久放行：用户关掉这个标签、或在另一个标签重新打开，
+    //   仍会重新提醒——这是安全隐患，不能因为一次点击就长期免提醒。
+    private val confirmedSearchHosts = HashMap<String, MutableSet<String>>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     // 下载响应体捕获：Gecko 在 onExternalResponse 时已把响应体拉了下来，body 流只在回调期间有效，
     // 必须当场读走存成临时文件。之后下载直接从本地文件落盘，不再用 URL 第二次请求，
@@ -558,7 +560,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // 国内搜索引擎：先拦下来做隐私确认，用户确认后才放行。
                 // 覆盖点链接、重定向、脚本跳转等不走地址栏的路径。
                 // 已确认过该主机的，后续导航（翻页、动态跳转）一律直接放行。
-                if (!isSearchHostConfirmed(uri)) MainlandSearchEngines.match(uri)?.let { hit ->
+                if (!isSearchHostConfirmed(uri, id)) MainlandSearchEngines.match(uri)?.let { hit ->
                     if (pendingInitialLoads[id] == uri) clearPending(id)
                     update(id) {
                         it.copy(
@@ -626,7 +628,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 }
                 // 已确认过该主机的子帧也放行，否则确认后页面里的搜索框（常为 iframe）
                 // 或 360 这类动态加载的结果页会加载不出来，看起来像确认按钮无效。
-                if (!isSearchHostConfirmed(request.uri) && MainlandSearchEngines.match(request.uri) != null) {
+                if (!isSearchHostConfirmed(request.uri, id) && MainlandSearchEngines.match(request.uri) != null) {
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -649,6 +651,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         cancelPendingFailure(id)
         pendingDownloads.remove(id)
         blockedExternalUris.remove(id)
+        // 标签已销毁，它记录的搜索引擎确认状态也一并丢掉：
+        // 否则同 id 永不复用但仍会残留，且语义上“关标签 = 结束这次浏览”
+        confirmedSearchHosts.remove(id)
         val closing = _tabs.value.firstOrNull { it.id == id }
         runCatching { closing?.session?.close() }
         _tabs.value = _tabs.value.filterNot { it.id == id }
@@ -884,7 +889,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 放在发请求之前，保证在用户确认前不会先发出一轮请求。
         // 已确认过该主机的直接放行：翻页、360 这类动态跟随的结果页
         // 会不断产生新 URL，否则每翻一页都弹一次确认。
-        if (!isSearchHostConfirmed(target)) MainlandSearchEngines.match(target)?.let { hit ->
+        if (!isSearchHostConfirmed(target, targetTab.id)) MainlandSearchEngines.match(target)?.let { hit ->
             clearPending(targetTab.id)
             cancelPendingFailure(targetTab.id)
             update(targetTab.id) {
@@ -955,20 +960,23 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
      * 移动版入口时再弹一次。
      * 解析不出引擎时返回 false（宁可多提醒一次，也不默认放行）。
      */
-    private fun isSearchHostConfirmed(url: String): Boolean {
+    private fun isSearchHostConfirmed(url: String, tabId: String): Boolean {
         val key = MainlandSearchEngines.engineKey(url) ?: return false
-        return confirmedSearchHosts.contains(key)
+        return confirmedSearchHosts[tabId]?.contains(key) == true
     }
 
     /**
      * 用户在隐私确认页选择「继续访问」。
      *
-     * 记下该引擎后走正常 load：同引擎下的后续导航（翻页、动态跳转、
-     * www / m 切换、子帧）都不再提醒；其它搜索引擎仍需各自确认。
+     * 只在当前标签内记住该引擎：同标签的后续导航（翻页、动态跳转、
+     * www / m 切换、子帧）不再提醒；
+     * 新开标签或关闭后重新打开同一引擎，仍会重新提醒。
      */
     fun continueToRestricted(url: String) {
         val tab = selected ?: return
-        MainlandSearchEngines.engineKey(url)?.let { confirmedSearchHosts.add(it) }
+        MainlandSearchEngines.engineKey(url)?.let { key ->
+            confirmedSearchHosts.getOrPut(tab.id) { mutableSetOf() }.add(key)
+        }
         update(tab.id) { it.copy(restrictedEngine = null, beforeRestrictedUrl = "") }
         load(url, tab)
     }

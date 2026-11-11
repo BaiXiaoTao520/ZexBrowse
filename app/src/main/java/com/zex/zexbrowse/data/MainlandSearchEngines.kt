@@ -51,9 +51,8 @@ object MainlandSearchEngines {
         "so.toutiao.com",
         // 抖音搜索：只拦搜索子域，不影响 douyin.com 官网
         "so.douyin.com",
-        // 元宝搜索：属于国内搜索引擎，与其它引擎一致给隐私提醒
-        "so.qq.com",
-        // 必应国内站明确放行，不在此列
+        // 元宝搜索不在此列：它不是受限/敏感目标的国内引擎，不需要弹确认
+        // 必应国内站明确放行，也不在此列
     )
 
     /**
@@ -102,7 +101,6 @@ object MainlandSearchEngines {
         host in QUARK_HOSTS -> "quark"
         host in TOUTIAO_HOSTS -> "toutiao"
         host in DOUYIN_HOSTS -> "douyin"
-        host in YUANBAO_HOSTS -> "yuanbao"
         // 兼底：名单新增主机但忘了归并时，用主机名自己，不影响正确性
         else -> host
     }
@@ -114,7 +112,6 @@ object MainlandSearchEngines {
     private val QUARK_HOSTS = setOf("quark.sm.cn")
     private val TOUTIAO_HOSTS = setOf("so.toutiao.com")
     private val DOUYIN_HOSTS = setOf("so.douyin.com")
-    private val YUANBAO_HOSTS = setOf("so.qq.com")
 
     /** 从地址中取出小写主机名；解析不了返回 null */
     private fun hostOf(url: String): String? {

@@ -4506,12 +4506,13 @@ private fun SearchEngineScreen(
     setEngines: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    // 顺序：Google → 元宝 → 必应 → DuckDuckGo。
+    // 元宝上提两位：它是国内引擎且不需提醒，放在常用位置更合理
     val engines = listOf(
         Triple("google", "Google", Icons.Rounded.Public),
+        Triple("yuanbao", stringResource(R.string.engine_yuanbao), Icons.Rounded.ManageSearch),
         Triple("bing", stringResource(R.string.engine_bing), Icons.Rounded.Language),
-        Triple("duckduckgo", "DuckDuckGo", Icons.Default.Search),
-        // 元宝搜索：入口 https://so.qq.com/isearch?query=
-        Triple("yuanbao", stringResource(R.string.engine_yuanbao), Icons.Rounded.ManageSearch)
+        Triple("duckduckgo", "DuckDuckGo", Icons.Default.Search)
     )
     val customEngines = remember(settings.customSearchEngines) { decodeCustomSearchEngines(settings.customSearchEngines) }
     var showAddDialog by remember { mutableStateOf(false) }

@@ -3,7 +3,7 @@
     <string name="s000">This site cannot be reached</string>
     <string name="compliance_title">You are about to enter a mainland search engine</string>
     <string name="compliance_body">This search engine records your queries and device information. If you choose to continue, the request is made at your own discretion.</string>
-    <string name="compliance_hint">Please protect your privacy and be cautious. Search engines record your queries and device information. Never enter passwords, ID numbers, bank card numbers, or other sensitive data, and do not trust download or advertising links in search results.</string>
+    <string name="compliance_hint">Search engines record your queries and device information. Never enter passwords, ID numbers, bank card numbers, or other sensitive data; be careful with download links and ads in search results, as they may lead to unwanted apps.</string>
     <string name="compliance_host">Target site: %1$s</string>
     <string name="compliance_back_home">Back to home</string>
     <string name="compliance_continue">Continue</string>
