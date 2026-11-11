@@ -669,6 +669,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _tabs.value.filter { !it.incognito }.forEach { tab ->
             riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
+            confirmedSearchHosts.remove(tab.id)
             runCatching { tab.session.close() }
         }
         _tabs.value = _tabs.value.filter { it.incognito }
@@ -678,6 +679,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _tabs.value.filter { it.incognito }.forEach { tab ->
             riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
+            confirmedSearchHosts.remove(tab.id)
             runCatching { tab.session.close() }
         }
         _tabs.value = _tabs.value.filterNot { it.incognito }
@@ -697,6 +699,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         incognitoTabs.forEach { tab ->
             riskyNavigationGate.dismiss(tab.id)
             attachedSessions.remove(tab.id)
+            confirmedSearchHosts.remove(tab.id)
             runCatching { tab.session.close() }
         }
         _tabs.value = _tabs.value.filterNot { it.incognito }
