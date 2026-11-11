@@ -51,7 +51,8 @@ object MainlandSearchEngines {
         "so.toutiao.com",
         // 抖音搜索：只拦搜索子域，不影响 douyin.com 官网
         "so.douyin.com",
-        // 必应国内站明确放行，不在此列
+        // 元宝搜索不在此列：它不是受限/敏感目标的国内引擎，不需要弹确认
+        // 必应国内站明确放行，也不在此列
     )
 
     /**
@@ -75,6 +76,42 @@ object MainlandSearchEngines {
 
         return restrictedHosts.firstOrNull { it == host }
     }
+
+    /** 从地址中取出小写主机名；解析不了返回 null。公开供放行判定使用 */
+    fun host(url: String): String? = hostOf(url)
+
+    /**
+     * 取该地址所属引擎的归并键；未命中返回 null。
+     *
+     * 同一引擎常有 www / m / 裸域多个入口（如 www.so.com、m.so.com、so.com），
+     * 用户确认过其中任意一个，就不该在换到同引擎的另一个入口时再弹一次。
+     * 这里把它们归并到同一个键，供「已确认」判定使用。
+     */
+    fun engineKey(url: String): String? {
+        val host = match(url) ?: return null
+        return engineRoot(host)
+    }
+
+    /** 把具体主机归并为其所属的引擎根域 */
+    private fun engineRoot(host: String): String = when {
+        host in BAIDU_HOSTS -> "baidu"
+        host in SOGOU_HOSTS -> "sogou"
+        host in SO_HOSTS -> "so360"
+        host in SM_HOSTS -> "shenma"
+        host in QUARK_HOSTS -> "quark"
+        host in TOUTIAO_HOSTS -> "toutiao"
+        host in DOUYIN_HOSTS -> "douyin"
+        // 兼底：名单新增主机但忘了归并时，用主机名自己，不影响正确性
+        else -> host
+    }
+
+    private val BAIDU_HOSTS = setOf("www.baidu.com", "m.baidu.com")
+    private val SOGOU_HOSTS = setOf("www.sogou.com")
+    private val SO_HOSTS = setOf("so.com", "www.so.com", "m.so.com", "360.so", "www.360.so")
+    private val SM_HOSTS = setOf("sm.cn", "m.sm.cn", "www.sm.cn")
+    private val QUARK_HOSTS = setOf("quark.sm.cn")
+    private val TOUTIAO_HOSTS = setOf("so.toutiao.com")
+    private val DOUYIN_HOSTS = setOf("so.douyin.com")
 
     /** 从地址中取出小写主机名；解析不了返回 null */
     private fun hostOf(url: String): String? {

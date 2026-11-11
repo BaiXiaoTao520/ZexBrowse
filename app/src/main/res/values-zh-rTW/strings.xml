@@ -3,7 +3,7 @@
     <string name="s000">無法存取此網站</string>
     <string name="compliance_title">您即將進入大陸搜尋引擎</string>
     <string name="compliance_body">該搜尋引擎會記錄您的搜尋內容與裝置資訊。若您確認繼續，相關請求將由您自行發起與承擔。</string>
-    <string name="compliance_hint">請注意隱私安全，切勿輕易相信！搜尋引擎會記錄搜尋內容與裝置資訊，請勿在其中輸入帳號密碼、身分證號、銀行卡等敏感資訊，也不要輕信搜尋結果中的下載與廣告連結。</string>
+    <string name="compliance_hint">搜尋引擎會記錄您的搜尋內容與裝置資訊，請勿在其中輸入帳號密碼、身分證號、銀行卡等敏感資訊；搜尋結果中的下載連結與廣告請謹慎點擊，避免誤裝來路不明的應用程式。</string>
     <string name="compliance_host">目標站點：%1$s</string>
     <string name="compliance_back_home">返回首頁</string>
     <string name="compliance_continue">繼續存取</string>
@@ -681,6 +681,8 @@
     <string name="notice_coolmonitor_title">CoolMonitor 網盤下載</string>
     <string name="notice_pan_download">網盤下載</string>
     <string name="engine_bing">Bing</string>
+    <string name="engine_yuanbao">元寶搜尋</string>
+    <string name="engine_selected">目前使用</string>
     <string name="notification_title">通知設定</string>
     <string name="notification_sub">即時通知與狀態列顯示</string>
     <string name="notification_live_title">即時通知</string>
