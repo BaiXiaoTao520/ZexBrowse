@@ -4235,15 +4235,20 @@ private fun SettingsScreen(
                 (item.title.contains(q, ignoreCase = true) || item.keywords.any { it.contains(q, ignoreCase = true) })
         }
     }
+    Box(
+        Modifier.fillMaxSize()
+            // 拦截挂在页面最外层（包含状态栏区域）：
+            // 之前挂在 Scaffold 的内容区，状态栏属于顶栏自己的 inset，
+            // 点击那里不会派发到内容区，所以点了没反应。
+            .dismissFocusOnOutsideTap(
+                searchFocused,
+                focusManager,
+                inputYRange = if (searchBottom > searchTop) searchTop..searchBottom else null
+            )
+    ) {
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s059)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }) }) { padding ->
       Box(
           Modifier.fillMaxSize().padding(padding)
-              // 传入搜索框的纵向范围，点中它时保留焦点，点空白处才收起
-              .dismissFocusOnOutsideTap(
-                  searchFocused,
-                  focusManager,
-                  inputYRange = if (searchBottom > searchTop) searchTop..searchBottom else null
-              )
       ) {
         LazyColumn(Modifier.fillMaxSize()) {
             // 设置搜索框
@@ -4322,6 +4327,7 @@ private fun SettingsScreen(
                 }
             }
         }
+    }
     }
     }
     if (showLinkDiagnostics) {
@@ -4445,6 +4451,7 @@ private fun searchEngineLabel(context: Context, settings: BrowserSettings) = whe
     settings.searchEngine == "baidu" -> "Google"
     settings.searchEngine == "bing" -> context.getString(R.string.label_bing)
     settings.searchEngine == "duckduckgo" -> "DuckDuckGo"
+    settings.searchEngine == "yuanbao" -> context.getString(R.string.engine_yuanbao)
     // 自定义搜索引擎的选中值是「custom:<标题>」，显示时去掉前缀只留标题
     settings.searchEngine.startsWith(CUSTOM_SEARCH_PREFIX) -> settings.searchEngine.removePrefix(CUSTOM_SEARCH_PREFIX)
     // 升级前配置的单个自定义搜索
@@ -4500,9 +4507,11 @@ private fun SearchEngineScreen(
     onBack: () -> Unit
 ) {
     val engines = listOf(
-        "google" to "Google",
-        "bing" to stringResource(R.string.engine_bing),
-        "duckduckgo" to "DuckDuckGo"
+        Triple("google", "Google", Icons.Rounded.Public),
+        Triple("bing", stringResource(R.string.engine_bing), Icons.Rounded.Language),
+        Triple("duckduckgo", "DuckDuckGo", Icons.Default.Search),
+        // 元宝搜索：入口 https://so.qq.com/isearch?query=
+        Triple("yuanbao", stringResource(R.string.engine_yuanbao), Icons.Rounded.ManageSearch)
     )
     val customEngines = remember(settings.customSearchEngines) { decodeCustomSearchEngines(settings.customSearchEngines) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -4511,7 +4520,17 @@ private fun SearchEngineScreen(
     SelectionScreen(stringResource(R.string.s213), onBack, actions = {
         IconButton(onClick = { showAddDialog = true }) { Icon(Icons.Default.Add, stringResource(R.string.s321)) }
     }) {
-        engines.forEach { (value, title) -> item { ChoiceItem(title, settings.searchEngine == value) { onSelect(value) } } }
+        // 内置引擎：卡片式列表。整张卡片可点，选中态用主色容器 + 勾标记，
+        // 比原先的纯文字行更容易一眼看出当前用的是哪个
+        items(engines, key = { it.first }) { engine ->
+            SearchEngineCard(
+                title = engine.second,
+                icon = engine.third,
+                selected = settings.searchEngine == engine.first,
+                onClick = { onSelect(engine.first) },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
         item { SectionHeader(stringResource(R.string.s037)) }
         if (customEngines.isEmpty()) {
             item {
@@ -4571,6 +4590,60 @@ private fun SearchEngineScreen(
 
 /** 自定义搜索引擎行：点击选中，长按弹编辑/删除 */
 @OptIn(ExperimentalFoundationApi::class)
+/**
+ * 内置搜索引擎卡片。
+ *
+ * 图标 + 标题 + 选中标记，整张卡片可点。
+ * 选中时用主色容器作底并显示勾，未选中用中性容器色，
+ * 尺寸与设置页其它卡片保持同一量级，不抢眼也不至于拥挤。
+ */
+@Composable
+private fun SearchEngineCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val container = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow
+    val content = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface
+
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    else MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Icon(Icons.Default.Check, stringResource(R.string.engine_selected), modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
 @Composable
 private fun CustomSearchEngineRow(
     engine: CustomSearchEngine,

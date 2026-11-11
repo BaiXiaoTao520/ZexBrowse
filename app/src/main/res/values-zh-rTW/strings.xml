@@ -681,6 +681,8 @@
     <string name="notice_coolmonitor_title">CoolMonitor 網盤下載</string>
     <string name="notice_pan_download">網盤下載</string>
     <string name="engine_bing">Bing</string>
+    <string name="engine_yuanbao">元寶搜尋</string>
+    <string name="engine_selected">目前使用</string>
     <string name="notification_title">通知設定</string>
     <string name="notification_sub">即時通知與狀態列顯示</string>
     <string name="notification_live_title">即時通知</string>

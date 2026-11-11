@@ -173,10 +173,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // 拒绝一个 sogou:// 之类的 scheme 时 Gecko 会回 onLoadError（UNKNOWN_PROTOCOL），
     // 若照常处理，用户会从正常的结果页被踢到完整错误页。
     private val blockedExternalUris = HashMap<String, MutableSet<String>>()
-    // 用户已确认过的国内搜索引擎地址：
-    // 确认后只对「这一次导航」放行，导航完成即从集合移除，
-    // 不做会话级永久放行，避免用户之后再点同一个链接时不经提示直接进入。
-    private val confirmedRestrictedUris = HashSet<String>()
+    // 用户已确认过的国内搜索引擎（按引擎归并，如 so360 / baidu）。
+    // 一次确认后，同引擎下的后续导航全部放行：
+    // 搜索页翻页、360 这类动态跟随的结果页会不断产生新 URL，
+    // 若按完整 URL 匹配，每翻一页都弹一次确认，体验很糟。
+    // 归并到引擎级别，既能避免翻页重复提醒，也不会阻止其他引擎再次提醒。
+    private val confirmedSearchHosts = HashSet<String>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     // 下载响应体捕获：Gecko 在 onExternalResponse 时已把响应体拉了下来，body 流只在回调期间有效，
     // 必须当场读走存成临时文件。之后下载直接从本地文件落盘，不再用 URL 第二次请求，
@@ -555,8 +557,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
                 // 国内搜索引擎：先拦下来做隐私确认，用户确认后才放行。
                 // 覆盖点链接、重定向、脚本跳转等不走地址栏的路径。
-                // 用户已在确认页选择继续的地址放行一次（取后即失效）。
-                if (!confirmedRestrictedUris.remove(uri)) MainlandSearchEngines.match(uri)?.let { hit ->
+                // 已确认过该主机的，后续导航（翻页、动态跳转）一律直接放行。
+                if (!isSearchHostConfirmed(uri)) MainlandSearchEngines.match(uri)?.let { hit ->
                     if (pendingInitialLoads[id] == uri) clearPending(id)
                     update(id) {
                         it.copy(
@@ -622,11 +624,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 if (FakeSites.match(request.uri) != null) {
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                // 国内搜索引擎：子帧同样要弹确认，而子帧没有界面可弹，
-                // 因此只能拒绝；不拒就无法做到「进页面前先确认」。
-                // 但用户已确认过的地址放行，否则确认后页面里的搜索框（常为 iframe）
-                // 会加载不出来，看起来像确认按钮无效。
-                if (!confirmedRestrictedUris.contains(request.uri) && MainlandSearchEngines.match(request.uri) != null) {
+                // 已确认过该主机的子帧也放行，否则确认后页面里的搜索框（常为 iframe）
+                // 或 360 这类动态加载的结果页会加载不出来，看起来像确认按钮无效。
+                if (!isSearchHostConfirmed(request.uri) && MainlandSearchEngines.match(request.uri) != null) {
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -882,10 +882,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
         // 国内搜索引擎：不发请求，先把标签置为隐私确认态。
         // 放在发请求之前，保证在用户确认前不会先发出一轮请求。
-        // 用户已确认过的同一条地址：不在 load 阶段消费放行标记，
-        // 而是交给 onLoadRequest 判断（那是真正的网请求入口），
-        // 否则两边各取一次会把标记吃掉，导致确认后又被拦下。
-        if (!confirmedRestrictedUris.contains(target)) MainlandSearchEngines.match(target)?.let { hit ->
+        // 已确认过该主机的直接放行：翻页、360 这类动态跟随的结果页
+        // 会不断产生新 URL，否则每翻一页都弹一次确认。
+        if (!isSearchHostConfirmed(target)) MainlandSearchEngines.match(target)?.let { hit ->
             clearPending(targetTab.id)
             cancelPendingFailure(targetTab.id)
             update(targetTab.id) {
@@ -948,16 +947,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }; fun forward() { selected?.session?.goForward() }
 
     /**
-     * 用户在二次确认页选择「继续访问」。
+     * 该地址所属的搜索引擎是否已被用户确认过。
      *
-     * 只放行这一次：地址先入一次性放行集合，再走正常 load；
-     * load 与 onLoadRequest 会各自取一次并立即移除，
-     * 因此用户下次再访问同一地址仍会重新提示。
-     * 若直接 loadUri 而不登记，会被拦截逻辑再次挡回，确认按钮就形同虚设。
+     * 按「引擎」而非完整 URL 判定：搜索页翻页、360 这类动态跟随的结果页
+     * 会持续产生新 URL，按完整 URL 放行会导致每一页都重新弹确认；
+     * 同时又按引擎归并（www / m / 裸域 算同一个），避免切到同一引擎的
+     * 移动版入口时再弹一次。
+     * 解析不出引擎时返回 false（宁可多提醒一次，也不默认放行）。
+     */
+    private fun isSearchHostConfirmed(url: String): Boolean {
+        val key = MainlandSearchEngines.engineKey(url) ?: return false
+        return confirmedSearchHosts.contains(key)
+    }
+
+    /**
+     * 用户在隐私确认页选择「继续访问」。
+     *
+     * 记下该引擎后走正常 load：同引擎下的后续导航（翻页、动态跳转、
+     * www / m 切换、子帧）都不再提醒；其它搜索引擎仍需各自确认。
      */
     fun continueToRestricted(url: String) {
         val tab = selected ?: return
-        confirmedRestrictedUris.add(url)
+        MainlandSearchEngines.engineKey(url)?.let { confirmedSearchHosts.add(it) }
         update(tab.id) { it.copy(restrictedEngine = null, beforeRestrictedUrl = "") }
         load(url, tab)
     }
@@ -1211,6 +1222,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             browserSettings.searchEngine == "baidu" -> "https://www.google.com/search?q={query}"
             browserSettings.searchEngine == "bing" -> "https://www.bing.com/search?q={query}"
             browserSettings.searchEngine == "duckduckgo" -> "https://duckduckgo.com/?q={query}"
+            // 元宝搜索：用户提供的入口，参数名为 query
+            browserSettings.searchEngine == "yuanbao" -> "https://so.qq.com/isearch?query={query}"
             browserSettings.searchEngine.startsWith(CUSTOM_SEARCH_PREFIX) -> resolveCustomSearchTemplate(browserSettings)
             browserSettings.searchEngine == "custom" -> browserSettings.customSearchUrl
             else -> "https://www.google.com/search?q={query}"

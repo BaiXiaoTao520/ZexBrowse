@@ -681,6 +681,8 @@
     <string name="notice_coolmonitor_title">Download CoolMonitor from a file host</string>
     <string name="notice_pan_download">Open file host</string>
     <string name="engine_bing">Bing</string>
+    <string name="engine_yuanbao">Yuanbao Search</string>
+    <string name="engine_selected">In use</string>
     <string name="notification_title">Notifications</string>
     <string name="notification_sub">Live updates and status bar</string>
     <string name="notification_live_title">Live updates</string>
