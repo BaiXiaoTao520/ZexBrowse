@@ -423,9 +423,9 @@
     <string name="s415">ZexBrowse is maintained by an individual in their spare time. It stays free, has no ads, and is not listed on any app store. Your support goes toward ongoing development and maintenance, as well as test devices.</string>
     <string name="s416">Sponsorship is entirely voluntary and any amount is welcome; not sponsoring does not affect any feature.</string>
     <string name="s417">How to support</string>
-    <string name="s418">1. Tap Sponsorship below to open the project README.</string>
-    <string name="s419">2. Scroll up to find the donation QR image in the Sponsorship section.</string>
-    <string name="s420">3. Long-press to save it (or take a screenshot), then open WeChat Scan and pick it from your album.</string>
+    <string name="s418">Tap the button below to open the Afdian sponsorship page.</string>
+    <string name="s419">Pick a tier or enter a custom amount on Afdian and follow the prompts. No screenshots or QR scanning needed.</string>
+    <string name="s420">The page may require sign-in and supports WeChat Pay, Alipay and others. Any issue can also be reported on the GitHub repository.</string>
     <string name="s421">Thank you for using ZexBrowse whether or not you sponsor. Feedback on the GitHub repository is always welcome.</string>
     <string name="s422">Sponsor</string>
     <string name="s423">Lingze mirror channel</string>
@@ -486,6 +486,7 @@
     <string name="color_theme_titanium">Titanium</string>
     <string name="color_theme_forest">Quiet Forest Morning</string>
     <string name="color_theme_custom">Custom</string>
+    <string name="color_theme_vibrant">Vibrant</string>
     <string name="settings_language_sub">App language and regional display</string>
     <string name="ad_block_title">Ad blocking</string>
     <string name="ad_block_sub">Block ads and tracking scripts on web pages</string>
@@ -595,10 +596,16 @@
     <string name="action_stop_loading">Stop loading</string>
     <string name="ua_desktop_chrome">Desktop Chrome</string>
     <string name="ua_desktop_firefox">Desktop Firefox</string>
+    <string name="ua_section_desc">The browser identifier determines the device type sites see, affecting layout and some features</string>
+    <string name="ua_desc_geckoview">Use the engine default identifier for best compatibility</string>
+    <string name="ua_desc_android_chrome">Appear as Chrome on Android</string>
+    <string name="ua_desc_desktop_chrome">Appear as desktop Chrome; some sites will show the desktop layout</string>
+    <string name="ua_desc_desktop_firefox">Appear as desktop Firefox with better compatibility than desktop Chrome</string>
     <string name="sha256_value">SHA-256: %1$s</string>
     <string name="toast_link_copied">Download link copied</string>
     <string name="toast_download_started">Download started. Check Downloads or the notification shade.</string>
     <string name="update_check_failed">Update check failed: %1$s</string>
+    <string name="update_network_failed">Network connection failed. Check your network and try again.</string>
     <string name="update_retry_later">Please try again later</string>
     <string name="crash_dialog_title">The app crashed last time</string>
     <string name="crash_dialog_hint">Crash information from the last launch. Tap Copy and send it to the developer:</string>

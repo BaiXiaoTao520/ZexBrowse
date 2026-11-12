@@ -7,6 +7,7 @@
 package com.zex.zexbrowse
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -163,5 +164,60 @@ class ZexBrowseApplication : Application() {
                     }
                 }, { error: Throwable? -> fail(error) })
         }.onFailure { fail(it) }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 内存机制
+    //
+    // Android 的「公平」体现在：进程收到什么级别的内存压力、能用多少堆，
+    // 都由系统按后台优先级统一调度，应用无法也不应自己抢占。
+    // 这里做的是正确响应系统信号，而不是“抢内存”：
+    // 1) largeHeap：浏览器存缓存/页面/图片，默认堆容易在低端机上先于系统其它进程被 OOM 杀掉；
+    // 2) onTrimMemory：系统回收内存时同步释放非必需缓存，避免被杀；
+    // 3) 通知 GeckoView 释放非活跃会话的内存，网页内核占大头。
+    // ────────────────────────────────────────────────────────────────
+
+    /** 内存压力回调：由 Activity 在 onTrimMemory / onLowMemory 时转发 */
+    var onMemoryPressure: ((level: Int) -> Unit)? = null
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        runCatching { onMemoryPressure?.invoke(level) }
+        // 严重级别时清理可重建缓存；下载捕获目录由下载 Worker 使用后清理。
+        // 不能动 filesDir 下的已下载文件——那是用户资产。
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            runCatching {
+                cacheDir?.listFiles()?.filter { it.name != "download-capture" }
+                    ?.forEach { it.deleteRecursively() }
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        runCatching { onMemoryPressure?.invoke(ComponentCallbacks2.TRIM_MEMORY_COMPLETE) }
+    }
+
+    /**
+     * 让 GeckoView 释放非活跃会话的内存。
+     *
+     * 内核（GeckoView）占的内存远大于应用自身 Java 堆，低内存时优先动它才有效；
+     * 但只能动非活跃会话：清掉当前正在看的页面会直接白屏。
+     *
+     * @param activeSessionId 当前活动标签的 id，保留它不清
+     * @param allSessions 全部会话（标签 id -> GeckoSession）
+     */
+    fun trimGeckoInactiveSessions(
+        activeSessionId: String?,
+        allSessions: List<Pair<String, org.mozilla.geckoview.GeckoSession>>
+    ) {
+        runCatching {
+            allSessions.forEach { (id, session) ->
+                if (id != activeSessionId) {
+                    // purgeHistory 清理后台会话的历史记录与部分缓存，属于可重建数据
+                    session.purgeHistory()
+                }
+            }
+        }
     }
 }

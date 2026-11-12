@@ -315,8 +315,8 @@ private data class SettingsEntryItem(
     val accent: Boolean = false
 )
 
-/** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
-private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
+/** 赞助页地址（爱发电）：点击直接进入赞助页面，不再引导用户去找图片 */
+private const val SPONSOR_PAGE_URL = "https://ifdian.net/a/ZexWanWu"
 
 /**
  * 无痕页专用主色。
@@ -1891,17 +1891,21 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
     var searchTop by remember { mutableStateOf(0f) }
     var searchBottom by remember { mutableStateOf(0f) }
 
-    // 无限循环的相位：驱动顶部色的色相缓慢往复（14 秒一趟）
+    // 无限循环的相位：驱动顶部色缓慢往复。
+    // 6.5 秒一趟：比原先的 14 秒快一倍，肉眼能明显看到颜色在流动，
+    // 但不至于快到像闪烁。
     val gradientTransition = rememberInfiniteTransition(label = "homeHeaderGradient")
     val gradientPhase by gradientTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 14_000, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 6_500, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "homeHeaderGradientPhase"
     )
+    // 缤纷色彩：首页顶部换成三色淡彩呼吸，而不是单一色相
+    val vibrant = isVibrantTheme(settings.colorTheme)
 
     Box(
         Modifier
@@ -1923,19 +1927,42 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
         val primaryTone = MaterialTheme.colorScheme.primaryContainer
         val tertiaryTone = MaterialTheme.colorScheme.tertiaryContainer
         val secondaryTone = MaterialTheme.colorScheme.secondaryContainer
-        // 相位参与色相插值：两两颜色随相位缓慢靠拢再拉开，色相持续微变
-        val topTone = androidx.compose.ui.graphics.lerp(primaryTone, tertiaryTone, gradientPhase * 0.5f)
-        val midTone = androidx.compose.ui.graphics.lerp(tertiaryTone, secondaryTone, gradientPhase * 0.5f)
-        val lowTone = androidx.compose.ui.graphics.lerp(secondaryTone, primaryTone, gradientPhase)
+        // 相位参与色相插值：两两颜色随相位缓慢靠拢再拉开，色相持续微变。
+        // 缤纷色彩下换成调色盘里的三色循环，得出真正的「多色」淡彩底，
+        // 而不是同一个色相变亮变暗。
+        val topTone: Color
+        val midTone: Color
+        val lowTone: Color
+        if (vibrant) {
+            // 用相位循环取调色盘相邻三色，颜色不断轮换；
+            // 都叠上低透明度，保证是「淡彩」而不是霓虹
+            val pal = vibrantPalette
+            val idx = (gradientPhase * pal.size).toInt().coerceIn(0, pal.size - 1)
+            topTone = pal[idx % pal.size]
+            midTone = pal[(idx + 2) % pal.size]
+            lowTone = pal[(idx + 4) % pal.size]
+        } else {
+            topTone = androidx.compose.ui.graphics.lerp(primaryTone, tertiaryTone, gradientPhase * 0.5f)
+            midTone = androidx.compose.ui.graphics.lerp(tertiaryTone, secondaryTone, gradientPhase * 0.5f)
+            lowTone = androidx.compose.ui.graphics.lerp(secondaryTone, primaryTone, gradientPhase)
+        }
+        // 缤纷色彩下透明度整体压低：三色同时出现容易过艳，淡彩才耐看
+        val topAlpha = if (vibrant) 0.42f else 0.80f
+        val midAlpha = if (vibrant) 0.26f else 0.45f
+        val lowAlpha = if (vibrant) 0.14f else 0.22f
+        val tailAlpha = if (vibrant) 0.05f else 0.06f
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
+                    // 必须用连续多段 colorStops 一路衰减到 surface，
+                    // 中途不能出现硬边：分段越密，过渡越看不出「线」
                     Brush.verticalGradient(
-                        0.00f to topTone.copy(alpha = 0.80f),
-                        0.22f to midTone.copy(alpha = 0.45f),
-                        0.45f to lowTone.copy(alpha = 0.22f),
-                        0.72f to lowTone.copy(alpha = 0.06f),
+                        0.00f to topTone.copy(alpha = topAlpha),
+                        0.18f to midTone.copy(alpha = midAlpha),
+                        0.38f to lowTone.copy(alpha = lowAlpha),
+                        0.62f to androidx.compose.ui.graphics.lerp(lowTone, surfaceColor, 0.5f).copy(alpha = tailAlpha),
+                        0.82f to surfaceColor.copy(alpha = 0.35f),
                         1.00f to surfaceColor
                     )
                 )
@@ -1970,7 +1997,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
             )
 
             Spacer(Modifier.height(20.dp))
-            AppRecommendationEntry(onClick = onAppRecommendations)
+            AppRecommendationEntry(vibrant = vibrant, onClick = onAppRecommendations)
 
             Spacer(Modifier.height(24.dp))
             // 常用站点标题行：左边标题 + 数量，右边「添加」
@@ -2005,6 +2032,7 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
             Spacer(Modifier.height(12.dp))
             BookmarkGrid(
                 sites = bookmarks,
+                vibrant = vibrant,
                 onOpen = onOpen,
                 onEdit = { editingBookmark = it },
                 onDelete = { site -> setQuickSites(encodeBookmarks(bookmarks.filter { it.url != site.url })) }
@@ -2787,7 +2815,7 @@ private fun RecommendationDownloadDialog(
  * 不再用 Modifier.clickable（矩形水波纹会超出圆角卡片边界造成错位）。
  */
 @Composable
-private fun AppRecommendationEntry(onClick: () -> Unit) {
+private fun AppRecommendationEntry(vibrant: Boolean, onClick: () -> Unit) {
     val shape = MaterialTheme.shapes.extraLarge
     Card(
         onClick = onClick,
@@ -2799,12 +2827,13 @@ private fun AppRecommendationEntry(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 图标小方块背景
+            val (entryBg, entryFg) = cardIconColors(vibrant, 0)
             Surface(
                 modifier = Modifier.size(44.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                color = entryBg,
                 shape = MaterialTheme.shapes.medium
             ) {
-                Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Apps, null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Apps, null, tint = entryFg) }
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -3152,7 +3181,7 @@ private fun AddressInput(
 }
 
 @Composable
-private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onEdit: (QuickSite) -> Unit, onDelete: (QuickSite) -> Unit) {
+private fun BookmarkGrid(sites: List<QuickSite>, vibrant: Boolean, onOpen: (String) -> Unit, onEdit: (QuickSite) -> Unit, onDelete: (QuickSite) -> Unit) {
     // 用普通 Column 而非 LazyColumn：本组件始终嵌在带 verticalScroll 的首页里，
     // 纵向可滚动组件不能在无限高度约束下测量（会直接抛异常导致启动闪退）；
     // 书签数量本就很少，无需懒加载。
@@ -3184,10 +3213,19 @@ private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onEdi
                 }
             }
         } else {
-            sites.chunked(2).forEach { row ->
+            sites.chunked(2).forEachIndexed { rowIndex, row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { site ->
-                        BookmarkCard(site = site, onOpen = onOpen, onEdit = onEdit, onDelete = onDelete, modifier = Modifier.weight(1f))
+                    row.forEachIndexed { colIndex, site ->
+                        BookmarkCard(
+                            site = site,
+                            onOpen = onOpen,
+                            onEdit = onEdit,
+                            onDelete = onDelete,
+                            // 传格子序号：缤纷主题下相邻书签拿到不同颜色
+                            colorIndex = rowIndex * 2 + colIndex,
+                            vibrant = vibrant,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                     repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -3199,8 +3237,10 @@ private fun BookmarkGrid(sites: List<QuickSite>, onOpen: (String) -> Unit, onEdi
 /** 书签卡片：长按弹菜单（编辑/删除） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onEdit: (QuickSite) -> Unit, onDelete: (QuickSite) -> Unit, modifier: Modifier = Modifier) {
+private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onEdit: (QuickSite) -> Unit, onDelete: (QuickSite) -> Unit, colorIndex: Int = 0, vibrant: Boolean = false, modifier: Modifier = Modifier) {
     var menuExpanded by remember { mutableStateOf(false) }
+    // 缤纷色彩下每个书签的徽标取不同颜色
+    val (badgeBg, badgeFg) = cardIconColors(vibrant, colorIndex)
     Box(modifier) {
         ElevatedCard(
             modifier = Modifier.fillMaxWidth().height(88.dp)
@@ -3216,14 +3256,14 @@ private fun BookmarkCard(site: QuickSite, onOpen: (String) -> Unit, onEdit: (Qui
                 Surface(
                     modifier = Modifier.size(38.dp),
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    color = badgeBg
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             site.icon.take(1),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            color = badgeFg
                         )
                     }
                 }
@@ -4408,6 +4448,8 @@ private fun CheckRow(title: String, checked: Boolean, changed: (Boolean) -> Unit
  *
  * - dynamic：走系统动态取色（Android 12+）；旧系统或无动态取色时退回默认配色
  * - 预设：用种子色推导明暗两套完整色调
+ * - vibrant（缤纷色彩）：**不改变全局配色**，白底黑字照旧。
+ *   它的效果只作用于首页顶部动态渐变与卡片图标，见 isVibrantTheme 的使用处。
  * - custom：用户自选的种子色，非法值回退默认自定义色
  */
 @Composable
@@ -4418,6 +4460,14 @@ private fun resolveColorScheme(settings: BrowserSettings, dark: Boolean, context
         val theme = ColorTheme.entries.firstOrNull { it.name.equals(settings.colorTheme, ignoreCase = true) }
             ?: ColorTheme.DYNAMIC
         if (theme == ColorTheme.DYNAMIC) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+            } else {
+                if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+            }
+        } else if (theme == ColorTheme.VIBRANT) {
+            // 缤纷色彩只影响首页渐变与卡片图标，不参与全局配色：
+            // 这里用系统动态取色/默认配色，避免把整个应用染成蓝紫
             if (android.os.Build.VERSION.SDK_INT >= 31) {
                 if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
             } else {
@@ -4719,17 +4769,164 @@ private fun CustomSearchEngineDialog(
 
 @Composable
 private fun UserAgentScreen(settings: BrowserSettings, onSelect: (String) -> Unit, onSimplified: (Boolean) -> Unit, onCustom: () -> Unit, onBack: () -> Unit) {
+    // 每项带图标 + 一句副标题：单纯四个名字看不出区别，
+    // 用户需要知道「桌面版会变成网页版布局」这类差异。
+    // 第四项 desc 视为字符串资源 id。
     val agents = listOf(
-        "geckoview" to stringResource(R.string.s314),
-        "android_chrome" to "Android Chrome",
-        "desktop_chrome" to stringResource(R.string.ua_desktop_chrome),
-        "desktop_firefox" to stringResource(R.string.ua_desktop_firefox)
+        Triple("geckoview", stringResource(R.string.s314), Icons.Rounded.Public),
+        Triple("android_chrome", "Android Chrome", Icons.Default.Computer),
+        Triple("desktop_chrome", stringResource(R.string.ua_desktop_chrome), Icons.Default.Computer),
+        Triple("desktop_firefox", stringResource(R.string.ua_desktop_firefox), Icons.Default.Computer)
     )
     val customCount = decodeCustomUserAgents(settings.customUserAgents).size
     SelectionScreen(stringResource(R.string.s219), onBack) {
-        agents.forEach { (value, title) -> item { ChoiceItem(title, settings.userAgentMode == value) { onSelect(value) } } }
-        item { SwitchRow(stringResource(R.string.s327), stringResource(R.string.s328), settings.simplifiedUserAgent, onSimplified, leading = Icons.Default.Computer) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s329)) }, supportingContent = { Text(if (customCount > 0) stringResource(R.string.s330, customCount) else stringResource(R.string.s331)) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onCustom)) }
+        item {
+            Text(
+                stringResource(R.string.ua_section_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+        items(agents, key = { it.first }) { agent ->
+            UserAgentCard(
+                title = agent.second,
+                icon = agent.third,
+                subtitle = when (agent.first) {
+                    "geckoview" -> stringResource(R.string.ua_desc_geckoview)
+                    "android_chrome" -> stringResource(R.string.ua_desc_android_chrome)
+                    "desktop_chrome" -> stringResource(R.string.ua_desc_desktop_chrome)
+                    else -> stringResource(R.string.ua_desc_desktop_firefox)
+                },
+                selected = settings.userAgentMode == agent.first,
+                onClick = { onSelect(agent.first) },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+        item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(36.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Computer, null, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.s327), style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                stringResource(R.string.s328),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = settings.simplifiedUserAgent, onCheckedChange = onSimplified)
+                    }
+                }
+            }
+        }
+        item {
+            Card(
+                onClick = onCustom,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.s329), style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            if (customCount > 0) stringResource(R.string.s330, customCount) else stringResource(R.string.s331),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** 浏览器标识卡片：图标 + 标题 + 副标题 + 选中勾 */
+@Composable
+private fun UserAgentCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val container = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow
+    val content = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    else MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = content.copy(alpha = 0.75f)
+                )
+            }
+            if (selected) {
+                Icon(Icons.Default.Check, stringResource(R.string.engine_selected), modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 
@@ -6175,15 +6372,16 @@ private fun AboutScreen(
                     checking = true
                     scope.launch {
                         val checker = UpdateChecker()
-                        runCatching { checker.latest() }
-                            .onSuccess { release ->
-                                if (release != null && checker.isNewer(release.version)) {
-                                    update = release
-                                } else {
-                                    Toast.makeText(context, context.getString(R.string.s408), Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            .onFailure { error -> message = context.getString(R.string.update_check_failed, error.message ?: context.getString(R.string.update_retry_later)) }
+                        val outcome = runCatching { checker.check() }.getOrNull()
+                        when {
+                            // 有新版本：直接弹更新弹窗
+                            outcome?.release != null -> update = outcome.release
+                            // 所有源都不可达：这是网络问题，不能报「已是最新」
+                            outcome == null || outcome.isUnreachable ->
+                                Toast.makeText(context, context.getString(R.string.update_network_failed), Toast.LENGTH_SHORT).show()
+                            // 确实是最新
+                            else -> Toast.makeText(context, context.getString(R.string.s408), Toast.LENGTH_SHORT).show()
+                        }
                         checking = false
                     }
                 },
@@ -6240,7 +6438,7 @@ private fun AboutScreen(
     }
 }
 
-/** 赞助与支持说明弹窗：自愿原则，引导前往仓库 README 查看赞赏码 */
+/** 赞助与支持说明弹窗：自愿原则，点击按钮直接前往爱发电赞助页 */
 @Composable
 private fun SponsorDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current

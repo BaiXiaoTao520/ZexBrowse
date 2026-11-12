@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -49,6 +50,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zex.zexbrowse.R
+
+/**
+ * 卡片图标底色与图标色。
+ *
+ * 普通主题下统一用 primaryContainer / onPrimaryContainer（保持原有观感）；
+ * 缤纷色彩下按 [index] 从调色盘取不同颜色，让相邻卡片图标各不相同。
+ * 按背景亮度选择黑色或白色图标，取对比度更高的一种。
+ *
+ * @param vibrant 是否处于缤纷色彩主题（见 isVibrantTheme）
+ * @param index 稳定序号（如列表下标），保证重组时颜色不乱跳
+ */
+@Composable
+internal fun cardIconColors(vibrant: Boolean, index: Int): Pair<Color, Color> =
+    if (vibrant) {
+        val background = vibrantColorAt(index)
+        val foreground = if (background.luminance() > 0.179f) Color.Black else Color.White
+        background to foreground
+    } else {
+        MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+    }
 
 /** 圆圈选中标记：外圈描边 + 选中时内圈填充 */
 @Composable
@@ -136,9 +157,12 @@ internal fun ColorThemeGrid(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items.forEach { theme ->
+            // 缤纷色彩不参与全局配色，仅在首页渐变与卡片图标上生效。
+            // 它的选中圈用调色盘首色作代表，与其它单色主题区分开。
             val swatch = when (theme) {
                 ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
                 ColorTheme.CUSTOM -> customSeed
+                ColorTheme.VIBRANT -> vibrantPalette.first()
                 else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
             }
             ColorThemeOption(

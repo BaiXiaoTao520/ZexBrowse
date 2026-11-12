@@ -32,6 +32,8 @@ enum class ColorTheme {
     DUSK,
     TITANIUM,
     FOREST,
+    /** 缤纷色彩：每张卡片图标用不同颜色，首页顶部为淡彩色氛围底 */
+    VIBRANT,
     CUSTOM
 }
 
@@ -47,6 +49,7 @@ fun colorThemeLabel(theme: ColorTheme): String = stringResource(
         ColorTheme.DUSK -> R.string.color_theme_dusk
         ColorTheme.TITANIUM -> R.string.color_theme_titanium
         ColorTheme.FOREST -> R.string.color_theme_forest
+        ColorTheme.VIBRANT -> R.string.color_theme_vibrant
         ColorTheme.CUSTOM -> R.string.color_theme_custom
     }
 )
@@ -217,7 +220,37 @@ val presetNeutrals: Map<ColorTheme, Color> = mapOf(
 /** 自定义主题的默认种子色（取 Material 默认蓝紫，用户可再调整） */
 val defaultCustomSeed = Color(0xFF4A5BC4)
 
-/** 解析用户保存的自定义颜色（#RRGGBB 或 #AARRGGBB）；非法时回退 null */
+/**
+ * 缤纷色彩主题下的卡片图标调色盘。
+ *
+ * 按顺序循环取色，每张卡片因此拿到不同颜色。
+ * 色相分布拉开（红/橙/绿/青/蓝/紫/粉），并统一中高明度，
+ * 保证在浅色与深色两套表面色上都能看清。
+ */
+val vibrantPalette: List<Color> = listOf(
+    Color(0xFFE05252), // 红
+    Color(0xFFE08A3C), // 橙
+    Color(0xFFD9A21B), // 金
+    Color(0xFF4CA64C), // 绿
+    Color(0xFF2E9E8F), // 青
+    Color(0xFF3B82C4), // 蓝
+    Color(0xFF6B5BC4), // 紫
+    Color(0xFFB75BB0)  // 粉
+)
+
+/** 该主题是否为缤纷色彩（卡片图标需各色） */
+fun isVibrantTheme(themeName: String): Boolean =
+    themeName.equals(ColorTheme.VIBRANT.name, ignoreCase = true)
+
+/**
+ * 按索引取缤纷调色盘中的颜色，越界时循环。
+ *
+ * 用于让列表里相邻卡片拿到不同颜色；调用方传稳定的序号（如列表下标），
+ * 避免每次重组颜色乱跳。
+ */
+fun vibrantColorAt(index: Int): Color =
+    vibrantPalette[((index % vibrantPalette.size) + vibrantPalette.size) % vibrantPalette.size]
+
 /** 解析用户保存的自定义颜色（#RRGGBB 或 #AARRGGBB）；非法时回退 null */
 fun parseColorOrNull(value: String): Color? {
     // 不用 runCatching { ... return null }：lambda 内的 return 是非局部返回，
