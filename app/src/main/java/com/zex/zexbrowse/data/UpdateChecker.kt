@@ -64,10 +64,7 @@ class UpdateChecker(
         val githubOk = github != null
 
         val lemwoodVersion = LemwoodMirror.latestVersion(client)
-            ?.takeIf { isNewer(it) }
-        // 柠木没有最新版本接口，latestVersion 返回 null 时也可能是断网；
-        // 但它只作为第三个辅助源，不参与「是否可达」判定，避免误报。
-        val lemwood = lemwoodVersion?.let { lemwoodRelease(it) }
+        val lemwood = lemwoodVersion?.takeIf { isNewer(it) }?.let { lemwoodRelease(it) }
 
         val anySourceOk = mirrorOk || githubOk || lemwoodVersion != null
 

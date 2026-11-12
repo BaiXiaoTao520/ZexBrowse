@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -55,7 +56,7 @@ import com.zex.zexbrowse.R
  *
  * 普通主题下统一用 primaryContainer / onPrimaryContainer（保持原有观感）；
  * 缤纷色彩下按 [index] 从调色盘取不同颜色，让相邻卡片图标各不相同。
- * 图标色统一用白色：调色盘颜色都是中高明度，白图标在两套明暗主题下都清晰。
+ * 按背景亮度选择黑色或白色图标，取对比度更高的一种。
  *
  * @param vibrant 是否处于缤纷色彩主题（见 isVibrantTheme）
  * @param index 稳定序号（如列表下标），保证重组时颜色不乱跳
@@ -63,7 +64,9 @@ import com.zex.zexbrowse.R
 @Composable
 internal fun cardIconColors(vibrant: Boolean, index: Int): Pair<Color, Color> =
     if (vibrant) {
-        vibrantColorAt(index) to Color.White
+        val background = vibrantColorAt(index)
+        val foreground = if (background.luminance() > 0.179f) Color.Black else Color.White
+        background to foreground
     } else {
         MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
     }

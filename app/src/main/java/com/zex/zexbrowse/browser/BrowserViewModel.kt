@@ -214,13 +214,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         runCatching { lastColorScheme = runtime.settings.getPreferredColorScheme() }
-        // 内存压力：系统回收时释放非活跃标签的内核缓存（网页内核是内存大头）。
-        // 只动非活跃会话，当前正在看的页不动，否则会直接白屏。
+        // 内存压力：释放可重新捕获的后台标签预览图，保留会话及前进/后退历史。
         (application as? ZexBrowseApplication)?.onMemoryPressure = { level ->
             if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
                 val activeId = _selectedId.value
-                _tabs.value.forEach { tab ->
-                    if (tab.id != activeId) runCatching { tab.session.purgeHistory() }
+                _tabs.value = _tabs.value.map { tab ->
+                    if (tab.id != activeId) tab.copy(preview = null) else tab
                 }
             }
         }
@@ -1256,7 +1255,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         mediaPlayback.release()
         // 先解开内存压力回调：它在 Application 上持有引用，
         // 不置空会让已销毁的 ViewModel 一直被引用，且回调里再访问会话会出错
-        (application as? ZexBrowseApplication)?.let { app ->
+        forceDarkApplication().let { app ->
             if (app.onMemoryPressure != null) app.onMemoryPressure = null
         }
         runCatching { confirmedSearchHosts.clear() }

@@ -183,11 +183,13 @@ class ZexBrowseApplication : Application() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         runCatching { onMemoryPressure?.invoke(level) }
-        // 严重级别时再清应用缓存目录：这些全是可重建的临时文件
-        // （下载捕获的临时体、网页截图缓存等），不影响用户数据。
+        // 严重级别时清理可重建缓存；下载捕获目录由下载 Worker 使用后清理。
         // 不能动 filesDir 下的已下载文件——那是用户资产。
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-            runCatching { cacheDir?.listFiles()?.forEach { it.deleteRecursively() } }
+            runCatching {
+                cacheDir?.listFiles()?.filter { it.name != "download-capture" }
+                    ?.forEach { it.deleteRecursively() }
+            }
         }
     }
 
