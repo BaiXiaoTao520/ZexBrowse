@@ -315,8 +315,8 @@ private data class SettingsEntryItem(
     val accent: Boolean = false
 )
 
-/** 赞助与支持说明中引导用户查看赞赏码的地址（仓库 README 的赞助章节） */
-private const val SPONSOR_PAGE_URL = "https://github.com/BaiXiaoTao520/ZexBrowse/blob/main/README.md"
+/** 赞助页地址（爱发电）：点击直接进入赞助页面，不再引导用户去找图片 */
+private const val SPONSOR_PAGE_URL = "https://ifdian.net/a/ZexWanWu"
 
 /**
  * 无痕页专用主色。
@@ -6438,7 +6438,7 @@ private fun AboutScreen(
     }
 }
 
-/** 赞助与支持说明弹窗：自愿原则，引导前往仓库 README 查看赞赏码 */
+/** 赞助与支持说明弹窗：自愿原则，点击按钮直接前往爱发电赞助页 */
 @Composable
 private fun SponsorDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current

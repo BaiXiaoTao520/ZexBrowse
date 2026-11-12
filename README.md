@@ -92,4 +92,6 @@ ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack
 
 如果我的分享对你有一点点帮助，一杯奶茶钱就是对我最大的鼓励 ☕
 
-<img width="1213" height="1213" alt="Image" src="https://github.com/user-attachments/assets/51c3e27e-d97f-4229-8f6e-1a33c3256776" />
+**[点击前往赞助](https://ifdian.net/a/ZexWanWu)**
+
+通过爱发电支持本项目，可用于后续功能开发与维护，以及测试设备的开销。赞助完全出于自愿，不赞助也不影响任何功能的使用。
