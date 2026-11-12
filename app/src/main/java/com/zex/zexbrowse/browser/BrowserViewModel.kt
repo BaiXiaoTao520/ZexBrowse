@@ -214,6 +214,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         runCatching { lastColorScheme = runtime.settings.getPreferredColorScheme() }
+        // 内存压力：系统回收时释放非活跃标签的内核缓存（网页内核是内存大头）。
+        // 只动非活跃会话，当前正在看的页不动，否则会直接白屏。
+        (application as? ZexBrowseApplication)?.onMemoryPressure = { level ->
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                val activeId = _selectedId.value
+                _tabs.value.forEach { tab ->
+                    if (tab.id != activeId) runCatching { tab.session.purgeHistory() }
+                }
+            }
+        }
     }
 
     // Gecko's cookie policy is runtime-wide, so it also affects existing tabs.
@@ -1244,6 +1254,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         // 释放媒体资源（前台服务 / 音频焦点），避免应用退出后残留常驻通知或占着焦点
         mediaPlayback.release()
+        // 先解开内存压力回调：它在 Application 上持有引用，
+        // 不置空会让已销毁的 ViewModel 一直被引用，且回调里再访问会话会出错
+        (application as? ZexBrowseApplication)?.let { app ->
+            if (app.onMemoryPressure != null) app.onMemoryPressure = null
+        }
+        runCatching { confirmedSearchHosts.clear() }
         _tabs.value.forEach { it.session.close() }
         super.onCleared()
     }

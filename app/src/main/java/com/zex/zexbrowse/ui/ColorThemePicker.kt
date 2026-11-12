@@ -50,6 +50,24 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zex.zexbrowse.R
 
+/**
+ * 卡片图标底色与图标色。
+ *
+ * 普通主题下统一用 primaryContainer / onPrimaryContainer（保持原有观感）；
+ * 缤纷色彩下按 [index] 从调色盘取不同颜色，让相邻卡片图标各不相同。
+ * 图标色统一用白色：调色盘颜色都是中高明度，白图标在两套明暗主题下都清晰。
+ *
+ * @param vibrant 是否处于缤纷色彩主题（见 isVibrantTheme）
+ * @param index 稳定序号（如列表下标），保证重组时颜色不乱跳
+ */
+@Composable
+internal fun cardIconColors(vibrant: Boolean, index: Int): Pair<Color, Color> =
+    if (vibrant) {
+        vibrantColorAt(index) to Color.White
+    } else {
+        MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+    }
+
 /** 圆圈选中标记：外圈描边 + 选中时内圈填充 */
 @Composable
 internal fun ThemeRadioCircle(

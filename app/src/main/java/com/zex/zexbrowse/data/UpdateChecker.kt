@@ -31,6 +31,50 @@ class UpdateChecker(
 ) {
 
     /**
+     * 检查结果的三种情况。
+     *
+     * 与只返回 `ReleaseInfo?` 相比，关键是能区分「确实没有新版」与「网络不可达」：
+     * 前者是真实结论，应该告诉用户「已是最新」；
+     * 后者是检查失败，不能当成「已是最新」误导用户（这是本次修正的重点）。
+     */
+    data class CheckOutcome(
+        /** 有新版本时的信息，未检出为 null */
+        val release: ReleaseInfo?,
+        /** 是否至少有一个来源成功响应（用于区分「无更新」与「断网」） */
+        val anySourceOk: Boolean
+    ) {
+        /** 确实已是最新：检出无新版本，且至少一个源可用 */
+        val isUpToDate: Boolean get() = release == null && anySourceOk
+        /** 网络不可达：所有来源都失败，无法判断是否有更新 */
+        val isUnreachable: Boolean get() = release == null && !anySourceOk
+    }
+
+    /**
+     * 执行一次检查并报告来源可用性。
+     *
+     * 实现上与 [latest] 共用同一套聚合逻辑，但额外记录
+     * 「是否有任意来源真的返回了结果」——这是区分断网与无更新的唯一依据。
+     */
+    suspend fun check(): CheckOutcome {
+        val remote = MirrorChyan.latest(BuildConfig.VERSION_NAME)
+        val mirrorOk = remote.code == 0
+        val mirrorVersion = remote.version?.takeIf { remote.succeeded && isNewer(it) }
+
+        val github = githubLatest()
+        val githubOk = github != null
+
+        val lemwoodVersion = LemwoodMirror.latestVersion(client)
+            ?.takeIf { isNewer(it) }
+        // 柠木没有最新版本接口，latestVersion 返回 null 时也可能是断网；
+        // 但它只作为第三个辅助源，不参与「是否可达」判定，避免误报。
+        val lemwood = lemwoodVersion?.let { lemwoodRelease(it) }
+
+        val anySourceOk = mirrorOk || githubOk || lemwoodVersion != null
+
+        return CheckOutcome(release = aggregate(remote, mirrorVersion, github, lemwood), anySourceOk = anySourceOk)
+    }
+
+    /**
      * 检查是否有新版本。本地已是最新或所有来源都不可用时返回 null。
      *
      * 三个来源同时参与，各自贡献自己擅长的部分：
@@ -41,16 +85,19 @@ class UpdateChecker(
      * 三者并存而非短路：任一渠道出问题时另外两个还能用，
      * 弹窗里也会同时展示可用的下载入口，由用户自己选。
      */
-    suspend fun latest(): ReleaseInfo? {
-        val remote = MirrorChyan.latest(BuildConfig.VERSION_NAME)
-        val mirrorVersion = remote.version?.takeIf { remote.succeeded && isNewer(it) }
+    suspend fun latest(): ReleaseInfo? = check().release
 
-        val github = githubLatest()
-
-        val lemwoodVersion = LemwoodMirror.latestVersion(client)
-            ?.takeIf { isNewer(it) }
-        val lemwood = lemwoodVersion?.let { lemwoodRelease(it) }
-
+    /**
+     * 把各来源的结果合并成一个结论（取最高版本 + 优先用 GitHub 的说明与直链）。
+     *
+     * 拆出来供 [check] 调用：先把「是否有可达来源」判定完，再聚合版本信息。
+     */
+    private fun aggregate(
+        remote: MirrorChyan.Result,
+        mirrorVersion: String?,
+        github: ReleaseInfo?,
+        lemwood: ReleaseInfo?
+    ): ReleaseInfo? {
         // 三方取最高版本，避免任何单一来源滞后掩盖真实的新版本。
         // 不能用拼接数字的方式比大小（段数不同的版本会得出错误结果），
         // 直接复用 isNewer 的逐段比较。
@@ -80,7 +127,7 @@ class UpdateChecker(
             // 因此拿不到 GitHub 直链时留空，弹窗会把「下载」置灰，引导用户走浏览器通道。
             downloadUrl = github?.downloadUrl.orEmpty(),
             // 柠枺只要同步了该版本就标记，与最终选哪个来源无关
-            lemwoodAvailable = lemwoodVersion != null
+            lemwoodAvailable = lemwood != null
         )
     }
 

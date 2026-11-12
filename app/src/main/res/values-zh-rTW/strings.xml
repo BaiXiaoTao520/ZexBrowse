@@ -486,6 +486,8 @@
     <string name="color_theme_titanium">鈦影</string>
     <string name="color_theme_forest">靜林之晨</string>
     <string name="color_theme_custom">自訂</string>
+    <string name="color_theme_vibrant">繽紛色彩</string>
+    <string name="color_theme_vibrant_desc">每張卡片圖示使用不同顏色，首頁頂部為淡彩色氛圍底</string>
     <string name="settings_language_sub">介面語言與區域顯示</string>
     <string name="ad_block_title">廣告封鎖</string>
     <string name="ad_block_sub">封鎖網頁廣告與追蹤腳本</string>
@@ -595,10 +597,16 @@
     <string name="action_stop_loading">停止載入</string>
     <string name="ua_desktop_chrome">電腦版 Chrome</string>
     <string name="ua_desktop_firefox">電腦版 Firefox</string>
+    <string name="ua_section_desc">瀏覽器識別決定網站看到的裝置類型，影響頁面版式與部分功能</string>
+    <string name="ua_desc_geckoview">使用核心預設識別，相容性最好</string>
+    <string name="ua_desc_android_chrome">模擬 Android 版 Chrome 手機瀏覽器</string>
+    <string name="ua_desc_desktop_chrome">以電腦版 Chrome 存取，部分網站會顯示桌面版頁面</string>
+    <string name="ua_desc_desktop_firefox">以電腦版 Firefox 存取，相容性較桌面 Chrome 更好</string>
     <string name="sha256_value">SHA-256：%1$s</string>
     <string name="toast_link_copied">已複製下載連結</string>
     <string name="toast_download_started">已開始下載，可前往下載記錄或通知欄查看</string>
     <string name="update_check_failed">檢查更新失敗：%1$s</string>
+    <string name="update_network_failed">網路連線失敗，請檢查網路後重試</string>
     <string name="update_retry_later">請稍後再試</string>
     <string name="crash_dialog_title">上次執行時發生崩潰</string>
     <string name="crash_dialog_hint">以下為上次啟動時的崩潰資訊，請點選「複製」後回饋給開發者：</string>
