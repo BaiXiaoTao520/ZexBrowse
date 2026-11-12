@@ -480,7 +480,6 @@
     <string name="color_theme_forest">静林之晨</string>
     <string name="color_theme_custom">自定义</string>
     <string name="color_theme_vibrant">缤纷色彩</string>
-    <string name="color_theme_vibrant_desc">每张卡片图标使用不同颜色，首页顶部为淡彩色氛围底</string>
     <string name="settings_language_sub">界面语言与区域显示</string>
     <string name="ad_block_title">广告拦截</string>
     <string name="ad_block_sub">拦截网页广告与追踪脚本</string>

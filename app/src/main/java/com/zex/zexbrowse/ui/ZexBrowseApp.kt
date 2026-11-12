@@ -4448,6 +4448,8 @@ private fun CheckRow(title: String, checked: Boolean, changed: (Boolean) -> Unit
  *
  * - dynamic：走系统动态取色（Android 12+）；旧系统或无动态取色时退回默认配色
  * - 预设：用种子色推导明暗两套完整色调
+ * - vibrant（缤纷色彩）：**不改变全局配色**，白底黑字照旧。
+ *   它的效果只作用于首页顶部动态渐变与卡片图标，见 isVibrantTheme 的使用处。
  * - custom：用户自选的种子色，非法值回退默认自定义色
  */
 @Composable
@@ -4458,6 +4460,14 @@ private fun resolveColorScheme(settings: BrowserSettings, dark: Boolean, context
         val theme = ColorTheme.entries.firstOrNull { it.name.equals(settings.colorTheme, ignoreCase = true) }
             ?: ColorTheme.DYNAMIC
         if (theme == ColorTheme.DYNAMIC) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+            } else {
+                if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+            }
+        } else if (theme == ColorTheme.VIBRANT) {
+            // 缤纷色彩只影响首页渐变与卡片图标，不参与全局配色：
+            // 这里用系统动态取色/默认配色，避免把整个应用染成蓝紫
             if (android.os.Build.VERSION.SDK_INT >= 31) {
                 if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
             } else {

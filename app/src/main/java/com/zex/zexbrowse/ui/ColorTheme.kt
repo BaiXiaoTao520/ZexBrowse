@@ -203,10 +203,7 @@ val presetSeeds: Map<ColorTheme, Color> = mapOf(
     ColorTheme.GLACIER to Color(0xFF3E8FA8),
     ColorTheme.DUSK to Color(0xFF8A6242),
     ColorTheme.TITANIUM to Color(0xFF5F6B73),
-    ColorTheme.FOREST to Color(0xFF3D6B4F),
-    // 缤纷色彩：种子取中性蓝紫，保证控件/文字色正常；
-    // 丰富效果靠卡片图标的独立调色盘（见 vibrantPalette）与首页淡彩氛围底
-    ColorTheme.VIBRANT to Color(0xFF5B6BC4)
+    ColorTheme.FOREST to Color(0xFF3D6B4F)
 )
 
 /** 预设的中性色基准，让表面色更贴合预设气质（缺省时用种子色） */
@@ -217,10 +214,7 @@ val presetNeutrals: Map<ColorTheme, Color> = mapOf(
     ColorTheme.GLACIER to Color(0xFF6A8090),
     ColorTheme.DUSK to Color(0xFF7A7060),
     ColorTheme.TITANIUM to Color(0xFF707070),
-    ColorTheme.FOREST to Color(0xFF6A7A6E),
-    // 缤纷色彩的中性基准取中性灰：表面色不偏某个单一色相，
-    // 否则会与“多种颜色共存”的意图打架
-    ColorTheme.VIBRANT to Color(0xFF73737A)
+    ColorTheme.FOREST to Color(0xFF6A7A6E)
 )
 
 /** 自定义主题的默认种子色（取 Material 默认蓝紫，用户可再调整） */

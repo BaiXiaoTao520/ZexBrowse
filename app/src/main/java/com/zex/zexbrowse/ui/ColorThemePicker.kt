@@ -154,9 +154,12 @@ internal fun ColorThemeGrid(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items.forEach { theme ->
+            // 缤纷色彩不参与全局配色，仅在首页渐变与卡片图标上生效。
+            // 它的选中圈用调色盘首色作代表，与其它单色主题区分开。
             val swatch = when (theme) {
                 ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
                 ColorTheme.CUSTOM -> customSeed
+                ColorTheme.VIBRANT -> vibrantPalette.first()
                 else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
             }
             ColorThemeOption(

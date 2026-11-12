@@ -487,7 +487,6 @@
     <string name="color_theme_forest">Quiet Forest Morning</string>
     <string name="color_theme_custom">Custom</string>
     <string name="color_theme_vibrant">Vibrant</string>
-    <string name="color_theme_vibrant_desc">Each card icon uses a different color, with a soft multi-color backdrop on the home header</string>
     <string name="settings_language_sub">App language and regional display</string>
     <string name="ad_block_title">Ad blocking</string>
     <string name="ad_block_sub">Block ads and tracking scripts on web pages</string>
