@@ -5797,7 +5797,6 @@ private fun ChoiceItem(title: String, selected: Boolean, onClick: () -> Unit) {
  * 选定后只写入存储，不重建当前界面：语言在下次启动时由 attachBaseContext 读取生效。
  * 这与系统级语言设置的直觉一致，也避免重建时丢失当前浏览状态。
  */
-@Composable
 /**
  * 语言选择：从底部向上弹出的底部面板。
  *
@@ -5839,7 +5838,7 @@ private fun LanguageSheet(
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
@@ -6757,10 +6756,8 @@ private fun UpdateIntroDialog(
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
         Column(
-            // 不再给整块加 verticalScroll：日志块自己已经有内嵌滚动，
-            // 嵌套两层滚动会抢手势，表现为「滑不动」或「一滑就到底」。
-            // 面板本身高度由 ModalBottomSheet 限制，超出时由日志块内部消化
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            // 整块可滚动，确保小屏幕上渠道和按钮仍可访问；日志保留独立滚动。
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
