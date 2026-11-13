@@ -5814,6 +5814,14 @@ private fun LanguageSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 先播收回动画再回调上关：否则面板会瞬间从组合中消失，看不到收起过程
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
     val options = listOf(
         Triple(AppLocale.SYSTEM, stringResource(R.string.settings_language_follow_system), Icons.Rounded.Language),
         Triple(AppLocale.ZH_CN, stringResource(R.string.settings_language_zh_cn), Icons.Rounded.Language),
@@ -5845,7 +5853,7 @@ private fun LanguageSheet(
                     label = label,
                     icon = icon,
                     selected = language == value,
-                    onClick = { setLanguage(value); onDismiss() }
+                    onClick = { setLanguage(value); animateDismiss() }
                 )
             }
             Spacer(Modifier.height(4.dp))
@@ -6728,6 +6736,16 @@ private fun UpdateIntroDialog(
     val context = LocalContext.current
     val effectiveUrl = release.downloadUrl
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 收回时先播完隐藏动画，再从组合中移除。
+    // 若直接把状态置 null（上层 onDismiss），ModalBottomSheet 会被立刻从组合中
+    // 摘下，收回动画来不及播放，看起来就是「啪一下消失」。
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
     // 改为底部面板：与语言选择保持一致，圆角只在顶部两角、带拖拽小横条、
     // 高度按内容自适应（更新日志限高、内部可滚动），不再弹一个满屏对话框。
     ModalBottomSheet(
@@ -6822,7 +6840,7 @@ private fun UpdateIntroDialog(
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.s069))
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = animateDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.s071))
             }
         }
