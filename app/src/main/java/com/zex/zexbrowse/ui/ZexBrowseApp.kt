@@ -950,6 +950,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     var startupUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
     // 赞助与支持：从「关于」页的卡片入口打开说明弹窗
     var sponsorInfo by remember { mutableStateOf(false) }
+    // 语言选择：直接在当前页弹出底部面板，不再先跳一个独立页面
+    var showLanguageSheet by remember { mutableStateOf(false) }
     // 首次启动引导：提醒下载目录为内部存储（仅首次，读取已持久化的真实值，避免默认初始值误触发）
     var showFirstRunStorageHint by remember { mutableStateOf(false) }
     // 首启引导第二弹：推荐将 ZexBrowse 设为默认浏览器（在外部存储提示之后，仅首启展示一次）
@@ -1395,6 +1397,22 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
             }
             startupUpdate?.let { release -> UpdateDialog(release = release, onDismiss = { startupUpdate = null }) }
             if (sponsorInfo) SponsorDialog(onDismiss = { sponsorInfo = false })
+            // 语言选择面板：挂在当前页之上，点入口就直接弹出，不经过页面切换
+            if (showLanguageSheet) {
+                LanguageSheet(
+                    language = settings.language,
+                    setLanguage = { tag ->
+                        // 只写 DataStore，不重建 Activity：语言在下次启动时由 attachBaseContext 读取生效。
+                        // 同步镜像一份 SharedPreferences，供下次启动同步读到（DataStore 读取是异步的）。
+                        if (tag != settings.language) {
+                            AppLocale.remember(context, tag)
+                            scope.launch { settingsStore.language(tag) }
+                            Toast.makeText(context, context.getString(R.string.toast_language_restart), Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    onDismiss = { showLanguageSheet = false }
+                )
+            }
             if (showFirstRunStorageHint && startupUpdate == null) {
                 AlertDialog(
                     onDismissRequest = { showFirstRunStorageHint = false; scope.launch { settingsStore.storageHintShown(true) } },
@@ -1565,7 +1583,7 @@ private fun PageContent(
             onHistory = { navigate(Page.HISTORY) },
             onBookmarks = { navigate(Page.BOOKMARKS) },
             onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
-            onLanguage = { navigate(Page.LANGUAGE) },
+            onLanguage = { showLanguageSheet = true },
             onSiteSettings = { navigate(Page.SITE_SETTINGS) },
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
             onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
@@ -1590,19 +1608,7 @@ private fun PageContent(
             onDownloadDirectory = { navigate(Page.DOWNLOAD_DIRECTORY) },
             onBack = goBack
         )
-        Page.LANGUAGE -> LanguageScreen(
-            language = settings.language,
-            setLanguage = { tag ->
-                // 只写 DataStore，不重建 Activity：语言在下次启动时由 attachBaseContext 读取生效。
-                // 同步镜像一份 SharedPreferences，供下次启动同步读到（DataStore 读取是异步的）。
-                if (tag != settings.language) {
-                    AppLocale.remember(context, tag)
-                    scope.launch { settingsStore.language(tag) }
-                    Toast.makeText(context, context.getString(R.string.toast_language_restart), Toast.LENGTH_LONG).show()
-                }
-            },
-            onBack = goBack
-        )
+        Page.LANGUAGE -> { /* 语言已改为在当前页直接弹底部面板，此页不再可达 */ }
         Page.ADVANCED_SETTINGS -> AdvancedSettingsScreen(
             onDebug = { navigate(Page.DEBUG) },
             onBack = goBack
@@ -5899,12 +5905,6 @@ private fun LanguageCard(
             if (selected) Icon(Icons.Default.Check, null, modifier = Modifier.size(20.dp))
         }
     }
-}
-
-/** 保留旧签名以兼容调用点：直接以底部弹窗呈现 */
-@Composable
-private fun LanguageScreen(language: String, setLanguage: (String) -> Unit, onBack: () -> Unit) {
-    LanguageSheet(language = language, setLanguage = setLanguage, onDismiss = onBack)
 }
 
 /**
