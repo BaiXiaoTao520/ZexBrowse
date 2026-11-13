@@ -80,13 +80,18 @@ internal fun cardIconColors(vibrant: Boolean, index: Int): Pair<Color, Color> =
         MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
     }
 
-/** 圆圈选中标记：外圈描边 + 选中时内圈填充 */
+/** 圆圈选中标记：外圈描边 + 选中时内圈填充。
+ *
+ * [brush] 不为空时内圈用渐变绘制（缤纷色彩用它表现「多色」），
+ * 否则用 [swatch] 单色填充。
+ */
 @Composable
 internal fun ThemeRadioCircle(
     selected: Boolean,
     swatch: Color,
     onClick: () -> Unit,
-    diameter: Dp = 18.dp
+    diameter: Dp = 18.dp,
+    brush: Brush? = null
 ) {
     Box(
         Modifier
@@ -105,7 +110,18 @@ internal fun ThemeRadioCircle(
                 Modifier
                     .size(diameter * 0.55f)
                     .clip(CircleShape)
-                    .background(swatch)
+                    .then(
+                        if (brush != null) Modifier.background(brush) else Modifier.background(swatch)
+                    )
+            )
+        } else if (brush != null) {
+            // 未选中时也给缤纷色彩一个小多色点：否则它看起来和其它单色主题没区别，
+            // 用户无法从外观上判断这一项是「多色」主题
+            Box(
+                Modifier
+                    .size(diameter * 0.55f)
+                    .clip(CircleShape)
+                    .background(brush)
             )
         }
     }
@@ -118,7 +134,7 @@ internal fun ThemeRadioCircle(
  * 相比之前「圆圈上、文字下」的四列网格占用高度更低、更整齐。
  */
 @Composable
-internal fun ColorThemeOption(label: String, selected: Boolean, swatch: Color, onClick: () -> Unit) {
+internal fun ColorThemeOption(label: String, selected: Boolean, swatch: Color, onClick: () -> Unit, brush: Brush? = null) {
     val bg = if (selected) {
         MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     } else {
@@ -132,7 +148,7 @@ internal fun ColorThemeOption(label: String, selected: Boolean, swatch: Color, o
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ThemeRadioCircle(selected = selected, swatch = swatch, onClick = onClick)
+        ThemeRadioCircle(selected = selected, swatch = swatch, onClick = onClick, brush = brush)
         Spacer(Modifier.width(6.dp))
         Text(
             text = label,
@@ -167,17 +183,21 @@ internal fun ColorThemeGrid(
     ) {
         items.forEach { theme ->
             // 缤纷色彩不参与全局配色，仅在首页渐变与卡片图标上生效。
-            // 它的选中圈用调色盘首色作代表，与其它单色主题区分开。
+            // 它的色块用调色盘多色渐变，让用户一眼看出这一项是「多色」主题
             val swatch = when (theme) {
                 ColorTheme.DYNAMIC -> MaterialTheme.colorScheme.primary
                 ColorTheme.CUSTOM -> customSeed
                 ColorTheme.VIBRANT -> vibrantPalette.first()
                 else -> presetSeeds[theme] ?: MaterialTheme.colorScheme.primary
             }
+            val vibrantBrush = if (theme == ColorTheme.VIBRANT) {
+                Brush.sweepGradient(vibrantPalette)
+            } else null
             ColorThemeOption(
                 label = colorThemeLabel(theme),
                 selected = currentTheme == theme,
                 swatch = swatch,
+                brush = vibrantBrush,
                 onClick = { if (theme == ColorTheme.CUSTOM) onEditCustom() else onPick(theme) }
             )
         }
