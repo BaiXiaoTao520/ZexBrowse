@@ -52,6 +52,15 @@ import androidx.compose.ui.unit.dp
 import com.zex.zexbrowse.R
 
 /**
+ * 当前是否处于「缤纷色彩」主题。
+ *
+ * 用 CompositionLocal 而不是层层传参：需要各色图标的卡片散在不同页面
+ * （首页、应用推荐、小工具等），逐个加参数会污染大量签名；
+ * 而它只是一个只读开关，不存在回写，适合往下隐式提供。
+ */
+internal val LocalVibrantTheme = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+/**
  * 卡片图标底色与图标色。
  *
  * 普通主题下统一用 primaryContainer / onPrimaryContainer（保持原有观感）；

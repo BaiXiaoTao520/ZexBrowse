@@ -118,6 +118,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.GppMaybe
@@ -139,6 +140,10 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -169,6 +174,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -1254,6 +1260,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     }
 
     MaterialExpressiveTheme(colorScheme = colorScheme) {
+        CompositionLocalProvider(LocalVibrantTheme provides isVibrantTheme(settings.colorTheme)) {
         Surface {
             Box(Modifier.fillMaxSize()) {
                 // 下层：手势进行中预先渲染目标页，让滑走时能看到真实的目标页面而不是空白。
@@ -1446,6 +1453,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                     dismissButton = { TextButton(onClick = { finishMic(false, true) }) { Text(stringResource(R.string.s048)) } }
                 )
             }
+        }
         }
     }
 }
@@ -1934,14 +1942,24 @@ private fun HomeScreen(settings: BrowserSettings, searchHistory: List<String>, o
         val midTone: Color
         val lowTone: Color
         if (vibrant) {
-            // 用相位循环取调色盘相邻三色，颜色不断轮换；
-            // 都叠上低透明度，保证是「淡彩」而不是霓虹
+            // 相位均匀映射到调色盘：用小数位置在两色间 lerp，再做环绕混合。
+            // 不能用 (phase * size).toInt() 直接取整——那会把连续相位变成离散下标，
+            // 颜色只能一格格跳变，看起来就是「一卡一顿」。
             val pal = vibrantPalette
-            val idx = (gradientPhase * pal.size).toInt().coerceIn(0, pal.size - 1)
-            topTone = pal[idx % pal.size]
-            midTone = pal[(idx + 2) % pal.size]
-            lowTone = pal[(idx + 4) % pal.size]
+            val size = pal.size
+            val pos = gradientPhase * size
+            // 取相邻两色插值，保证色相连续变化
+            fun paletteAt(offset: Float): Color {
+                val p = (pos + offset) % size
+                val i = p.toInt().coerceIn(0, size - 1)
+                val frac = p - i
+                return androidx.compose.ui.graphics.lerp(pal[i], pal[(i + 1) % size], frac)
+            }
+            topTone = paletteAt(0f)
+            midTone = paletteAt(size / 3f)
+            lowTone = paletteAt(size * 2f / 3f)
         } else {
+            // 非缤纷主题：两个端色随相位双向 interpolation，也是连续的，不会跳帧
             topTone = androidx.compose.ui.graphics.lerp(primaryTone, tertiaryTone, gradientPhase * 0.5f)
             midTone = androidx.compose.ui.graphics.lerp(tertiaryTone, secondaryTone, gradientPhase * 0.5f)
             lowTone = androidx.compose.ui.graphics.lerp(secondaryTone, primaryTone, gradientPhase)
@@ -2205,12 +2223,14 @@ private fun AppRecommendationsScreen(browserViewModel: BrowserViewModel, onBack:
                             onToggle = { noticeExpanded = !noticeExpanded }
                         )
                     }
-                    items(recommendCategoryMeta) { meta ->
+                    items(recommendCategoryMeta.size) { index ->
+                        val meta = recommendCategoryMeta[index]
                         val count = countInCategory(meta.category)
                         if (count > 0) {
                             RecommendationCategoryCard(
                                 meta = meta,
                                 count = count,
+                                iconIndex = index,
                                 onClick = { openCategory = meta.category }
                             )
                         }
@@ -2269,8 +2289,9 @@ private fun RecommendCategoryScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(apps) { app ->
-                    RecommendationCard(app = app) { detail = app }
+                items(apps.size) { index ->
+                    val app = apps[index]
+                    RecommendationCard(app = app, iconIndex = index) { detail = app }
                 }
             }
         }
@@ -2480,8 +2501,11 @@ private val KNOWN_BROWSERS = setOf(
 private fun RecommendationCategoryCard(
     meta: RecommendCategoryMeta,
     count: Int,
+    iconIndex: Int = 0,
     onClick: () -> Unit
 ) {
+    // 缤纷色彩下每个分类拿不同颜色
+    val (catBg, catFg) = cardIconColors(LocalVibrantTheme.current, iconIndex)
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -2493,11 +2517,11 @@ private fun RecommendationCategoryCard(
         ) {
             Surface(
                 modifier = Modifier.size(44.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                color = catBg,
                 shape = MaterialTheme.shapes.medium
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(meta.icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Icon(meta.icon, null, tint = catFg)
                 }
             }
             Spacer(Modifier.width(14.dp))
@@ -2631,8 +2655,10 @@ private fun RecommendationNetworkNotice() {
  * 因此水波纹与卡片圆角完全一致；同时 [Card] 默认 clip 内容，图标方块也不会溢出。
  */
 @Composable
-private fun RecommendationCard(app: RecommendedApp, onClick: () -> Unit) {
+private fun RecommendationCard(app: RecommendedApp, iconIndex: Int = 0, onClick: () -> Unit) {
     val shape = MaterialTheme.shapes.large
+    // 缤纷色彩下每个推荐条目拿不同颜色
+    val (appBg, appFg) = cardIconColors(LocalVibrantTheme.current, iconIndex)
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = shape) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -2641,10 +2667,10 @@ private fun RecommendationCard(app: RecommendedApp, onClick: () -> Unit) {
             // 图标小正方形背景
             Surface(
                 modifier = Modifier.size(44.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                color = appBg,
                 shape = MaterialTheme.shapes.medium
             ) {
-                Box(contentAlignment = Alignment.Center) { Icon(app.icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+                Box(contentAlignment = Alignment.Center) { Icon(app.icon, null, tint = appFg) }
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -3708,8 +3734,13 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     WavyProgressBar(
                         progress = selectedTab.progress / 100f,
                         modifier = Modifier.fillMaxWidth(),
-                        // 无痕时进度条也用专属紫，与顶底栏保持一致
-                        color = if (incognitoActive) IncognitoAccentColor else null
+                        // 无痕时进度条用专属紫；缤纷色彩下按进度位置轮换调色盘颜色，
+                        // 让进度条本身也能体现出「多彩」
+                        color = when {
+                            incognitoActive -> IncognitoAccentColor
+                            LocalVibrantTheme.current -> vibrantColorAt((selectedTab.progress / 12).toInt())
+                            else -> null
+                        }
                     )
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -5767,27 +5798,114 @@ private fun ChoiceItem(title: String, selected: Boolean, onClick: () -> Unit) {
  * 这与系统级语言设置的直觉一致，也避免重建时丢失当前浏览状态。
  */
 @Composable
-private fun LanguageScreen(language: String, setLanguage: (String) -> Unit, onBack: () -> Unit) {
-    val options = listOf(
-        AppLocale.SYSTEM to stringResource(R.string.settings_language_follow_system),
-        AppLocale.ZH_CN to stringResource(R.string.settings_language_zh_cn),
-        AppLocale.ZH_TW to stringResource(R.string.settings_language_zh_tw),
-        AppLocale.EN to stringResource(R.string.settings_language_en)
-    )
-    SelectionScreen(stringResource(R.string.s173), onBack) {
-        options.forEach { (value, label) ->
-            item { ChoiceItem(label, language == value) { setLanguage(value) } }
+/**
+ * 语言选择：从底部向上弹出的底部面板。
+ *
+ * 之前是整页跳转，选择一次要点进再退出，路径长。
+ * 改成底部弹窗后：面板按内容自适应高度（不占满屏）、顶部有可拖拽的小横条、
+ * 上两角为圆角，点遮罩可收起——与系统及主流 App 的选择器一致。
+ * 选项本身也改成卡片 + 图标，选中态有勾。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LanguageSheet(
+    language: String,
+    setLanguage: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 先播收回动画再回调上关：否则面板会瞬间从组合中消失，看不到收起过程
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
         }
-        item { Spacer(Modifier.height(8.dp)) }
-        item {
+    }
+    val options = listOf(
+        Triple(AppLocale.SYSTEM, stringResource(R.string.settings_language_follow_system), Icons.Rounded.Language),
+        Triple(AppLocale.ZH_CN, stringResource(R.string.settings_language_zh_cn), Icons.Rounded.Language),
+        Triple(AppLocale.ZH_TW, stringResource(R.string.settings_language_zh_tw), Icons.Rounded.Language),
+        Triple(AppLocale.EN, stringResource(R.string.settings_language_en), Icons.Rounded.Language)
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        // 只圆角上两角：面板从底边升起、底边贴屏幕，底部不需要圆角
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        // 拖拽手柄（小横条）：告诉用户面板可以下拉关闭
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                stringResource(R.string.s173),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            )
+            options.forEach { (value, label, icon) ->
+                LanguageCard(
+                    label = label,
+                    icon = icon,
+                    selected = language == value,
+                    onClick = { setLanguage(value); animateDismiss() }
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
                 stringResource(R.string.s390),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.padding(start = 4.dp)
             )
         }
     }
+}
+
+/** 语言选项卡片：图标 + 名称 + 选中勾 */
+@Composable
+private fun LanguageCard(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val container = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh
+    val content = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) Icon(Icons.Default.Check, null, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** 保留旧签名以兼容调用点：直接以底部弹窗呈现 */
+@Composable
+private fun LanguageScreen(language: String, setLanguage: (String) -> Unit, onBack: () -> Unit) {
+    LanguageSheet(language = language, setLanguage = setLanguage, onDismiss = onBack)
 }
 
 /**
@@ -6607,7 +6725,8 @@ private fun ChannelCard(
     }
 }
 
-/** 发现新版本的简介窗口：只负责展示更新说明并提供下载入口 */
+/** 发现新版本的简介窗口：底部面板形式，展示更新说明并提供下载入口 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UpdateIntroDialog(
     release: ReleaseInfo,
@@ -6616,76 +6735,123 @@ private fun UpdateIntroDialog(
 ) {
     val context = LocalContext.current
     val effectiveUrl = release.downloadUrl
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 收回时先播完隐藏动画，再从组合中移除。
+    // 若直接把状态置 null（上层 onDismiss），ModalBottomSheet 会被立刻从组合中
+    // 摘下，收回动画来不及播放，看起来就是「啪一下消失」。
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
+    // 改为底部面板：与语言选择保持一致，四角圆角、带拖拽小横条、
+    // 高度按内容自适应（更新日志限高、内部可滚动），不再弹一个满屏对话框。
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
+        sheetState = sheetState,
+        // 只圆角上两角，底边贴屏幕不加圆角
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            // 不再给整块加 verticalScroll：日志块自己已经有内嵌滚动，
+            // 嵌套两层滚动会抢手势，表现为「滑不动」或「一滑就到底」。
+            // 面板本身高度由 ModalBottomSheet 限制，超出时由日志块内部消化
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
+            // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.SystemUpdate, stringResource(R.string.s425), tint = MaterialTheme.colorScheme.primary)
+                Icon(
+                    Icons.Rounded.RocketLaunch,
+                    null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.s426, release.version))
+                Text(
+                    stringResource(R.string.s426, release.version),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(
+
+            // 更新日志：单独的圆角方块，内部可滑动，长日志也不会把面板撑满
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Text(
+                    release.notes.ifBlank { stringResource(R.string.s427) },
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 240.dp)
+                        // 固定上限 200dp：日志再长也只占这个高度，内部自行滚动，
+                        // 不会把下面的渠道卡片与按钮挤出面板
+                        .heightIn(max = 200.dp)
                         .verticalScroll(rememberScrollState())
-                ) {
-                    Text(release.notes.ifBlank { stringResource(R.string.s427) })
-                }
-                // 无任何可下载地址且无镜像渠道时才提示错误
-                if (effectiveUrl.isBlank() && !release.lemwoodAvailable && !MirrorChyan.isAvailable) {
-                    Text(stringResource(R.string.s428), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-                // 镜像站高速通道：站点已同步该版本时才渲染，
-                // 未配置的公开构建不会出现空壳入口。
-                if (LemwoodMirror.isAvailable && release.lemwoodAvailable) {
-                    LemwoodChannelCard(
-                        onClick = {
-                            openMirrorDownload(context, LemwoodMirror.apkDownloadUrl(release.version))
-                            onDismiss()
-                        }
-                    )
-                }
-                // Mirror酱高速下载：不支持应用内下载，点击直接跳转项目页，
-                // 由网页侧完成分发。与柠枺卡片并列展示，两者互不影响。
-                // rid 未注入时整体不展示：否则会跳到 ?rid= 空参数页，等于死链
-                if (MirrorChyan.isAvailable) {
-                    MirrorChyanChannelCard(
-                        onClick = {
-                            openInBrowser(context, MirrorChyan.projectUrl())
-                            onDismiss()
-                        }
-                    )
-                }
-                // GitHub 直链浏览器下载：与上面的应用内下载同一源，
-                // 只是把系统下载管理器让给浏览器，适合想手动指定保存位置或使用下载工具的用户
-                if (effectiveUrl.isNotBlank()) {
-                    BrowserDownloadChannelCard(
-                        onClick = {
-                            openInBrowser(context, effectiveUrl)
-                            onDismiss()
-                        }
-                    )
-                }
+                        .padding(14.dp)
+                )
             }
-        },
-        confirmButton = {
-            // 应用内下载需要可直接请求的直链：只有 GitHub assets 满足；
-            // Mirror酱 与 柠枺 都要经浏览器完成，不能作为应用内下载地址
+
+            // 无任何可下载地址且无镜像渠道时才提示错误
+            if (effectiveUrl.isBlank() && !release.lemwoodAvailable && !MirrorChyan.isAvailable) {
+                Text(stringResource(R.string.s428), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            // 镜像站高速通道：站点已同步该版本时才渲染，
+            // 未配置的公开构建不会出现空壳入口。
+            if (LemwoodMirror.isAvailable && release.lemwoodAvailable) {
+                LemwoodChannelCard(
+                    onClick = {
+                        openMirrorDownload(context, LemwoodMirror.apkDownloadUrl(release.version))
+                        onDismiss()
+                    }
+                )
+            }
+            // Mirror酱高速下载：不支持应用内下载，点击直接跳转项目页，
+            // 由网页侧完成分发。与柠枺卡片并列展示，两者互不影响。
+            // rid 未注入时整体不展示：否则会跳到 ?rid= 空参数页，等于死链
+            if (MirrorChyan.isAvailable) {
+                MirrorChyanChannelCard(
+                    onClick = {
+                        openInBrowser(context, MirrorChyan.projectUrl())
+                        onDismiss()
+                    }
+                )
+            }
+            // GitHub 直链浏览器下载：与上面的应用内下载同一源，
+            // 只是把系统下载管理器让给浏览器，适合想手动指定保存位置或使用下载工具的用户
+            if (effectiveUrl.isNotBlank()) {
+                BrowserDownloadChannelCard(
+                    onClick = {
+                        openInBrowser(context, effectiveUrl)
+                        onDismiss()
+                    }
+                )
+            }
+
+            // 按钮顺序：主操作（下载）在上、取消在下。
+            // 更符合「先看到主要动作、再决定是否退出」的阅读顺序。
+            Spacer(Modifier.height(4.dp))
             Button(
                 enabled = effectiveUrl.isNotBlank(),
-                onClick = onStartDownload
+                onClick = onStartDownload,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Download, null)
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.s069))
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
-    )
+            TextButton(onClick = animateDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.s071))
+            }
+        }
+    }
 }
 
 /**
