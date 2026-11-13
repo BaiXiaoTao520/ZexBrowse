@@ -5832,9 +5832,8 @@ private fun LanguageSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        // 四角都从圆角：部分机型/手势导航下，面板底部不会完全贴屏幕边缘，
-        // 只给上面两角会在底部露出直角，看起来像被切了一刀
-        shape = RoundedCornerShape(28.dp),
+        // 只圆角上两角：面板从底边升起、底边贴屏幕，底部不需要圆角
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         // 拖拽手柄（小横条）：告诉用户面板可以下拉关闭
         dragHandle = { BottomSheetDefaults.DragHandle() }
@@ -6752,7 +6751,8 @@ private fun UpdateIntroDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(28.dp),
+        // 只圆角上两角，底边贴屏幕不加圆角
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
