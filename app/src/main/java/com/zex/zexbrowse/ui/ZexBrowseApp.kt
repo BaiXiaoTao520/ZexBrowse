@@ -1287,7 +1287,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 resetToHome = { navForward = false; navStack = listOf(Page.HOME) },
                                 resetToHomeImmediately = { browserExitReset++; navForward = false; navStack = listOf(Page.HOME) },
                                 goBack = goBack,
-                                onSponsor = { sponsorInfo = true }
+                                onSponsor = { sponsorInfo = true },
+                                onLanguage = { showLanguageSheet = true }
                             )
                         } else {
                             // 目标为浏览器页：不能重复创建 GeckoView，用主题背景色占位，
@@ -1361,7 +1362,8 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
                                 resetToHome = { navForward = false; navStack = listOf(Page.HOME) },
                                 resetToHomeImmediately = { browserExitReset++; navForward = false; navStack = listOf(Page.HOME) },
                                 goBack = goBack,
-                                onSponsor = { sponsorInfo = true }
+                                onSponsor = { sponsorInfo = true },
+                                onLanguage = { showLanguageSheet = true }
                             )
                         }
                     }
@@ -1501,7 +1503,8 @@ private fun PageContent(
     resetToHome: () -> Unit,
     resetToHomeImmediately: () -> Unit,
     goBack: () -> Unit,
-    onSponsor: () -> Unit
+    onSponsor: () -> Unit,
+    onLanguage: () -> Unit
 ) {
     when (destination) {
         Page.HOME -> HomeScreen(
@@ -1583,7 +1586,7 @@ private fun PageContent(
             onHistory = { navigate(Page.HISTORY) },
             onBookmarks = { navigate(Page.BOOKMARKS) },
             onGeneralSettings = { navigate(Page.GENERAL_SETTINGS) },
-            onLanguage = { showLanguageSheet = true },
+            onLanguage = onLanguage,
             onSiteSettings = { navigate(Page.SITE_SETTINGS) },
             onCookieSettings = { navigate(Page.COOKIE_SETTINGS) },
             onHttpsOnly = { navigate(Page.HTTPS_ONLY) },
