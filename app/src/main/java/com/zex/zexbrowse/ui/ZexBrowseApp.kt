@@ -5832,8 +5832,9 @@ private fun LanguageSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        // 圆角只作用于顶部两角：面板从底部升起，底边贴屏幕边缘不需要圆角
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        // 四角都从圆角：部分机型/手势导航下，面板底部不会完全贴屏幕边缘，
+        // 只给上面两角会在底部露出直角，看起来像被切了一刀
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         // 拖拽手柄（小横条）：告诉用户面板可以下拉关闭
         dragHandle = { BottomSheetDefaults.DragHandle() }
@@ -6746,19 +6747,23 @@ private fun UpdateIntroDialog(
             onDismiss()
         }
     }
-    // 改为底部面板：与语言选择保持一致，圆角只在顶部两角、带拖拽小横条、
+    // 改为底部面板：与语言选择保持一致，四角圆角、带拖拽小横条、
     // 高度按内容自适应（更新日志限高、内部可滚动），不再弹一个满屏对话框。
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
         Column(
+            // 不再给整块加 verticalScroll：日志块自己已经有内嵌滚动，
+            // 嵌套两层滚动会抢手势，表现为「滑不动」或「一滑就到底」。
+            // 面板本身高度由 ModalBottomSheet 限制，超出时由日志块内部消化
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -6786,7 +6791,9 @@ private fun UpdateIntroDialog(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 220.dp)
+                        // 固定上限 200dp：日志再长也只占这个高度，内部自行滚动，
+                        // 不会把下面的渠道卡片与按钮挤出面板
+                        .heightIn(max = 200.dp)
                         .verticalScroll(rememberScrollState())
                         .padding(14.dp)
                 )
