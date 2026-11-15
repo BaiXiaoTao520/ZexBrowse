@@ -73,6 +73,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -194,6 +195,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -6967,7 +6969,7 @@ private fun UpdateSettingsSheet(
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
@@ -6984,7 +6986,11 @@ private fun UpdateSettingsSheet(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    Modifier.fillMaxWidth().toggleable(
+                        value = autoCheck,
+                        role = Role.Switch,
+                        onValueChange = onAutoCheckChange
+                    ).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
@@ -7006,7 +7012,7 @@ private fun UpdateSettingsSheet(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(checked = autoCheck, onCheckedChange = onAutoCheckChange)
+                    Switch(checked = autoCheck, onCheckedChange = null)
                 }
             }
             // 手动检查按钮：检查中禁用并改文案，避免重复请求
