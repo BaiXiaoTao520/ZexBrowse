@@ -3175,20 +3175,27 @@ private fun AddressInput(
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                shape = MaterialTheme.shapes.large
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
-                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                // 每条建议独立成卡片、之间留小间距：
+                // 原先所有行挤在同一张卡里只靠内边距分隔，点击区域边界看不清；
+                // 改为卡片列表后每一项的可点区域一目了然
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     val items = when {
                         showSuggestions -> suggestions
                         showHistory || fallbackHistory -> matchedHistory
                         else -> emptyList()
                     }
                     items.forEach { keyword ->
-                        // 历史项可长按式的删除由末尾图标提供，联想项直接点击即搜索
                         Row(
                             Modifier.fillMaxWidth()
+                                .clip(MaterialTheme.shapes.medium)
                                 .clickable { onValueChange(keyword); onSubmit() }
-                                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                                .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -3198,7 +3205,12 @@ private fun AddressInput(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(Modifier.width(12.dp))
-                            Text(keyword, maxLines = 1, modifier = Modifier.weight(1f))
+                            Text(
+                                keyword,
+                                maxLines = 1,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
                             if (!showSuggestions) {
                                 IconButton(onClick = { onRemoveHistory(keyword) }, modifier = Modifier.size(36.dp)) {
                                     Icon(Icons.Default.Close, stringResource(R.string.s094), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -4373,14 +4385,15 @@ private fun SettingsScreen(
             }
             if (searchQuery.isBlank()) {
                 // 默认展示入口卡片
-                entries.forEach { entry ->
+                entries.forEachIndexed { index, entry ->
                     item {
                         SettingsEntry(
                             title = entry.title,
                             subtitle = entry.subtitle,
                             icon = entry.icon,
                             onClick = entry.onClick,
-                            accent = entry.accent
+                            accent = entry.accent,
+                            colorIndex = index
                         )
                     }
                 }
@@ -4394,14 +4407,15 @@ private fun SettingsScreen(
                     )
                 }
             } else {
-                filtered.forEach { entry ->
+                filtered.forEachIndexed { index, entry ->
                     item {
                         SettingsEntry(
                             title = entry.title,
                             subtitle = entry.subtitle ?: stringResource(entry.group.labelRes),
                             icon = entry.group.icon,
                             onClick = entry.onClick,
-                            accent = entry.accent
+                            accent = entry.accent,
+                            colorIndex = index
                         )
                     }
                 }
@@ -4441,7 +4455,14 @@ private fun securityModeSubtitle(context: Context, settings: BrowserSettings): S
  * 水波纹说明：使用 [Card] 的 onClick 重载，水波纹由卡片自身的 [shape] 裁剪，
  * 与实际卡片形状完全一致；若改用 Modifier.clickable，水波纹会溢出圆角边界。
  */@Composable
-private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp, accent: Boolean = false) {
+private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp, accent: Boolean = false, colorIndex: Int = 0) {
+    // 缤纷色彩下每个入口图标取不同颜色；accent（如「设为默认浏览器」）保持红色警示色，
+    // 因为它表达的是「待办/需注意」而非普通入口
+    val (iconBg, iconFg) = if (accent) {
+        MaterialTheme.colorScheme.error to MaterialTheme.colorScheme.onError
+    } else {
+        cardIconColors(LocalVibrantTheme.current, colorIndex)
+    }
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 6.dp),
@@ -4458,11 +4479,11 @@ private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compos
         ) {
             Surface(
                 modifier = Modifier.size(44.dp),
-                color = if (accent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondaryContainer,
+                color = iconBg,
                 shape = MaterialTheme.shapes.medium
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, null, tint = if (accent) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondaryContainer)
+                    Icon(icon, null, tint = iconFg)
                 }
             }
             Spacer(Modifier.width(14.dp))
@@ -5165,8 +5186,8 @@ private fun GeneralSettingsScreen(
         item { SectionHeader(stringResource(R.string.s_performance)) }
         item { SwitchRow(stringResource(R.string.s184), stringResource(R.string.s343), settings.hardwareAcceleration, setHardwareAcceleration, leading = Icons.Rounded.Speed) }
         item { SectionHeader(stringResource(R.string.s344)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s117)) }, supportingContent = { Text(stringResource(R.string.s345)) }, leadingContent = { Icon(Icons.Default.Download, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloads)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s194)) }, supportingContent = { Text(downloadDirectoryLabel(context, settings)) }, leadingContent = { Icon(Icons.Rounded.Folder, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onDownloadDirectory)) }
+        item { SettingsNavCard(stringResource(R.string.s117), stringResource(R.string.s345), Icons.Default.Download, onDownloads, colorIndex = 0) }
+        item { SettingsNavCard(stringResource(R.string.s194), downloadDirectoryLabel(context, settings), Icons.Rounded.Folder, onDownloadDirectory, colorIndex = 1) }
         item { SwitchRow(stringResource(R.string.s201), stringResource(R.string.s346), settings.apkHashEnabled, setApkHash, leading = Icons.Rounded.VerifiedUser) }
     }
 
@@ -5217,8 +5238,8 @@ private fun WebSiteSettingsScreen(
         item { SectionHeader(stringResource(R.string.web_render_section)) }
         item { SwitchRow(stringResource(R.string.s206), stringResource(R.string.s348), settings.forceDarkWeb, setForceDarkWeb, leading = Icons.Rounded.DarkMode) }
         item { SectionHeader(stringResource(R.string.s349)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s213)) }, supportingContent = { Text(searchEngineLabel(context, settings)) }, leadingContent = { Icon(Icons.Rounded.ManageSearch, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onSearchEngine)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s219)) }, supportingContent = { Text(userAgentLabel(context, settings)) }, leadingContent = { Icon(Icons.Default.Computer, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onUserAgent)) }
+        item { SettingsNavCard(stringResource(R.string.s213), searchEngineLabel(context, settings), Icons.Rounded.ManageSearch, onSearchEngine, colorIndex = 2) }
+        item { SettingsNavCard(stringResource(R.string.s219), userAgentLabel(context, settings), Icons.Default.Computer, onUserAgent, colorIndex = 3) }
     }
 }
 
@@ -5241,15 +5262,9 @@ private fun CookieSettingsScreen(
     SelectionScreen(stringResource(R.string.s225), onBack) {
         item { SwitchRow(stringResource(R.string.s224), stringResource(R.string.s350), settings.cookiesEnabled, setCookie, leading = Icons.Rounded.Cookie) }
         item {
-            ListItem(
-                headlineContent = { Text("HTTPS-Only") },
-                supportingContent = { Text(httpsOnlySubtitle(context, settings)) },
-                leadingContent = { Icon(Icons.Rounded.Lock, null) },
-                trailingContent = { Icon(Icons.Default.ArrowForward, null) },
-                modifier = Modifier.clickable(onClick = onHttpsOnly)
-            )
+            SettingsNavCard("HTTPS-Only", httpsOnlySubtitle(context, settings), Icons.Rounded.Lock, onHttpsOnly, colorIndex = 5)
         }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s228)) }, supportingContent = { Text(stringResource(R.string.s351)) }, leadingContent = { Icon(Icons.Default.Delete, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable { showClearConfirmation = true }) }
+        item { SettingsNavCard(stringResource(R.string.s228), stringResource(R.string.s351), Icons.Default.Delete, { showClearConfirmation = true }, colorIndex = 4) }
         item { SwitchRow(stringResource(R.string.s232), stringResource(R.string.s352), settings.clearOnExit, { showExitOptions = true }, leading = Icons.Default.Delete) }
     }
     if (showClearConfirmation) ConfirmDialog(stringResource(R.string.s353), stringResource(R.string.s354), {
@@ -5321,10 +5336,11 @@ private fun HttpsOnlyScreen(
             )
         }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.s364)) },
-                supportingContent = { Text(stringResource(R.string.s365)) },
-                leadingContent = { Icon(Icons.Rounded.Policy, null) }
+            SettingsInfoCard(
+                title = stringResource(R.string.s364),
+                subtitle = stringResource(R.string.s365),
+                icon = Icons.Rounded.Policy,
+                colorIndex = 2
             )
         }
     }
@@ -5354,22 +5370,22 @@ private fun SecuritySettingsScreen(
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.s369)) },
-                    supportingContent = { Text(stringResource(R.string.s370)) },
-                    leadingContent = { Icon(Icons.Rounded.GppGood, null, tint = MaterialTheme.colorScheme.primary) }
+                SettingsInfoCard(
+                    title = stringResource(R.string.s369),
+                    subtitle = stringResource(R.string.s370),
+                    icon = Icons.Rounded.GppGood,
+                    colorIndex = 0
                 )
             }
-            item { HorizontalDivider() }
             item { SecurityModeOption(stringResource(R.string.s371), stringResource(R.string.s372), stringResource(R.string.s373), settings.securityMode == "enhanced") { onSelectMode("enhanced") } }
             item { SecurityModeOption(stringResource(R.string.s374), stringResource(R.string.s375), stringResource(R.string.s376), settings.securityMode == "standard") { onSelectMode("standard") } }
             item { SecurityModeOption(stringResource(R.string.s377), stringResource(R.string.s378), stringResource(R.string.s379), settings.securityMode == "basic") { onSelectMode("basic") } }
-            item { HorizontalDivider() }
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.s380)) },
-                    supportingContent = { Text(stringResource(R.string.s381)) },
-                    leadingContent = { Icon(Icons.Rounded.Policy, null) }
+                SettingsInfoCard(
+                    title = stringResource(R.string.s380),
+                    subtitle = stringResource(R.string.s381),
+                    icon = Icons.Rounded.Policy,
+                    colorIndex = 1
                 )
             }
         }
@@ -5572,11 +5588,35 @@ private fun NotificationSettingsScreen(onBack: () -> Unit) {
                 promotedEnabled -> stringResource(R.string.notification_on)
                 else -> stringResource(R.string.notification_off)
             }
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.notification_live_title)) },
-                supportingContent = { Text(status) },
-                leadingContent = { Icon(Icons.Rounded.Notifications, null) },
-                trailingContent = {
+            val (notifBg, notifFg) = cardIconColors(LocalVibrantTheme.current, 0)
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        color = notifBg,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Notifications, null, tint = notifFg, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.notification_live_title), style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (supported) {
                         // 已开启也保留入口：用户可能想关掉，不替系统做决定
                         TextButton(onClick = { PromotedNotification.openSettings(context) }) {
@@ -5588,30 +5628,32 @@ private fun NotificationSettingsScreen(onBack: () -> Unit) {
                         }
                     }
                 }
-            )
+            }
         }
         if (supported && !notificationsEnabled) {
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.notification_need_permission_title)) },
-                    supportingContent = { Text(stringResource(R.string.notification_need_permission_body)) },
-                    leadingContent = { Icon(Icons.Rounded.Block, null) }
+                SettingsInfoCard(
+                    title = stringResource(R.string.notification_need_permission_title),
+                    subtitle = stringResource(R.string.notification_need_permission_body),
+                    icon = Icons.Rounded.Block,
+                    colorIndex = 1
                 )
             }
         }
-        item { HorizontalDivider() }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.s364)) },
-                supportingContent = { Text(stringResource(R.string.notification_how_it_works)) },
-                leadingContent = { Icon(Icons.Rounded.GppGood, null) }
+            SettingsInfoCard(
+                title = stringResource(R.string.s364),
+                subtitle = stringResource(R.string.notification_how_it_works),
+                icon = Icons.Rounded.GppGood,
+                colorIndex = 2
             )
         }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.notification_tip_title)) },
-                supportingContent = { Text(stringResource(R.string.notification_tip)) },
-                leadingContent = { Icon(Icons.Rounded.Policy, null) }
+            SettingsInfoCard(
+                title = stringResource(R.string.notification_tip_title),
+                subtitle = stringResource(R.string.notification_tip),
+                icon = Icons.Rounded.Policy,
+                colorIndex = 3
             )
         }
     }
@@ -5627,15 +5669,32 @@ private fun SecurityModeOption(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    ListItem(
-        headlineContent = { Text(title, color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)) },
-        supportingContent = {
-            Column {
-                Text(summary)
-                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        leadingContent = {
+    val container = when {
+        selected && enabled -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        selected -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            // Card 没有 enabled 参数（不同 M3 版本签名不一），
+            // 禁用态改用 clickable 的 enabled 控制，不依赖卡片自身是否支持
+            .clickable(enabled = enabled, onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = if (enabled) container else MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = contentColor
+        )
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Icon(
                 if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
                 contentDescription = if (selected) stringResource(R.string.s382) else null,
@@ -5643,11 +5702,23 @@ private fun SecurityModeOption(
                     !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                     selected -> MaterialTheme.colorScheme.primary
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
+                },
+                modifier = Modifier.size(22.dp)
             )
-        },
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
-    )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(2.dp))
+                Text(summary, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }
 
 /** 网页权限管理：剪贴板 / 跳转至外部 APP / 麦克风 */
@@ -5661,9 +5732,9 @@ private fun WebPermissionsScreen(
 ) {
     val context = LocalContext.current
     SelectionScreen(stringResource(R.string.s250), onBack) {
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s249)) }, supportingContent = { Text(clipboardPolicyLabel(context, settings.clipboardReadPolicy)) }, leadingContent = { Icon(Icons.Rounded.ContentPaste, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onClipboard)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s053)) }, supportingContent = { Text(policyLabel(context, settings.externalAppPolicy)) }, leadingContent = { Icon(Icons.Default.OpenInNew, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onExternalApp)) }
-        item { ListItem(headlineContent = { Text(stringResource(R.string.s259)) }, supportingContent = { Text(policyLabel(context, settings.micPolicy)) }, leadingContent = { Icon(Icons.Rounded.Mic, null) }, trailingContent = { Icon(Icons.Default.ArrowForward, null) }, modifier = Modifier.clickable(onClick = onMic)) }
+        item { SettingsNavCard(stringResource(R.string.s249), clipboardPolicyLabel(context, settings.clipboardReadPolicy), Icons.Rounded.ContentPaste, onClipboard, colorIndex = 0) }
+        item { SettingsNavCard(stringResource(R.string.s053), policyLabel(context, settings.externalAppPolicy), Icons.Default.OpenInNew, onExternalApp, colorIndex = 1) }
+        item { SettingsNavCard(stringResource(R.string.s259), policyLabel(context, settings.micPolicy), Icons.Rounded.Mic, onMic, colorIndex = 2) }
         item { Text(stringResource(R.string.s383), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
     }
 }
@@ -5768,17 +5839,41 @@ private fun MicPermissionScreen(
         item { Text(stringResource(R.string.s384), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
         item { Spacer(Modifier.height(8.dp)) }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.s385)) },
-                supportingContent = { Text(stringResource(if (osGranted) R.string.s386 else R.string.s387)) },
-                leadingContent = { Icon(Icons.Rounded.Mic, null) },
-                trailingContent = {
+            val (micBg, micFg) = cardIconColors(LocalVibrantTheme.current, 0)
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        color = micBg,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Mic, null, tint = micFg, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.s385), style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(if (osGranted) R.string.s386 else R.string.s387),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     TextButton(onClick = {
                         runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                             .onFailure { Toast.makeText(context, context.getString(R.string.s388), Toast.LENGTH_SHORT).show() }
                     }) { Text(stringResource(R.string.s389)) }
                 }
-            )
+            }
         }
         item { Spacer(Modifier.height(8.dp)) }
         item { OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text(stringResource(R.string.s340)) } }
@@ -5797,15 +5892,36 @@ private fun SelectionScreen(
 
 @Composable
 private fun ChoiceItem(title: String, selected: Boolean, onClick: () -> Unit) {
-    ListItem(headlineContent = { Text(title) }, leadingContent = { if (selected) Icon(Icons.Default.Check, null) }, modifier = Modifier.clickable(onClick = onClick))
+    // 卡片式单选：此前是裸 ListItem，在一堆卡片页面里显得扁平。
+    // 选中时用 primaryContainer 强调，未选中用 surfaceContainerHigh，
+    // 右侧勾只在选中时出现，减少视觉噪音
+    val container = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh
+    val content = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Icon(Icons.Default.Check, null, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
 }
 
-/**
- * 语言选择页。
- *
- * 选定后只写入存储，不重建当前界面：语言在下次启动时由 attachBaseContext 读取生效。
- * 这与系统级语言设置的直觉一致，也避免重建时丢失当前浏览状态。
- */
 /**
  * 语言选择：从底部向上弹出的底部面板。
  *
@@ -5999,34 +6115,13 @@ private fun DebugScreen(
         item { DebugSectionHeader(stringResource(R.string.debug_info_title)) }
         items.forEach { item ->
             item {
-                ListItem(
-                    headlineContent = { Text(item.label, style = MaterialTheme.typography.bodyMedium) },
-                    supportingContent = {
-                        Text(
-                            item.value,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                )
+                DebugInfoCard(label = item.label, value = item.value)
             }
         }
 
         item { DebugSectionHeader(stringResource(R.string.debug_signature_title)) }
-        item {
-            ListItem(
-                headlineContent = { Text("安装来源", style = MaterialTheme.typography.bodyMedium) },
-                supportingContent = { Text(installer, style = MaterialTheme.typography.bodySmall) }
-            )
-        }
-        item {
-            ListItem(
-                headlineContent = { Text("签名摘要 (SHA-256)", style = MaterialTheme.typography.bodyMedium) },
-                supportingContent = { Text(signature, style = MaterialTheme.typography.bodySmall) }
-            )
-        }
-
-        item { HorizontalDivider() }
+        item { DebugInfoCard(label = "安装来源", value = installer) }
+        item { DebugInfoCard(label = "签名摘要 (SHA-256)", value = signature) }
 
         // 崩溃日志：只在真实存在崩溃记录时可展开，不做示例数据
         item {
@@ -6322,14 +6417,162 @@ private fun UserAgentSelector(mode: String, labels: Map<String, String>, setMode
     )
 }
 
+/**
+ * 调试页的信息行卡片：左标值、右内容，纯展示不可点击。
+ */
+@Composable
+private fun DebugInfoCard(label: String, value: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * 信息卡：只有图标 + 标题 + 说明，不可点击。
+ *
+ * 用于替换原先裸写的 ListItem 说明行，让功能页的纯文字说明也统一成卡片。
+ */
+@Composable
+private fun SettingsInfoCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    colorIndex: Int = 0
+) {
+    val (iconBg, iconFg) = cardIconColors(LocalVibrantTheme.current, colorIndex)
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                color = iconBg,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = iconFg, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 功能页里的可点击入口卡片（带箭头）。
+ *
+ * 用于替换原先裸用 ListItem + clickable + ArrowForward 的写法，
+ * 让各功能页与设置主页的卡片风格统一。
+ */
+@Composable
+private fun SettingsNavCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    colorIndex: Int = 0
+) {
+    val (iconBg, iconFg) = cardIconColors(LocalVibrantTheme.current, colorIndex)
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                color = iconBg,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = iconFg, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2
+                )
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 @Composable
 private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, leading: androidx.compose.ui.graphics.vector.ImageVector? = null) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(subtitle) },
-        leadingContent = leading?.let { icon -> { Icon(icon, null) } },
-        trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange) }
-    )
+    // 卡片式开关行：与设置页入口卡片保持一致的圆角与留白，
+    // 不再用裸 ListItem（在卡片页面里显得扁平且分隔不清）
+    val (iconBg, iconFg) = cardIconColors(LocalVibrantTheme.current, title.hashCode())
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (leading != null) {
+                Surface(
+                    modifier = Modifier.size(36.dp),
+                    color = iconBg,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(leading, null, tint = iconFg, modifier = Modifier.size(20.dp))
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
 }
 
 @Composable
@@ -6438,45 +6681,88 @@ private fun AboutScreen(
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s282)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }) }) { padding ->
         // 条目较多，在窄屏/横屏/大字体下会超出一屏，必须可滚动，否则底部内容点不到
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("ZexBrowse", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            // 连点版本号 7 次解锁调试入口（每次点击间隔需在 1.5 秒内）。
-            // 解锁只存在内存：进程结束或重装后自动失效，需重新连点。
-            Text(
-                stringResource(R.string.s401, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
-                modifier = Modifier.clickable {
-                    val remaining = DebugUnlock.tap()
-                    if (remaining == 0 && DebugUnlock.unlocked) {
-                        Toast.makeText(context, context.getString(R.string.debug_unlocked), Toast.LENGTH_SHORT).show()
+            // 版本信息卡：应用名、版本号与一句话介绍收进一张卡，
+            // 比原先散落的几行文字更有层次
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            modifier = Modifier.size(48.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Public, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(26.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("ZexBrowse", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text(
+                                stringResource(R.string.s401, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                // 连点版本号 7 次解锁调试入口（每次点击间隔需在 1.5 秒内）。
+                                // 解锁只存在内存：进程结束或重装后自动失效，需重新连点。
+                                modifier = Modifier.clickable {
+                                    val remaining = DebugUnlock.tap()
+                                    if (remaining == 0 && DebugUnlock.unlocked) {
+                                        Toast.makeText(context, context.getString(R.string.debug_unlocked), Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                        }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.s402),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            )
-            Text(stringResource(R.string.s402))
-            FilledTonalButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) }) {
-                Icon(painterResource(R.drawable.ic_github), null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.s403))
             }
+
+            // 入口列表：统一为带图标的卡片，与设置主页一致
+            SettingsEntry(
+                title = stringResource(R.string.s403),
+                subtitle = "github.com/BaiXiaoTao520/ZexBrowse",
+                icon = Icons.Rounded.Public,
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) },
+                horizontalPadding = 0.dp,
+                colorIndex = 0
+            )
             // Mirror酱高速下载：放在 GitHub 入口之后，属于同一类「获取安装包」的辅助入口，
             // 点击跳转网页，应用内不参与分发。
             // rid 未注入时整体不展示，避免跳到 ?rid= 空参数页
             if (MirrorChyan.isAvailable) {
                 MirrorChyanChannelCard(onClick = { openInBrowser(context, MirrorChyan.projectUrl()) })
             }
-            OutlinedButton(onClick = {
-                val request = ++contributorsRequest
-                contributors = null
-                contributorsLoading = true
-                scope.launch {
-                    val result = runCatching { UpdateChecker().contributors() }.getOrElse { emptyList() }
-                    if (contributorsRequest == request) {
-                        contributors = result
-                        contributorsLoading = false
+            SettingsEntry(
+                title = stringResource(R.string.s285),
+                subtitle = stringResource(R.string.s300),
+                icon = Icons.Rounded.ContactSupport,
+                onClick = {
+                    val request = ++contributorsRequest
+                    contributors = null
+                    contributorsLoading = true
+                    scope.launch {
+                        val result = runCatching { UpdateChecker().contributors() }.getOrElse { emptyList() }
+                        if (contributorsRequest == request) {
+                            contributors = result
+                            contributorsLoading = false
+                        }
                     }
-                }
-            }) { Text(stringResource(R.string.s285)) }
+                },
+                horizontalPadding = 0.dp,
+                colorIndex = 1
+            )
             SwitchRow(stringResource(R.string.s404), stringResource(R.string.s405), settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
             // 赞助与支持：与其它入口保持相同的卡片样式
             SettingsEntry(
@@ -6485,9 +6771,13 @@ private fun AboutScreen(
                 icon = Icons.Rounded.VolunteerActivism,
                 onClick = onSponsor,
                 // 本页其余控件都基于 24dp 内边距，卡片不再额外内缩，保持左边缘对齐
-                horizontalPadding = 0.dp
+                horizontalPadding = 0.dp,
+                colorIndex = 2
             )
-            OutlinedButton(
+            SettingsEntry(
+                title = stringResource(if (checking) R.string.s410 else R.string.s411),
+                subtitle = stringResource(R.string.s300),
+                icon = Icons.Default.SystemUpdate,
                 onClick = {
                     checking = true
                     scope.launch {
@@ -6505,8 +6795,9 @@ private fun AboutScreen(
                         checking = false
                     }
                 },
-                enabled = !checking
-            ) { Text(stringResource(if (checking) R.string.s410 else R.string.s411)) }
+                horizontalPadding = 0.dp,
+                colorIndex = 3
+            )
         }
     }
 
