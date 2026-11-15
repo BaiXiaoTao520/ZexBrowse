@@ -73,6 +73,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -115,6 +116,7 @@ import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Public
@@ -150,6 +152,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -192,6 +195,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -4497,6 +4501,58 @@ private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compos
     }
 }
 
+/**
+ * 与 [SettingsEntry] 同款式的入口卡，但图标用 Drawable 资源（如 GitHub 品牌 logo）。
+ *
+ * Material Icons 里没有 GitHub 标志，只能用自带的矢量图；
+ * 品牌色不宜再叠主题色块，因此图标区直接透明、按品牌原色绘制。
+ */
+@Composable
+private fun SettingsEntryWithPainter(
+    title: String,
+    subtitle: String,
+    @androidx.annotation.DrawableRes painterRes: Int,
+    onClick: () -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
+    colorIndex: Int = 0,
+    enabled: Boolean = true
+) {
+    val iconBg = MaterialTheme.colorScheme.surfaceContainerHighest
+    val iconFg = MaterialTheme.colorScheme.onSurface
+    Card(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 6.dp),
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                color = iconBg,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        painterResource(painterRes),
+                        null,
+                        tint = iconFg,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 @Composable
 private fun CheckRow(title: String, checked: Boolean, changed: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { changed(!checked) }, verticalAlignment = Alignment.CenterVertically) {
@@ -5583,44 +5639,76 @@ private fun NotificationSettingsScreen(onBack: () -> Unit) {
 
     SelectionScreen(stringResource(R.string.notification_title), onBack) {
         item {
-            val status = when {
+            // 状态色：开启用主色、异常用错误色、不支持/未开启用中性色。
+            // 用颜色区分状态，比一行灰字副标题更一目了然
+            val statusActive = supported && notificationsEnabled && promotedEnabled
+            val statusWarn = supported && !notificationsEnabled
+            val stateColor = when {
+                statusWarn -> MaterialTheme.colorScheme.error
+                statusActive -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            val stateContainer = when {
+                statusWarn -> MaterialTheme.colorScheme.errorContainer
+                statusActive -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest
+            }
+            val stateText = when {
                 !supported -> stringResource(R.string.notification_unsupported)
                 !notificationsEnabled -> stringResource(R.string.notification_blocked)
                 promotedEnabled -> stringResource(R.string.notification_on)
                 else -> stringResource(R.string.notification_off)
             }
-            val (notifBg, notifFg) = cardIconColors(LocalVibrantTheme.current, 0)
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                shape = MaterialTheme.shapes.large,
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        modifier = Modifier.size(36.dp),
-                        color = notifBg,
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.Notifications, null, tint = notifFg, modifier = Modifier.size(20.dp))
+                Column(Modifier.fillMaxWidth().padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            color = stateContainer,
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    if (statusActive) Icons.Rounded.NotificationsActive else Icons.Rounded.Notifications,
+                                    null,
+                                    tint = stateColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.notification_live_title),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            // 状态徒标：开启/关闭一目了然，不依赖读完一整句描述
+                            Surface(
+                                color = stateContainer,
+                                shape = MaterialTheme.shapes.small
+                            ) {
+                                Text(
+                                    stateText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = stateColor,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.notification_live_title), style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            status,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     if (supported) {
+                        Spacer(Modifier.height(14.dp))
                         // 已开启也保留入口：用户可能想关掉，不替系统做决定
-                        TextButton(onClick = { PromotedNotification.openSettings(context) }) {
+                        Button(
+                            onClick = { PromotedNotification.openSettings(context) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text(
                                 stringResource(
                                     if (promotedEnabled) R.string.notification_manage else R.string.notification_enable
@@ -6678,6 +6766,8 @@ private fun AboutScreen(
     var contributorsLoading by remember { mutableStateOf(false) }
     // 加载请求令牌：用于丢弃被用户提前关闭弹窗后的过期结果，避免弹窗被加载结果重新弹回
     var contributorsRequest by remember { mutableStateOf(0) }
+    // 更新设置面板：把自动检查开关与手动检查按钮收进一个底部面板
+    var showUpdateSheet by remember { mutableStateOf(false) }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.s282)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }) }) { padding ->
         // 条目较多，在窄屏/横屏/大字体下会超出一屏，必须可滚动，否则底部内容点不到
@@ -6731,10 +6821,11 @@ private fun AboutScreen(
             }
 
             // 入口列表：统一为带图标的卡片，与设置主页一致
-            SettingsEntry(
+            SettingsEntryWithPainter(
                 title = stringResource(R.string.s403),
-                subtitle = "github.com/BaiXiaoTao520/ZexBrowse",
-                icon = Icons.Rounded.Public,
+                // 不把仓库地址当作副标题：地址对用户没有意义，只告诉他点进去能做什么
+                subtitle = stringResource(R.string.about_github_sub),
+                painterRes = R.drawable.ic_github,
                 onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) },
                 horizontalPadding = 0.dp,
                 colorIndex = 0
@@ -6764,23 +6855,27 @@ private fun AboutScreen(
                 horizontalPadding = 0.dp,
                 colorIndex = 1
             )
-            SwitchRow(stringResource(R.string.s404), stringResource(R.string.s405), settings.autoCheckUpdates, setAutoCheckUpdates, leading = Icons.Default.SystemUpdate)
-            // 赞助与支持：与其它入口保持相同的卡片样式
+            // 自动检查与手动检查合并为一个入口，点开底部面板后再分别操作：
+            // 页面上并排两个与「更新」相关的卡片会显得重复
             SettingsEntry(
-                title = stringResource(R.string.s406),
-                subtitle = stringResource(R.string.s407),
-                icon = Icons.Rounded.VolunteerActivism,
-                onClick = onSponsor,
-                // 本页其余控件都基于 24dp 内边距，卡片不再额外内缩，保持左边缘对齐
-                horizontalPadding = 0.dp,
-                colorIndex = 2
-            )
-            SettingsEntry(
-                title = stringResource(if (checking) R.string.s410 else R.string.s411),
-                subtitle = stringResource(R.string.s300),
+                title = stringResource(R.string.update_settings_title),
+                subtitle = stringResource(R.string.update_settings_sub),
                 icon = Icons.Default.SystemUpdate,
-                onClick = {
-                    if (checking) return@SettingsEntry
+                onClick = { showUpdateSheet = true },
+                horizontalPadding = 0.dp,
+                colorIndex = 3
+            )
+        }
+    }
+
+    // 更新设置面板：自动检查开关 + 立即检查按钮，挂在当前页之上
+    if (showUpdateSheet) {
+        UpdateSettingsSheet(
+            autoCheck = settings.autoCheckUpdates,
+            onAutoCheckChange = setAutoCheckUpdates,
+            checking = checking,
+            onCheck = {
+                if (!checking) {
                     checking = true
                     scope.launch {
                         val checker = UpdateChecker()
@@ -6796,12 +6891,10 @@ private fun AboutScreen(
                         }
                         checking = false
                     }
-                },
-                horizontalPadding = 0.dp,
-                colorIndex = 3,
-                enabled = !checking
-            )
-        }
+                }
+            },
+            onDismiss = { showUpdateSheet = false }
+        )
     }
 
     val dismissContributors = { contributorsRequest++; contributors = null; contributorsLoading = false }
@@ -6849,6 +6942,96 @@ private fun AboutScreen(
             text = { Text(content) },
             confirmButton = { TextButton(onClick = { message = null }) { Text(stringResource(R.string.s127)) } }
         )
+    }
+}
+
+/**
+ * 更新设置：从底部弹出，包含自动检查开关与手动检查入口。
+ *
+ * 与语言选择、版本更新面板保持完全相同的交互：
+ * 上两角圆角、顶部拖拽小横条、高度按内容自适应、点遮罩收起。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UpdateSettingsSheet(
+    autoCheck: Boolean,
+    onAutoCheckChange: (Boolean) -> Unit,
+    checking: Boolean,
+    onCheck: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                stringResource(R.string.update_settings_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+            )
+            // 自动检查开关
+            val (autoBg, autoFg) = cardIconColors(LocalVibrantTheme.current, 0)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().toggleable(
+                        value = autoCheck,
+                        role = Role.Switch,
+                        onValueChange = onAutoCheckChange
+                    ).padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        color = autoBg,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.SystemUpdate, null, tint = autoFg, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.s404), style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.s405),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = autoCheck, onCheckedChange = null)
+                }
+            }
+            // 手动检查按钮：检查中禁用并改文案，避免重复请求
+            Button(
+                onClick = onCheck,
+                enabled = !checking,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (checking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(stringResource(if (checking) R.string.s410 else R.string.s411))
+            }
+        }
     }
 }
 
@@ -7032,9 +7215,8 @@ private fun UpdateIntroDialog(
     val context = LocalContext.current
     val effectiveUrl = release.downloadUrl
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // 收回时先播完隐藏动画，再从组合中移除。
-    // 若直接把状态置 null（上层 onDismiss），ModalBottomSheet 会被立刻从组合中
-    // 摘下，收回动画来不及播放，看起来就是「啪一下消失」。
+    // 「稍后更新」需要主动收起面板：必须先播完隐藏动画再销毁，
+    // 否则 ModalBottomSheet 会被立刻从组合中摘下，看不到收回过程
     val scope = rememberCoroutineScope()
     val animateDismiss: () -> Unit = {
         scope.launch {
@@ -7057,7 +7239,6 @@ private fun UpdateIntroDialog(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -7129,8 +7310,8 @@ private fun UpdateIntroDialog(
                 )
             }
 
-            // 按钮顺序：主操作（下载）在上、取消在下。
-            // 更符合「先看到主要动作、再决定是否退出」的阅读顺序。
+            // 按钮顺序：主操作（下载）在上、稍后更新在下。
+            // 更符合「先看到主要动作、再决定是否暂缓」的阅读顺序。
             Spacer(Modifier.height(4.dp))
             Button(
                 enabled = effectiveUrl.isNotBlank(),
@@ -7141,8 +7322,10 @@ private fun UpdateIntroDialog(
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.s069))
             }
+            // 更新是重要的不可逆动作转换（进入下载），提供一个明确的暂缓出口；
+            // 文案用「稍后更新」而非「取消」，语义上更贴近用户实际意图
             TextButton(onClick = animateDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.s071))
+                Text(stringResource(R.string.update_later))
             }
         }
     }

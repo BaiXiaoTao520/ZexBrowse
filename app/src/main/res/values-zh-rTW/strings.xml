@@ -81,6 +81,7 @@
     <string name="s069">下載</string>
     <string name="s070">瀏覽器開啟</string>
     <string name="s071">取消</string>
+    <string name="update_later">稍後更新</string>
     <string name="s072">下載 %1$s</string>
     <string name="s073">下載完成，可直接安裝；檔案也已儲存到「下載設定」指定的目錄。</string>
     <string name="s074">下載失敗</string>
@@ -410,6 +411,11 @@
     <string name="s401">版本 %1$s（%2$s）</string>
     <string name="s402">本專案採用 Mozilla Public License 2.0 (MPL-2.0) 開源。GeckoView 及其相關元件遵循 Mozilla 的相應開源授權。Jetpack Compose、Material 3 和 AndroidX 程式庫遵循各自授權條款。</string>
     <string name="s403">GitHub 儲存庫</string>
+    <string name="about_github_sub">前往存取</string>
+    <string name="update_settings_title">更新設定</string>
+    <string name="update_settings_sub">自動檢查與手動檢查更新</string>
+    <string name="update_check_title">檢查更新</string>
+    <string name="update_check_sub">立即偵測是否有新版本</string>
     <string name="s404">啟動時自動檢查更新</string>
     <string name="s405">每次開啟應用程式時在背景偵測新版本</string>
     <string name="s406">贊助與支持</string>

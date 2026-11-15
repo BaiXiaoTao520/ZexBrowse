@@ -81,6 +81,7 @@
     <string name="s069">Download</string>
     <string name="s070">Open in browser</string>
     <string name="s071">Cancel</string>
+    <string name="update_later">Update later</string>
     <string name="s072">Download %1$s</string>
     <string name="s073">Download complete. You can install it now; the file is also saved to the folder set in Download settings.</string>
     <string name="s074">Download failed</string>
@@ -410,6 +411,11 @@
     <string name="s401">Version %1$s (%2$s)</string>
     <string name="s402">This project is open source under the Mozilla Public License 2.0 (MPL-2.0). GeckoView and related components follow Mozilla\'s respective licenses. Jetpack Compose, Material 3 and AndroidX libraries follow their own licenses.</string>
     <string name="s403">GitHub repository</string>
+    <string name="about_github_sub">Open on GitHub</string>
+    <string name="update_settings_title">Update settings</string>
+    <string name="update_settings_sub">Automatic and manual update checks</string>
+    <string name="update_check_title">Check for updates</string>
+    <string name="update_check_sub">Look for a newer version now</string>
     <string name="s404">Check for updates on launch</string>
     <string name="s405">Detect new versions in the background each time the app opens</string>
     <string name="s406">Sponsorship</string>
