@@ -615,7 +615,6 @@
     <string name="ua_desc_android_chrome">Appear as Chrome on Android</string>
     <string name="ua_desc_desktop_chrome">Appear as desktop Chrome; some sites will show the desktop layout</string>
     <string name="ua_desc_desktop_firefox">Appear as desktop Firefox with better compatibility than desktop Chrome</string>
-    <string name="sha256_value">SHA-256: %1$s</string>
     <string name="toast_link_copied">Download link copied</string>
     <string name="toast_download_started">Download started. Check Downloads or the notification shade.</string>
     <string name="update_check_failed">Update check failed: %1$s</string>

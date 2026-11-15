@@ -615,7 +615,6 @@
     <string name="ua_desc_android_chrome">模擬 Android 版 Chrome 手機瀏覽器</string>
     <string name="ua_desc_desktop_chrome">以電腦版 Chrome 存取，部分網站會顯示桌面版頁面</string>
     <string name="ua_desc_desktop_firefox">以電腦版 Firefox 存取，相容性較桌面 Chrome 更好</string>
-    <string name="sha256_value">SHA-256：%1$s</string>
     <string name="toast_link_copied">已複製下載連結</string>
     <string name="toast_download_started">已開始下載，可前往下載記錄或通知欄查看</string>
     <string name="update_check_failed">檢查更新失敗：%1$s</string>

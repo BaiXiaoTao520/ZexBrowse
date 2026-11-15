@@ -735,37 +735,83 @@ private fun PageErrorView(
     val context = LocalContext.current
     val reasons = remember(errorCode, errorCategory) { describeLoadFailure(context, errorCode, errorCategory) }
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        // 不用 weight 撑满：本列已在 verticalScroll 内，滚动容器给子项的是无限高度约束，
+        // 再用 weight 会触发测量异常。改用固定留白把内容集中在视觉中心偏上。
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 40.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(Icons.Default.WifiOff, null, modifier = Modifier.size(52.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(18.dp))
-            Text(stringResource(R.string.s000), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            // 同步显示请求失败的网址，方便用户核对是否输错或粘贴了错误链接
-            Text(
-                url,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(22.dp))
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.height(48.dp))
+            // 图标放进圆形色块：纯色图标在大片空白里显得单薄
+            Surface(
+                modifier = Modifier.size(88.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = CircleShape
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.WifiOff,
+                        null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(stringResource(R.string.s000), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            // 网址单独放在一个弱化色块里：长链接不会与标题、按钮的文字混在一起，
+            // 复制地址或核对是否输错都更容易
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text(
+                    url,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            // 排查建议：逐条做成轻量卡片，比项目符号列表更好扫读
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 reasons.forEach { reason ->
-                    Row(verticalAlignment = Alignment.Top) {
-                        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(8.dp))
-                        Text(reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Rounded.Info,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
-            Spacer(Modifier.height(28.dp))
-            Button(onClick = onRetry) {
-                Icon(Icons.Default.Refresh, null)
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.s001))
             }
+            Spacer(Modifier.height(48.dp))
         }
     }
 }
@@ -2817,9 +2863,6 @@ private fun RecommendationDownloadDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (finished) {
                     Text(stringResource(R.string.s073))
-                    record?.sha256?.takeIf { it.isNotBlank() }?.let { hash ->
-                        Text("SHA-256：$hash", style = MaterialTheme.typography.bodySmall)
-                    }
                 } else if (failed) {
                     Text(record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed))
                 } else {
@@ -3718,28 +3761,10 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
             // 标签条不再展示：浏览器页只应专注当前网页，标签切换统一走底部工具栏的
             // 标签管理入口。顶部再堆一排 Chip 会挤压网页可视高度，也容易与地址栏抢注意力。
             if (selectedTab != null) {
-                if (selectedTab.loading) Box(
-                    Modifier.fillMaxWidth()
-                        // 进度条这一行的背景默认是主题色，无痕时补上与上下栏同一档淡紫，
-                        // 否则标签条与网页之间会夹一条浅色横带（截图所示）
-                        .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    WavyProgressBar(
-                        progress = selectedTab.progress / 100f,
-                        modifier = Modifier.fillMaxWidth(),
-                        // 无痕时进度条用专属紫；缤纷色彩下按进度位置轮换调色盘颜色，
-                        // 让进度条本身也能体现出「多彩」
-                        color = when {
-                            incognitoActive -> IncognitoAccentColor
-                            LocalVibrantTheme.current -> vibrantColorAt((selectedTab.progress / 12).toInt())
-                            else -> null
-                        }
-                    )
-                }
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // 视图销毁（切换硬件加速、离开浏览页）时清除挂载标记，
-                    // 否则视图重建后会话其实尚未挂载，loadUri 会被静默丢弃并停在空白页。
+                    // 加载进度条叠在网页顶部而非占据一行：
+                    // 原先它作为独立行插入，加载开始/结束时网页会被顶下去再弹回，
+                    // 阅读位置跟着跳动；改成覆盖层后网页高度恒定。
                     DisposableEffect(selectedTab.id, settings.hardwareAcceleration) {
                         onDispose { viewModel.onSessionDetached(selectedTab.id) }
                     }
@@ -3797,6 +3822,24 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                             errorCategory = selectedTab.errorCategory,
                             onRetry = { viewModel.reload() },
                             modifier = Modifier.matchParentSize()
+                        )
+                    }
+                    // 加载进度条：盖在网页顶端的小细条，不占布局高度，
+                    // 因此网页不会在加载开始/结束时上下跳动
+                    if (selectedTab.loading) {
+                        val barColor = when {
+                            incognitoActive -> IncognitoAccentColor
+                            LocalVibrantTheme.current -> vibrantColorAt((selectedTab.progress / 12).toInt())
+                            else -> MaterialTheme.colorScheme.primary
+                        }
+                        LinearProgressIndicator(
+                            progress = { (selectedTab.progress / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .fillMaxWidth()
+                                .height(2.dp),
+                            color = barColor,
+                            trackColor = barColor.copy(alpha = 0.15f)
                         )
                     }
                 }
@@ -7675,7 +7718,6 @@ private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
                 when {
                     result != null -> {
                         Text(stringResource(R.string.s435, result!!.file.name))
-                        Text(stringResource(R.string.sha256_value, result!!.sha256), style = MaterialTheme.typography.bodySmall)
                         Text(result!!.file.absolutePath, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     errText != null -> Text(stringResource(R.string.s436, errText), color = MaterialTheme.colorScheme.error)
