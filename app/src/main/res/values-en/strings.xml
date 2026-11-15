@@ -81,6 +81,7 @@
     <string name="s069">Download</string>
     <string name="s070">Open in browser</string>
     <string name="s071">Cancel</string>
+    <string name="update_later">Update later</string>
     <string name="s072">Download %1$s</string>
     <string name="s073">Download complete. You can install it now; the file is also saved to the folder set in Download settings.</string>
     <string name="s074">Download failed</string>

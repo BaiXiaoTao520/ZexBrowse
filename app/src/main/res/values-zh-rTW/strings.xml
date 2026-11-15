@@ -81,6 +81,7 @@
     <string name="s069">下載</string>
     <string name="s070">瀏覽器開啟</string>
     <string name="s071">取消</string>
+    <string name="update_later">稍後更新</string>
     <string name="s072">下載 %1$s</string>
     <string name="s073">下載完成，可直接安裝；檔案也已儲存到「下載設定」指定的目錄。</string>
     <string name="s074">下載失敗</string>

@@ -7209,6 +7209,15 @@ private fun UpdateIntroDialog(
     val context = LocalContext.current
     val effectiveUrl = release.downloadUrl
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 「稍后更新」需要主动收起面板：必须先播完隐藏动画再销毁，
+    // 否则 ModalBottomSheet 会被立刻从组合中摘下，看不到收回过程
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
     // 改为底部面板：与语言选择保持一致，四角圆角、带拖拽小横条、
     // 高度按内容自适应（更新日志限高、内部可滚动），不再弹一个满屏对话框。
     ModalBottomSheet(
@@ -7224,7 +7233,6 @@ private fun UpdateIntroDialog(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             // 标题：小火箭向上，语义比手机更新图标更贴合「升到新版本」
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -7307,6 +7315,11 @@ private fun UpdateIntroDialog(
                 Icon(Icons.Default.Download, null)
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.s069))
+            }
+            // 更新是重要的不可逆动作转换（进入下载），提供一个明确的暂缓出口；
+            // 文案用「稍后更新」而非「取消」，语义上更贴近用户实际意图
+            TextButton(onClick = animateDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.update_later))
             }
         }
     }
