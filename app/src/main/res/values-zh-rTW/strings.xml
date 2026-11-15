@@ -167,6 +167,13 @@
     <string name="s156">暫停</string>
     <string name="s157">繼續</string>
     <string name="s158">等待下載</string>
+    <string name="dl_view_log">檢視紀錄</string>
+    <string name="dl_log_title">下載紀錄</string>
+    <string name="dl_log_share">分享紀錄</string>
+    <string name="dl_log_empty">沒有更多紀錄資訊</string>
+    <string name="dl_failed_hint">下載失敗，可在「更多」中檢視紀錄</string>
+    <string name="dl_open_file">開啟</string>
+    <string name="dl_cancel_download">取消下載</string>
     <string name="s159">正在下載</string>
     <string name="s160">已暫停</string>
     <string name="s161">下載完成</string>

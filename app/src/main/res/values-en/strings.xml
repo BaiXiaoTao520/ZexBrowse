@@ -167,6 +167,13 @@
     <string name="s156">Pause</string>
     <string name="s157">Resume</string>
     <string name="s158">Queued</string>
+    <string name="dl_view_log">View log</string>
+    <string name="dl_log_title">Download log</string>
+    <string name="dl_log_share">Share log</string>
+    <string name="dl_log_empty">No further log details</string>
+    <string name="dl_failed_hint">Download failed. See \"More\" for the log.</string>
+    <string name="dl_open_file">Open</string>
+    <string name="dl_cancel_download">Cancel download</string>
     <string name="s159">Downloading</string>
     <string name="s160">Paused</string>
     <string name="s161">Completed</string>

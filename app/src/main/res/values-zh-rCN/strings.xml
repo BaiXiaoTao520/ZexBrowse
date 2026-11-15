@@ -167,6 +167,13 @@
     <string name="s156">暂停</string>
     <string name="s157">继续</string>
     <string name="s158">等待下载</string>
+    <string name="dl_view_log">查看日志</string>
+    <string name="dl_log_title">下载日志</string>
+    <string name="dl_log_share">分享日志</string>
+    <string name="dl_log_empty">没有更多日志信息</string>
+    <string name="dl_failed_hint">下载失败，可在「更多」中查看日志</string>
+    <string name="dl_open_file">打开</string>
+    <string name="dl_cancel_download">取消下载</string>
     <string name="s159">正在下载</string>
     <string name="s160">已暂停</string>
     <string name="s161">下载完成</string>

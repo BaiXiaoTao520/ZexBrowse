@@ -68,7 +68,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -101,6 +100,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Block
@@ -126,7 +126,10 @@ import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.GppBad
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Phishing
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Policy
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
@@ -162,6 +165,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -196,6 +200,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -3710,44 +3715,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     inputYRange = if (barBottom > barTop) barTop..barBottom else null
                 )
         ) {
-            // 标签条这一行位于地址栏与网页之间，默认透出主题背景色。
-            // 无痕时补上与上下栏同一档淡紫，否则中间会露出一条主题色断层（截图 1）。
-            LazyRow(
-                Modifier.fillMaxWidth()
-                    .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
-                    .padding(horizontal = 8.dp)
-            ) {
-                items(visibleTabs, key = { it.id }) { tab ->
-                    AssistChip(
-                        onClick = { viewModel.select(tab.id) },
-                        colors = if (incognitoActive) {
-                            AssistChipDefaults.assistChipColors(
-                                containerColor = Color.Transparent,
-                                labelColor = IncognitoBarBackground,
-                                leadingIconContentColor = IncognitoBarBackground,
-                                trailingIconContentColor = IncognitoBarBackground
-                            )
-                        } else {
-                            AssistChipDefaults.assistChipColors()
-                        },
-                        label = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(tab.title.ifBlank { stringResource(R.string.s107) }, maxLines = 1)
-                                Icon(Icons.Default.Close, stringResource(R.string.s119), Modifier.size(16.dp).clickable {
-                                    // 关掉最后一个无痕标签时彻底退出无痕（清 Cookie/缓存）并回首页，
-                                    // 不能落到剩下的普通标签上（那看起来像无痕变成了普通）
-                                    if (tab.incognito && viewModel.tabs.value.count { it.incognito } == 1) {
-                                        onExitIncognito(tab.id)
-                                    } else {
-                                        viewModel.close(tab.id)
-                                    }
-                                })
-                            }
-                        },
-                        leadingIcon = { if (tab.id == selectedId) Icon(Icons.Default.Check, null) }
-                    )
-                }
-            }
+            // 标签条不再展示：浏览器页只应专注当前网页，标签切换统一走底部工具栏的
+            // 标签管理入口。顶部再堆一排 Chip 会挤压网页可视高度，也容易与地址栏抢注意力。
             if (selectedTab != null) {
                 if (selectedTab.loading) Box(
                     Modifier.fillMaxWidth()
@@ -4042,19 +4011,163 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val downloads by viewModel.downloads.collectAsState(initial = emptyList())
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    // 待删除集合与选择状态分开：菜单里的单项删除不应该把页面拖进选择模式
+    var deleteTargets by remember { mutableStateOf(setOf<String>()) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var deleteFiles by remember { mutableStateOf(false) }
-    Scaffold(topBar = { TopAppBar(title = { Text(if (selectedIds.isEmpty()) stringResource(R.string.s117) else stringResource(R.string.s137, selectedIds.size)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, stringResource(R.string.s063)) } }, actions = { if (selectedIds.isNotEmpty()) IconButton(onClick = { showDeleteConfirmation = true }) { Icon(Icons.Default.Delete, stringResource(R.string.s138)) } }) }) { padding ->
+    // 日志面板当前展示的下载项 id（null 表示不展示）。
+    // 存 id 而非快照：列表会因删除/状态变化而刷新，直接持有实体可能拿到已删除的记录
+    var logItemId by remember { mutableStateOf<String?>(null) }
+    // 选择模式：由长按进入，选中为空时自动退出。
+    // 不在判断里掺入删除弹窗开关：那会让弹窗一开就退回浏览态，顶栏标题和全选按钮跟着闪一下
+    val selectionMode = selectedIds.isNotEmpty()
+    // 系统返回键优先退出选择模式，而不是直接关掉整个下载页
+    BackHandler(enabled = selectionMode) { selectedIds = emptySet() }
+    Scaffold(topBar = { TopAppBar(title = { Text(if (!selectionMode) stringResource(R.string.s117) else stringResource(R.string.s137, selectedIds.size)) }, navigationIcon = { IconButton(onClick = { if (selectionMode) selectedIds = emptySet() else onBack() }) { Icon(if (selectionMode) Icons.Default.Close else Icons.Default.ArrowBack, stringResource(if (selectionMode) R.string.s071 else R.string.s063)) } }, actions = { if (selectionMode) IconButton(onClick = { deleteTargets = selectedIds; showDeleteConfirmation = true }) { Icon(Icons.Default.Delete, stringResource(R.string.s138)) } }) }) { padding ->
         if (downloads.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(stringResource(R.string.s139)) }
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { TextButton(onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() }) { Text(stringResource(if (selectedIds.size == downloads.size) R.string.s140 else R.string.s141)) } }
-                items(downloads, key = { it.id }) { item -> DownloadRecordCard(item, item.id in selectedIds, { selectedIds = selectedIds.toggle(item.id) }, { viewModel.cancelDownload(item.id) }, { viewModel.pauseDownload(item.id) }, { viewModel.resumeDownload(item.id) }, { openDownload(context, item) }, { showDeleteConfirmation = true; selectedIds = setOf(item.id) }) }
+            LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 全选入口只在选择模式下出现：默认状态不占位置
+                if (selectionMode) {
+                    item {
+                        TextButton(onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() }) {
+                            Text(stringResource(if (selectedIds.size == downloads.size) R.string.s140 else R.string.s141))
+                        }
+                    }
+                }
+                items(downloads, key = { it.id }) { item ->
+                    DownloadRecordCard(
+                        item = item,
+                        selected = item.id in selectedIds,
+                        selectionMode = selectionMode,
+                        onSelect = { selectedIds = selectedIds.toggle(item.id) },
+                        onCancel = { viewModel.cancelDownload(item.id) },
+                        onPause = { viewModel.pauseDownload(item.id) },
+                        onResume = { viewModel.resumeDownload(item.id) },
+                        onOpen = { openDownload(context, item) },
+                        onDelete = { deleteTargets = setOf(item.id); showDeleteConfirmation = true },
+                        onViewLog = { logItemId = item.id }
+                    )
+                }
             }
         }
     }
-    if (showDeleteConfirmation) AlertDialog(onDismissRequest = { showDeleteConfirmation = false }, title = { Text(stringResource(R.string.s142)) }, text = { Column { Text(stringResource(R.string.s143, selectedIds.size)) ; CheckRow(stringResource(R.string.s144), deleteFiles) { deleteFiles = it } } }, confirmButton = { TextButton(onClick = { downloads.filter { it.id in selectedIds }.forEach { viewModel.deleteDownload(it.id, it.targetUri, deleteFiles) }; Toast.makeText(context, context.getString(R.string.s050), Toast.LENGTH_SHORT).show(); selectedIds = emptySet(); showDeleteConfirmation = false }) { Text(stringResource(R.string.s145)) } }, dismissButton = { TextButton(onClick = { showDeleteConfirmation = false }) { Text(stringResource(R.string.s071)) } })
+    // 从最新列表里取；记录已被删除时用副作用清空，不在组合期间直接写状态
+    val logItem = logItemId?.let { id -> downloads.firstOrNull { it.id == id } }
+    LaunchedEffect(logItemId, logItem) {
+        if (logItemId != null && logItem == null) logItemId = null
+    }
+    logItem?.let { item ->
+        DownloadLogSheet(item = item, onDismiss = { logItemId = null })
+    }
+    if (showDeleteConfirmation) AlertDialog(onDismissRequest = { showDeleteConfirmation = false; selectedIds = emptySet(); deleteTargets = emptySet() }, title = { Text(stringResource(R.string.s142)) }, text = { Column { Text(stringResource(R.string.s143, deleteTargets.size)) ; CheckRow(stringResource(R.string.s144), deleteFiles) { deleteFiles = it } } }, confirmButton = { TextButton(onClick = { downloads.filter { it.id in deleteTargets }.forEach { viewModel.deleteDownload(it.id, it.targetUri, deleteFiles) }; Toast.makeText(context, context.getString(R.string.s050), Toast.LENGTH_SHORT).show(); selectedIds = emptySet(); deleteTargets = emptySet(); showDeleteConfirmation = false }) { Text(stringResource(R.string.s145)) } }, dismissButton = { TextButton(onClick = { showDeleteConfirmation = false; selectedIds = emptySet(); deleteTargets = emptySet() }) { Text(stringResource(R.string.s071)) } })
+}
+
+/**
+ * 下载失败的日志：底部面板展示该条下载的诊断信息，只提供一个分享入口。
+ *
+ * 日志不直接铺在列表卡片上：一长串异常栈会淹没「文件到底怎么了」，
+ * 用户真正需要的是一个能拿去反馈的文本。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DownloadLogSheet(item: DownloadEntity, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val logText = remember(item) { buildDownloadLog(context, item) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Article,
+                            null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    stringResource(R.string.dl_log_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(14.dp)
+                ) {
+                    Text(
+                        logText,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Button(onClick = { shareDownloadLog(context, item, logText) }) {
+                    Icon(Icons.Rounded.Share, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.dl_log_share))
+                }
+            }
+        }
+    }
+}
+
+/** 组装一条下载失败的诊断文本：包含文件名、来源、状态与错误信息 */
+private fun buildDownloadLog(context: Context, item: DownloadEntity): String = buildString {
+    appendLine("ZexBrowse ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+    appendLine("Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
+    appendLine()
+    appendLine("文件：${item.fileName}")
+    appendLine("来源：${item.sourceUrl}")
+    appendLine("状态：${downloadStatus(context, item)}")
+    appendLine("进度：${item.progress}%（${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}）")
+    if (item.expectedSha256.isNotBlank()) {
+        appendLine("预期 SHA-256：${item.expectedSha256}")
+        appendLine("实际 SHA-256：${item.sha256.ifBlank { "（未生成）" }}")
+    } else if (item.sha256.isNotBlank()) {
+        appendLine("SHA-256：${item.sha256}")
+    }
+    appendLine()
+    append(item.errorMessage.ifBlank { context.getString(R.string.dl_log_empty) })
+}.trimEnd()
+
+/** 分享日志文本：优先走系统分享面板，失败时退回剪贴板 */
+private fun shareDownloadLog(context: Context, item: DownloadEntity, logText: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, item.fileName)
+        putExtra(Intent.EXTRA_TEXT, logText)
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, context.getString(R.string.dl_log_share))) }
+        .onFailure {
+            // 没有任何应用能接收分享时，退回剪贴板，至少让用户能把日志拷走
+            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.dl_log_title), logText))
+            Toast.makeText(context, context.getString(R.string.toast_link_copied), Toast.LENGTH_SHORT).show()
+        }
 }
 
 private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
@@ -4143,38 +4256,133 @@ private fun copyDownloadLink(context: android.content.Context, url: String) {
     clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.s155), url))
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectionMode: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit, onViewLog: () -> Unit) {
     val context = LocalContext.current
     val running = item.status == "queued" || item.status == "downloading"
     val paused = item.status == "paused"
+    // 失败包括：明确的 failed、哈希不符、以及被取消。日志入口只在这几种情况下给
+    val failed = item.status == "failed" || item.status == "hash_mismatch" || item.status == "cancelled"
+    val completed = item.status == "completed"
     var menuExpanded by remember { mutableStateOf(false) }
-    ElevatedCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-            Checkbox(checked = selected, onCheckedChange = { onSelect() })
-            Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(item.fileName, style = MaterialTheme.typography.titleMedium)
-                Text(downloadStatus(context, item), style = MaterialTheme.typography.bodySmall)
-                if (running || paused) {
-                    WavyProgressBar(progress = item.progress / 100f, modifier = Modifier.fillMaxWidth())
-                    Text("${item.progress}% · ${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}")
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (running) {
-                            TextButton(onClick = onPause) { Icon(Icons.Default.Pause, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.s156)) }
-                        } else {
-                            TextButton(onClick = onResume) { Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.s157)) }
-                        }
-                        TextButton(onClick = onCancel) { Text(stringResource(R.string.s078)) }
-                    }
-                } else if (item.status == "completed" || item.status == "hash_mismatch") {
-                    IconButton(onClick = onOpen) { Icon(Icons.Default.OpenInNew, stringResource(R.string.s152)) }
+    // 选中态用主题色容器突出，替代原先左侧的方形复选框：
+    // 没进入选择模式时不应该有任何勾选框干扰阅读
+    val container = if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = container)
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = { if (selectionMode) onSelect() else if (completed) onOpen() },
+                    onLongClick = onSelect
+                )
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 选中标识：只在选择模式下出现，用对勾而非复选框
+            if (selectionMode) {
+                Icon(
+                    if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    item.fileName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                // 状态行：完成且无错误时不显示任何状态文字（不写「下载成功」）；
+                // 失败只给一句带出路的提示，不在这里倾倒日志
+                val subtitle = when {
+                    failed -> stringResource(R.string.dl_failed_hint)
+                    running || paused -> downloadStatus(context, item)
+                    else -> null
                 }
-                if (item.errorMessage.isNotBlank()) Text(item.errorMessage, color = MaterialTheme.colorScheme.error)
-                if (item.sha256.isNotBlank()) Text("SHA-256：${item.sha256}", style = MaterialTheme.typography.bodySmall)
+                if (subtitle != null) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (running || paused) {
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { (item.progress / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(4.dp)
+                    )
+                    Text(
+                        "${item.progress}% · ${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            // 操作区：一律图标按钮，不铺文字；
+            // 只在选择模式外显示，避免与勾选操作抢点击
+            if (!selectionMode) {
+                when {
+                    running -> {
+                        IconButton(onClick = onPause, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Rounded.Pause, stringResource(R.string.s156), modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Close, stringResource(R.string.dl_cancel_download), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    paused -> {
+                        IconButton(onClick = onResume, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Rounded.PlayArrow, stringResource(R.string.s157), modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Close, stringResource(R.string.dl_cancel_download), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    completed -> {
+                        IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.OpenInNew, stringResource(R.string.s152), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
             }
             Box {
-                IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.s115)) }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) { DropdownMenuItem(text = { Text(stringResource(R.string.s145)) }, onClick = { menuExpanded = false; onDelete() }) }
+                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.MoreVert, stringResource(R.string.s115), modifier = Modifier.size(20.dp))
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    if (failed) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.dl_view_log)) },
+                            leadingIcon = { Icon(Icons.Rounded.Article, null) },
+                            onClick = { menuExpanded = false; onViewLog() }
+                        )
+                    }
+                    if (completed) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.dl_open_file)) },
+                            leadingIcon = { Icon(Icons.Default.OpenInNew, null) },
+                            onClick = { menuExpanded = false; onOpen() }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.s145)) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null) },
+                        onClick = { menuExpanded = false; onDelete() }
+                    )
+                }
             }
         }
     }
