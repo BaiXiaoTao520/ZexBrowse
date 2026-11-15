@@ -4455,7 +4455,7 @@ private fun securityModeSubtitle(context: Context, settings: BrowserSettings): S
  * 水波纹说明：使用 [Card] 的 onClick 重载，水波纹由卡片自身的 [shape] 裁剪，
  * 与实际卡片形状完全一致；若改用 Modifier.clickable，水波纹会溢出圆角边界。
  */@Composable
-private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp, accent: Boolean = false, colorIndex: Int = 0) {
+private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp, accent: Boolean = false, colorIndex: Int = 0, enabled: Boolean = true) {
     // 缤纷色彩下每个入口图标取不同颜色；accent（如「设为默认浏览器」）保持红色警示色，
     // 因为它表达的是「待办/需注意」而非普通入口
     val (iconBg, iconFg) = if (accent) {
@@ -4465,6 +4465,7 @@ private fun SettingsEntry(title: String, subtitle: String, icon: androidx.compos
     }
     Card(
         onClick = onClick,
+        enabled = enabled,
         modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 6.dp),
         shape = MaterialTheme.shapes.large,
         // accent 仅用于需要突出的单项入口（如「设为默认浏览器」）；其余入口保持默认配色
@@ -6779,6 +6780,7 @@ private fun AboutScreen(
                 subtitle = stringResource(R.string.s300),
                 icon = Icons.Default.SystemUpdate,
                 onClick = {
+                    if (checking) return@SettingsEntry
                     checking = true
                     scope.launch {
                         val checker = UpdateChecker()
@@ -6796,7 +6798,8 @@ private fun AboutScreen(
                     }
                 },
                 horizontalPadding = 0.dp,
-                colorIndex = 3
+                colorIndex = 3,
+                enabled = !checking
             )
         }
     }
