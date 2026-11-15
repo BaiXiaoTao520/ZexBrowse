@@ -80,7 +80,7 @@ android {
 
     defaultConfig {
         applicationId = "com.zex.zexbrowse"
-        minSdk = 28
+        minSdk = 29
         targetSdk = 37
         versionCode = 93
         versionName = "12.0.1"

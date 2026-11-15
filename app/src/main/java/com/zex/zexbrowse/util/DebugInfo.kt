@@ -60,11 +60,9 @@ object DebugInfo {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }.getOrNull().orEmpty()
 
-    @Suppress("DEPRECATION")
     fun appVersionCode(context: Context): Long = runCatching {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
-        else info.versionCode.toLong()
+        info.longVersionCode
     }.getOrDefault(0L)
 
     /** APK 安装来源与签名摘要，用于确认装的是自建包还是应用商店重签包 */
@@ -82,7 +80,6 @@ object DebugInfo {
     }.getOrElse { "读取失败" }
 
     fun signatureSummary(context: Context): String = runCatching {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return@runCatching "不可用"
         val info = context.packageManager
             .getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
             .signingInfo
