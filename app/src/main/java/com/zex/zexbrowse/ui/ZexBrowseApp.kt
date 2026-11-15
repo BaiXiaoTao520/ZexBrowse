@@ -7109,13 +7109,15 @@ private fun SponsorDialog(onDismiss: () -> Unit) {
                 Text(stringResource(R.string.s420), style = MaterialTheme.typography.bodyMedium)
                 Text(stringResource(R.string.s421), style = MaterialTheme.typography.bodyMedium)
             }
-            Button(
-                onClick = { openInBrowser(context, SPONSOR_PAGE_URL); animateDismiss() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.VolunteerActivism, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.s422))
+            // 主操作按钮右对齐，不拉满整行：
+            // 赞助是自愿行为，按钮不占满宽度也和「非强制」的语气一致；
+            // Button（实心主色）保留为视觉重心，与上方正文区分开
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Button(onClick = { openInBrowser(context, SPONSOR_PAGE_URL); animateDismiss() }) {
+                    Icon(Icons.Rounded.VolunteerActivism, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.s422))
+                }
             }
         }
     }
