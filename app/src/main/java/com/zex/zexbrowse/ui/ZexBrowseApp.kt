@@ -6959,14 +6959,6 @@ private fun UpdateSettingsSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // 先播收回动画再销毁，否则面板会从组合中直接消失
-    val scope = rememberCoroutineScope()
-    val animateDismiss: () -> Unit = {
-        scope.launch {
-            runCatching { sheetState.hide() }
-            onDismiss()
-        }
-    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -7032,9 +7024,6 @@ private fun UpdateSettingsSheet(
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(stringResource(if (checking) R.string.s410 else R.string.s411))
-            }
-            TextButton(onClick = animateDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.s071))
             }
         }
     }
@@ -7220,16 +7209,6 @@ private fun UpdateIntroDialog(
     val context = LocalContext.current
     val effectiveUrl = release.downloadUrl
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // 收回时先播完隐藏动画，再从组合中移除。
-    // 若直接把状态置 null（上层 onDismiss），ModalBottomSheet 会被立刻从组合中
-    // 摘下，收回动画来不及播放，看起来就是「啪一下消失」。
-    val scope = rememberCoroutineScope()
-    val animateDismiss: () -> Unit = {
-        scope.launch {
-            runCatching { sheetState.hide() }
-            onDismiss()
-        }
-    }
     // 改为底部面板：与语言选择保持一致，四角圆角、带拖拽小横条、
     // 高度按内容自适应（更新日志限高、内部可滚动），不再弹一个满屏对话框。
     ModalBottomSheet(
@@ -7328,9 +7307,6 @@ private fun UpdateIntroDialog(
                 Icon(Icons.Default.Download, null)
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.s069))
-            }
-            TextButton(onClick = animateDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.s071))
             }
         }
     }
