@@ -7097,7 +7097,7 @@ private fun SponsorDialog(onDismiss: () -> Unit) {
                 )
             }
             Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(stringResource(R.string.s414), style = MaterialTheme.typography.bodyMedium)
