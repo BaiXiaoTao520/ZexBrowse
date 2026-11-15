@@ -6838,7 +6838,7 @@ private fun AboutScreen(
             }
             SettingsEntry(
                 title = stringResource(R.string.s285),
-                subtitle = stringResource(R.string.s300),
+                subtitle = stringResource(R.string.about_contributors_sub),
                 icon = Icons.Rounded.ContactSupport,
                 onClick = {
                     val request = ++contributorsRequest
@@ -6854,6 +6854,15 @@ private fun AboutScreen(
                 },
                 horizontalPadding = 0.dp,
                 colorIndex = 1
+            )
+            // 赞助与支持：自愿原则，点开说明面板后再决定是否前往
+            SettingsEntry(
+                title = stringResource(R.string.s406),
+                subtitle = stringResource(R.string.s407),
+                icon = Icons.Rounded.VolunteerActivism,
+                onClick = onSponsor,
+                horizontalPadding = 0.dp,
+                colorIndex = 2
             )
             // 自动检查与手动检查合并为一个入口，点开底部面板后再分别操作：
             // 页面上并排两个与「更新」相关的卡片会显得重复
@@ -7035,42 +7044,83 @@ private fun UpdateSettingsSheet(
     }
 }
 
-/** 赞助与支持说明弹窗：自愿原则，点击按钮直接前往爱发电赞助页 */
+/**
+ * 赞助与支持：底部面板形式，与语言选择、更新设置、版本更新保持同一套交互。
+ *
+ * 正文较长，面板内正文块限高并在内部滚动，
+ * 避免小屏上「前往赞助」按钮被顶出屏幕。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SponsorDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 「前往赞助」跳转后需连带关闭面板：先播完收回动画再销毁
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.VolunteerActivism, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.s406))
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.VolunteerActivism,
+                            null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    stringResource(R.string.s406),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-        },
-        text = {
             Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(stringResource(R.string.s414))
-                Text(stringResource(R.string.s415))
-                Text(stringResource(R.string.s416))
+                Text(stringResource(R.string.s414), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.s415), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.s416), style = MaterialTheme.typography.bodyMedium)
                 Text(stringResource(R.string.s417), style = MaterialTheme.typography.titleSmall)
-                Text(stringResource(R.string.s418))
-                Text(stringResource(R.string.s419))
-                Text(stringResource(R.string.s420))
-                Text(stringResource(R.string.s421))
+                Text(stringResource(R.string.s418), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.s419), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.s420), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.s421), style = MaterialTheme.typography.bodyMedium)
             }
-        },
-        confirmButton = {
-            Button(onClick = { openInBrowser(context, SPONSOR_PAGE_URL); onDismiss() }) {
-                Icon(Icons.Rounded.VolunteerActivism, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.s422))
+            // 主操作按钮右对齐，不拉满整行：
+            // 赞助是自愿行为，按钮不占满宽度也和「非强制」的语气一致；
+            // Button（实心主色）保留为视觉重心，与上方正文区分开
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Button(onClick = { openInBrowser(context, SPONSOR_PAGE_URL); animateDismiss() }) {
+                    Icon(Icons.Rounded.VolunteerActivism, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.s422))
+                }
             }
         }
-    )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

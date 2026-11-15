@@ -412,6 +412,7 @@
     <string name="s402">This project is open source under the Mozilla Public License 2.0 (MPL-2.0). GeckoView and related components follow Mozilla\'s respective licenses. Jetpack Compose, Material 3 and AndroidX libraries follow their own licenses.</string>
     <string name="s403">GitHub repository</string>
     <string name="about_github_sub">Open on GitHub</string>
+    <string name="about_contributors_sub">See who contributed to this project</string>
     <string name="update_settings_title">Update settings</string>
     <string name="update_settings_sub">Automatic and manual update checks</string>
     <string name="update_check_title">Check for updates</string>

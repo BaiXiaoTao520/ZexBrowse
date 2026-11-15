@@ -412,6 +412,7 @@
     <string name="s402">本项目采用 Mozilla Public License 2.0 (MPL-2.0) 开源。GeckoView 及其相关组件遵循 Mozilla 的相应开源许可。Jetpack Compose、Material 3 和 AndroidX 库遵循各自许可证。</string>
     <string name="s403">GitHub 仓库</string>
     <string name="about_github_sub">前往访问</string>
+    <string name="about_contributors_sub">查看为项目做出贡献的开发者</string>
     <string name="update_settings_title">更新设置</string>
     <string name="update_settings_sub">自动检查与手动检查更新</string>
     <string name="update_check_title">检查更新</string>
