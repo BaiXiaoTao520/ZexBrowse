@@ -9,7 +9,7 @@
 
 ZexBrowse 是一款基于 **GeckoView（Firefox 内核）**、Kotlin 和 Jetpack Compose Material 3 的开源 Android 浏览器。
 
-- 支持 Android 8.0（API 28）及以上，已适配 Android 17（API 37）
+- 支持 Android 10（API 29）及以上，已适配 Android 17（API 37）
 - 许可证：[Mozilla Public License 2.0](LICENSE)
 
 ## 功能

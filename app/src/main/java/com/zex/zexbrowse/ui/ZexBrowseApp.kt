@@ -869,7 +869,7 @@ private fun isAppDefaultBrowser(context: Context): Boolean {
  * 而该值仅在 startActivityForResult 启动时才非空；用 startActivity 会被系统直接忽略。
  */
 private fun defaultBrowserRoleIntent(context: Context): Intent? {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+    // minSdk 29 起 RoleManager 一定存在，不再需要版本分支
     return runCatching {
         val roleManager = context.getSystemService(android.app.role.RoleManager::class.java)
         if (roleManager == null || !roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) return null

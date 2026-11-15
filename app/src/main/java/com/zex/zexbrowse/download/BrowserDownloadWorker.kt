@@ -12,7 +12,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
@@ -346,11 +345,8 @@ class BrowserDownloadWorker(appContext: Context, params: WorkerParameters) : Cor
             .setProgress(100, progress, indeterminate)
         applyLiveUpdate(builder, progress, indeterminate)
         val notification = builder.build()
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(foregroundNotificationId(id), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(foregroundNotificationId(id), notification)
-        }
+        // minSdk 29 起始终支持前台服务类型，不再需要旧版本分支
+        return ForegroundInfo(foregroundNotificationId(id), notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
     }
 
     /**
