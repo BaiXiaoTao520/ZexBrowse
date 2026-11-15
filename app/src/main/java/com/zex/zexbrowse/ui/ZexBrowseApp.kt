@@ -7304,8 +7304,8 @@ private fun UpdateIntroDialog(
                 )
             }
 
-            // 按钮顺序：主操作（下载）在上、取消在下。
-            // 更符合「先看到主要动作、再决定是否退出」的阅读顺序。
+            // 按钮顺序：主操作（下载）在上、稍后更新在下。
+            // 更符合「先看到主要动作、再决定是否暂缓」的阅读顺序。
             Spacer(Modifier.height(4.dp))
             Button(
                 enabled = effectiveUrl.isNotBlank(),
