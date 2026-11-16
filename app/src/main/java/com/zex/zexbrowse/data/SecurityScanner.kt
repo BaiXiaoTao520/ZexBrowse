@@ -382,32 +382,17 @@ object SecurityScanner {
         .replace("cl", "d")
         .replace("-", "")
 
-    /**
-     * 判断 host 是否属于域名 domain（含其子域与各国官方变体）。
-     *
-     * 只加两种扩展形态，不放开任意包含关系：
-     *
-     * - `google.com.hk`、`google.com.tw`：「品牌.原后缀.两字母国家码」
-     * - `google.co.jp`：「品牌.二级后缀.两字母国家码」
-     *
-     * 多一层子域就不算（`google.com.evil.hk` 仍被拦），
-     * 否則只能手工往上堆名单，google 这种有上百个国家站的品牌总是漏。
-     */
-    private fun matchesDomain(host: String, domain: String): Boolean {
-        if (host == domain || host.endsWith(".$domain")) return true
-        val brandCore = domain.substringBefore('.')
-        val brandTld = domain.substringAfter('.', "")
-        val labels = host.removePrefix("www.").split('.').filter { it.isNotBlank() }
-        if (labels.size != 3 || labels[0] != brandCore) return false
-        val second = labels[1]
-        // 末段必须是两字母国家/地区码，否则就是另一个独立域名
-        if (labels[2].length != 2) return false
-        if (brandTld.isNotEmpty() && second == brandTld) return true
-        return second in CC_SECOND_LEVEL
-    }
+    /** Match only known domains and their subdomains; suffix shape cannot prove ownership. */
+    private fun matchesDomain(host: String, domain: String): Boolean =
+        host == domain || host.endsWith(".$domain") ||
+            VERIFIED_COUNTRY_DOMAINS[domain].orEmpty().any {
+                host == it || host.endsWith(".$it")
+            }
 
-    /** 国家后缀下常见的二级域，如 co.jp / com.cn / or.kr 里的前缀 */
-    private val CC_SECOND_LEVEL = setOf("com", "co", "net", "org", "gov", "edu", "ac", "or", "ne", "go")
+    // Official country domains already identified by the scanner's country-domain contract.
+    private val VERIFIED_COUNTRY_DOMAINS = mapOf(
+        "google.com" to setOf("google.com.hk", "google.com.tw", "google.co.jp")
+    )
 
     /** 已知安全的大站：跳过启发式判定，避免 .top 等后缀或长度规则误伤 */
     private fun isWhitelisted(host: String): Boolean =

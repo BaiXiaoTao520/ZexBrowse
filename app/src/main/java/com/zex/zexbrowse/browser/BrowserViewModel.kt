@@ -455,7 +455,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val hasCert = securityInfo.certificate != null
                 val secure = securityInfo.isSecure && !securityInfo.isException
                 update(id) { tab ->
-                    tab.copy(
+                    // A blocked fake-site page owns its risk; Gecko may still report the previous page.
+                    if (tab.fakeSite != null) tab else tab.copy(
                         risk = connectionSecurity.onSecurityChange(
                             securityOrigin = securityInfo.origin,
                             isSecure = secure,

@@ -33,6 +33,19 @@ class SecurityScannerTest {
         }
     }
 
+    @Test fun countrySuffixShapeDoesNotGrantTrust() {
+        for (host in listOf("github.com.tk", "github.co.tk", "google.com.tk", "google.co.tk", "google.com.evil.hk")) {
+            val result = SecurityScanner.assessUrl("https://$host/silverfox")
+            assertEquals(host, RiskLevel.DANGEROUS, result.level)
+            assertEquals(host, R.string.risk_reason_trojan, result.reasonRes)
+        }
+        for (host in listOf("google.com.hk", "google.com.tw", "google.co.jp", "maps.google.co.jp")) {
+            assertEquals(host, RiskLevel.SAFE, SecurityScanner.assessUrl("https://$host/silverfox").level)
+        }
+        assertEquals(R.string.risk_reason_impersonation,
+            SecurityScanner.assessUrl("https://google.co.tk/").reasonRes)
+    }
+
     @Test fun establishedRulesStillApplyToTheActualHost() {
         assertEquals(RiskLevel.SAFE, SecurityScanner.assessUrl("https://sub.github.com\\page").level)
         assertEquals(RiskLevel.SAFE, SecurityScanner.assessUrl("https://github.com:443/silverfox").level)
