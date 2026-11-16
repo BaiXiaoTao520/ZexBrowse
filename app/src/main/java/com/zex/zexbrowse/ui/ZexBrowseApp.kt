@@ -202,6 +202,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -4166,7 +4168,7 @@ private fun DownloadLogSheet(item: DownloadEntity, onDismiss: () -> Unit) {
                 )
             }
             Surface(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 320.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 shape = MaterialTheme.shapes.medium
             ) {
@@ -4342,6 +4344,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                     onClick = { if (selectionMode) onSelect() else if (completed) onOpen() },
                     onLongClick = onSelect
                 )
+                .semantics { if (selectionMode) this.selected = selected }
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
