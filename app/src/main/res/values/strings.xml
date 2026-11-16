@@ -666,7 +666,9 @@
     <string name="risk_reason_known_bad">已知风险网站</string>
     <string name="risk_reason_trojan">疑似木马或欺诈</string>
     <string name="risk_reason_impersonation">疑似仿冒网站</string>
+    <string name="risk_reason_fake_site">已知假冒站点</string>
     <string name="risk_detail_impersonation">该域名与 %1$s 高度相似，但不是其官方域名，常用于骗取账号密码。</string>
+    <string name="risk_detail_fake_site">该网站为人工确认的假冒站点，已阻止访问。请勿输入任何账号或个人信息。</string>
     <string name="risk_reason_punycode">域名含特殊字符</string>
     <string name="risk_detail_punycode">该域名使用编码字符，显示出来可能与真实网站几乎一样，请仔细核对。</string>
     <string name="risk_reason_bad_tld">可疑域名后缀</string>

@@ -666,7 +666,9 @@
     <string name="risk_reason_known_bad">Known risky site</string>
     <string name="risk_reason_trojan">Suspected trojan or fraud</string>
     <string name="risk_reason_impersonation">Suspected impersonation</string>
+    <string name="risk_reason_fake_site">Known fake site</string>
     <string name="risk_detail_impersonation">This domain closely resembles %1$s but is not its official domain. Such sites are used to steal credentials.</string>
+    <string name="risk_detail_fake_site">This site is a confirmed fake and has been blocked. Do not enter any account or personal information.</string>
     <string name="risk_reason_punycode">Domain uses unusual characters</string>
     <string name="risk_detail_punycode">This domain uses encoded characters and may look almost identical to a real site. Check it carefully.</string>
     <string name="risk_reason_bad_tld">Suspicious domain suffix</string>

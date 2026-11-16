@@ -174,6 +174,17 @@ object SecurityScanner {
         // 白名单优先：已知安全的大站不做后续启发式判定，避免误伤
         if (isWhitelisted(host)) return RiskAssessment()
 
+        // 已知假冒站点：名单本身是人工确认过的，优先于其他规则报出真实原因。
+        // 之前只在导航层拦页面，扫描层不知道这件事，地址栏护盾仍显示「安全」，
+        // 于是同一页上「禁止访问」与「连接安全」两个结论互相矛盾。
+        FakeSites.match(url)?.let {
+            return RiskAssessment(
+                level = RiskLevel.DANGEROUS,
+                reasonRes = R.string.risk_reason_fake_site,
+                detailRes = R.string.risk_detail_fake_site
+            )
+        }
+
         // 2. 内置黑名单（域名与路径关键词）
         blockedDomain(host)?.let {
             return RiskAssessment(level = RiskLevel.DANGEROUS, reasonRes = R.string.risk_reason_known_bad, detailRes = it)
@@ -277,7 +288,9 @@ object SecurityScanner {
      * 完全相等、或仅差一个同形字符时，才判定为仿冒。
      */
     private fun impersonatedBrand(host: String): String? {
-        if (OFFICIAL_DOMAINS.any { host == it || host.endsWith(".$it") }) return null
+        // 官方域名及其各国变体（google.com.hk 等）直接放行，
+        // 否则会被下面的「归一化后与品牌名相同」规则当成仿冒
+        if (OFFICIAL_DOMAINS.any { matchesDomain(host, it) }) return null
 
         val core = host.removePrefix("www.")
         val labels = core.split('.').filter { it.isNotBlank() }
@@ -369,9 +382,36 @@ object SecurityScanner {
         .replace("cl", "d")
         .replace("-", "")
 
+    /**
+     * 判断 host 是否属于域名 domain（含其子域与各国官方变体）。
+     *
+     * 只加两种扩展形态，不放开任意包含关系：
+     *
+     * - `google.com.hk`、`google.com.tw`：「品牌.原后缀.两字母国家码」
+     * - `google.co.jp`：「品牌.二级后缀.两字母国家码」
+     *
+     * 多一层子域就不算（`google.com.evil.hk` 仍被拦），
+     * 否則只能手工往上堆名单，google 这种有上百个国家站的品牌总是漏。
+     */
+    private fun matchesDomain(host: String, domain: String): Boolean {
+        if (host == domain || host.endsWith(".$domain")) return true
+        val brandCore = domain.substringBefore('.')
+        val brandTld = domain.substringAfter('.', "")
+        val labels = host.removePrefix("www.").split('.').filter { it.isNotBlank() }
+        if (labels.size != 3 || labels[0] != brandCore) return false
+        val second = labels[1]
+        // 末段必须是两字母国家/地区码，否则就是另一个独立域名
+        if (labels[2].length != 2) return false
+        if (brandTld.isNotEmpty() && second == brandTld) return true
+        return second in CC_SECOND_LEVEL
+    }
+
+    /** 国家后缀下常见的二级域，如 co.jp / com.cn / or.kr 里的前缀 */
+    private val CC_SECOND_LEVEL = setOf("com", "co", "net", "org", "gov", "edu", "ac", "or", "ne", "go")
+
     /** 已知安全的大站：跳过启发式判定，避免 .top 等后缀或长度规则误伤 */
     private fun isWhitelisted(host: String): Boolean =
-        SAFE_DOMAINS.any { host == it || host.endsWith(".$it") }
+        SAFE_DOMAINS.any { matchesDomain(host, it) }
 
     /** 已知风险域名（示例名单，可在后续按需扩充） */
     private val BLOCKED_DOMAINS: Map<String, Int> = mapOf(

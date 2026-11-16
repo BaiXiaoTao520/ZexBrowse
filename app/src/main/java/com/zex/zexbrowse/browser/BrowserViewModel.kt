@@ -598,6 +598,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                             failedUrl = "",
                             restrictedEngine = null,
                             beforeRestrictedUrl = "",
+                            // 同时刷新扫描结论：地址栏护盾读的是 risk，
+                            // 不一起设就会在禁止访问页上仍显示「安全」
+                            risk = SecurityScanner.assessUrl(uri),
                             fakeSite = hit
                         )
                     }
@@ -892,6 +895,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     failedUrl = "",
                     restrictedEngine = null,
                     beforeRestrictedUrl = "",
+                    // 同上：护盾与详情弹窗都依赖 risk
+                    risk = SecurityScanner.assessUrl(target),
                     fakeSite = hit
                 )
             }
