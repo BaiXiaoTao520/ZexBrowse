@@ -477,6 +477,7 @@
     <string name="dl_err_empty_body">下載回應內容為空</string>
     <string name="dl_err_incomplete">本機檔案不完整，無法繼續下載，請重新下載。</string>
     <string name="dl_err_no_resume">此儲存位置不支援續傳，請重新下載。</string>
+    <string name="dl_retry_failed">重試失敗，請稍後再試</string>
     <string name="dl_err_cannot_write">無法寫入所選位置</string>
     <string name="dl_err_http">下載失敗：%1$s</string>
     <string name="dl_err_dir_unavailable">外部下載目錄無法使用</string>

@@ -110,6 +110,33 @@ class DownloadScheduler(private val context: Context) {
         database.downloadDao().delete(id)
     }
 
+    /**
+     * 重试一条已取消或已失败的下载。
+     *
+     * 走「重新下一遍」而不是续传：取消时文件已被删、失败时内容不完整，
+     * 拼起来比从头下风险还高。
+     * 顺序上是「先入队新任务，成功后才删旧记录与旧文件」：
+     * 反过来的话入队一报错，用户就同时失去记录和文件，连再点一次都不行。
+     * 不能复用 capturedBodies：那是一次性令牌的本地副本，当时已经消费过了。
+     */
+    suspend fun retry(id: String, useExternalDirectory: Boolean, externalTreeUri: String): Boolean = withContext(Dispatchers.IO) {
+        val record = database.downloadDao().find(id) ?: return@withContext false
+        workManager.cancelAllWorkByTag(id)
+        val created = runCatching {
+            enqueue(
+                record.sourceUrl,
+                originalFileName(record.fileName, id),
+                record.expectedSha256,
+                useExternalDirectory,
+                externalTreeUri
+            )
+        }.getOrNull() ?: return@withContext false
+        // 旧记录与旧文件此刻才清：新任务已经落库，清掉不会让用户失去重试入口
+        if (record.ownsTarget) deleteTarget(Uri.parse(record.targetUri))
+        database.downloadDao().delete(id)
+        created.isNotBlank()
+    }
+
     /** 目标文件当前已写入的字节数；不存在或读不到时返回 0 */
     private fun existingSize(target: Uri): Long = if (target.scheme == "file") {
         internalTarget(target).length()
@@ -172,4 +199,17 @@ internal fun downloadTargetName(fileName: String, id: String): String {
         .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "download"
     val dot = base.lastIndexOf('.')
     return if (dot > 0) "${base.substring(0, dot)}-$id${base.substring(dot)}" else "$base-$id"
+}
+
+/**
+ * [downloadTargetName] 的逆运算：从落盘名还原用户看到的文件名，
+ * `name-<id>.apk` → `name.apk`。
+ * 重试时用它重新入队，否则文件名会一层层叠上任务后缀。
+ */
+internal fun originalFileName(targetName: String, id: String): String {
+    val dot = targetName.lastIndexOf('.')
+    val stem = if (dot > 0) targetName.substring(0, dot) else targetName
+    val ext = if (dot > 0) targetName.substring(dot) else ""
+    val cleaned = stem.removeSuffix("-$id")
+    return if (cleaned.isBlank()) "download$ext" else cleaned + ext
 }

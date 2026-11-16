@@ -4094,6 +4094,7 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
                         onCancel = { viewModel.cancelDownload(item.id) },
                         onPause = { viewModel.pauseDownload(item.id) },
                         onResume = { viewModel.resumeDownload(item.id) },
+                        onRetry = { viewModel.retryDownload(item.id) },
                         onOpen = { openDownload(context, item) },
                         onDelete = { deleteTargets = setOf(item.id); showDeleteConfirmation = true },
                         onViewLog = { logItemId = item.id }
@@ -4314,7 +4315,7 @@ private fun copyDownloadLink(context: android.content.Context, url: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectionMode: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit, onViewLog: () -> Unit) {
+private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectionMode: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onRetry: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit, onViewLog: () -> Unit) {
     val context = LocalContext.current
     val running = item.status == "queued" || item.status == "downloading"
     val paused = item.status == "paused"
@@ -4420,6 +4421,13 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                             Icon(Icons.Default.OpenInNew, stringResource(R.string.s152), modifier = Modifier.size(20.dp))
                         }
                     }
+                    // 已取消与失败都给重试：这两类都是「没拿到文件但可以再试一次」，
+                    // 重试是用户在这种状态下最想要的动作，放在行内一键直达
+                    failed || cancelled -> {
+                        IconButton(onClick = onRetry, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Refresh, stringResource(R.string.s437), modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
             Box {
@@ -4432,6 +4440,15 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                             text = { Text(stringResource(R.string.dl_view_log)) },
                             leadingIcon = { Icon(Icons.Rounded.Article, null) },
                             onClick = { menuExpanded = false; onViewLog() }
+                        )
+                    }
+                    // 行内只留一个重试图标，菜单里再放一份文字版，
+                    // 否则只看图标不一定能认出这是「重试」
+                    if (failed || cancelled) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.s437)) },
+                            leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                            onClick = { menuExpanded = false; onRetry() }
                         )
                     }
                     if (completed) {

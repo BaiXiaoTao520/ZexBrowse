@@ -477,6 +477,7 @@
     <string name="dl_err_empty_body">下载响应内容为空</string>
     <string name="dl_err_incomplete">本地文件不完整，无法继续下载，请重新下载</string>
     <string name="dl_err_no_resume">该保存位置不支持断点续传，请重新下载</string>
+    <string name="dl_retry_failed">重试失败，请稍后再试</string>
     <string name="dl_err_cannot_write">无法写入所选位置</string>
     <string name="dl_err_http">下载失败：%1$s</string>
     <string name="dl_err_dir_unavailable">外部下载目录不可用</string>

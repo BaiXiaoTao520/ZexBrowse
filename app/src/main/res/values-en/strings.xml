@@ -477,6 +477,7 @@
     <string name="dl_err_empty_body">The download response was empty</string>
     <string name="dl_err_incomplete">The local file is incomplete and cannot be resumed. Please download again.</string>
     <string name="dl_err_no_resume">This location does not support resuming. Please download again.</string>
+    <string name="dl_retry_failed">Retry failed. Please try again later.</string>
     <string name="dl_err_cannot_write">Cannot write to the selected location</string>
     <string name="dl_err_http">Download failed: %1$s</string>
     <string name="dl_err_dir_unavailable">The external download folder is unavailable</string>
