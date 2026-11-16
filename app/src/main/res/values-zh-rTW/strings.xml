@@ -485,6 +485,7 @@
     <string name="dl_err_empty_body">下載回應內容為空</string>
     <string name="dl_err_incomplete">本機檔案不完整，無法繼續下載，請重新下載。</string>
     <string name="dl_err_no_resume">此儲存位置不支援續傳，請重新下載。</string>
+    <string name="dl_retry_failed">重試失敗，請稍後再試</string>
     <string name="dl_err_cannot_write">無法寫入所選位置</string>
     <string name="dl_err_http">下載失敗：%1$s</string>
     <string name="dl_err_dir_unavailable">外部下載目錄無法使用</string>
@@ -674,7 +675,9 @@
     <string name="risk_reason_known_bad">已知風險網站</string>
     <string name="risk_reason_trojan">疑似木馬或詐欺</string>
     <string name="risk_reason_impersonation">疑似偽冒網站</string>
+    <string name="risk_reason_fake_site">已知假冒網站</string>
     <string name="risk_detail_impersonation">該網域與 %1$s 高度相似，但不是其官方網域，常用於騙取帳號密碼。</string>
+    <string name="risk_detail_fake_site">該網站為人工確認的假冒網站，已阻止存取。請勿輸入任何帳號或個人資訊。</string>
     <string name="risk_reason_punycode">網域含特殊字元</string>
     <string name="risk_detail_punycode">該網域使用編碼字元，顯示出來可能與真實網站幾乎一樣，請仔細核對。</string>
     <string name="risk_reason_bad_tld">可疑網域後綴</string>

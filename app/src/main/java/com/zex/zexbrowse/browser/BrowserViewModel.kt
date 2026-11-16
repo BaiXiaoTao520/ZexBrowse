@@ -455,7 +455,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 val hasCert = securityInfo.certificate != null
                 val secure = securityInfo.isSecure && !securityInfo.isException
                 update(id) { tab ->
-                    tab.copy(
+                    // A blocked fake-site page owns its risk; Gecko may still report the previous page.
+                    if (tab.fakeSite != null) tab else tab.copy(
                         risk = connectionSecurity.onSecurityChange(
                             securityOrigin = securityInfo.origin,
                             isSecure = secure,
@@ -598,6 +599,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                             failedUrl = "",
                             restrictedEngine = null,
                             beforeRestrictedUrl = "",
+                            // 同时刷新扫描结论：地址栏护盾读的是 risk，
+                            // 不一起设就会在禁止访问页上仍显示「安全」
+                            risk = SecurityScanner.assessUrl(uri),
                             fakeSite = hit
                         )
                     }
@@ -892,6 +896,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     failedUrl = "",
                     restrictedEngine = null,
                     beforeRestrictedUrl = "",
+                    // 同上：护盾与详情弹窗都依赖 risk
+                    risk = SecurityScanner.assessUrl(target),
                     fakeSite = hit
                 )
             }
@@ -1058,6 +1064,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             if (!downloadScheduler.resume(id)) {
                 android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.dl_err_no_resume), android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    /**
+     * 重试一条已取消或已失败的下载。
+     *
+     * 走「删旧建新」而不是续传：取消时文件已被删、失败时内容不完整，
+     * 拼起来比重新下一遍风险还高。旧记录在新任务成功入队后才清，
+     * 所以列表里不会出现两条同名条目，也不会因为入队失败而连记录都没了。
+     * 不能复用 capturedBodies：那是一次性令牌的本地副本，当时已经消费过了。
+     */
+    fun retryDownload(id: String) {
+        viewModelScope.launch {
+            val ok = runCatching {
+                downloadScheduler.retry(
+                    id,
+                    browserSettings.downloadDirectoryMode == "external",
+                    browserSettings.externalDownloadTreeUri
+                )
+            }.getOrDefault(false)
+            if (!ok) {
+                android.widget.Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.dl_retry_failed), android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }

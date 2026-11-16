@@ -17,11 +17,15 @@ import com.zex.zexbrowse.R
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.DownloadEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
 class DownloadScheduler(private val context: Context) {
+    private val retryMutex = Mutex()
     private val database = BrowserDatabase.create(context)
     private val workManager = WorkManager.getInstance(context)
 
@@ -37,25 +41,39 @@ class DownloadScheduler(private val context: Context) {
         val finalName = fileName
         val id = UUID.randomUUID().toString()
         val (target, targetName) = createTargetUri(finalName, id, useExternalDirectory, externalTreeUri)
-        database.downloadDao().save(
-            DownloadEntity(
-                id = id,
-                fileName = targetName,
-                sourceUrl = url,
-                targetUri = target.toString(),
-                expectedSha256 = expectedHash.trim(),
-                ownsTarget = true
+        try {
+            database.downloadDao().save(
+                DownloadEntity(
+                    id = id,
+                    fileName = targetName,
+                    sourceUrl = url,
+                    targetUri = target.toString(),
+                    expectedSha256 = expectedHash.trim(),
+                    ownsTarget = true
+                )
             )
-        )
-        val input = Data.Builder()
-            .putString(BrowserDownloadWorker.KEY_ID, id)
-            .putString(BrowserDownloadWorker.KEY_URL, url)
-            .putString(BrowserDownloadWorker.KEY_URI, target.toString())
-            .putString(BrowserDownloadWorker.KEY_FILE_NAME, targetName)
-            .putString(BrowserDownloadWorker.KEY_EXPECTED_HASH, expectedHash.trim())
-            .putString(BrowserDownloadWorker.KEY_LOCAL_SOURCE, localSourceBin)
-            .build()
-        workManager.enqueue(OneTimeWorkRequestBuilder<BrowserDownloadWorker>().setInputData(input).addTag(id).build())
+            val input = Data.Builder()
+                .putString(BrowserDownloadWorker.KEY_ID, id)
+                .putString(BrowserDownloadWorker.KEY_URL, url)
+                .putString(BrowserDownloadWorker.KEY_URI, target.toString())
+                .putString(BrowserDownloadWorker.KEY_FILE_NAME, targetName)
+                .putString(BrowserDownloadWorker.KEY_EXPECTED_HASH, expectedHash.trim())
+                .putString(BrowserDownloadWorker.KEY_LOCAL_SOURCE, localSourceBin)
+                .build()
+            workManager.enqueue(OneTimeWorkRequestBuilder<BrowserDownloadWorker>().setInputData(input).addTag(id).build()).result.get()
+        } catch (failure: Exception) {
+            // Registration must succeed before a retry may discard the original download.
+            withContext(NonCancellable) {
+                try {
+                    database.downloadDao().delete(id)
+                } catch (cleanupFailure: Exception) {
+                    failure.addSuppressed(cleanupFailure)
+                } finally {
+                    deleteTarget(target)
+                }
+            }
+            throw failure
+        }
         return@withContext id
     }
 
@@ -108,6 +126,36 @@ class DownloadScheduler(private val context: Context) {
     suspend fun delete(id: String, uri: String, deleteFile: Boolean) {
         if (deleteFile) withContext(Dispatchers.IO) { deleteTarget(Uri.parse(uri)) }
         database.downloadDao().delete(id)
+    }
+
+    /**
+     * 重试一条已取消或已失败的下载。
+     *
+     * 走「重新下一遍」而不是续传：取消时文件已被删、失败时内容不完整，
+     * 拼起来比从头下风险还高。
+     * 顺序上是「先入队新任务，成功后才删旧记录与旧文件」：
+     * 反过来的话入队一报错，用户就同时失去记录和文件，连再点一次都不行。
+     * 不能复用 capturedBodies：那是一次性令牌的本地副本，当时已经消费过了。
+     */
+    suspend fun retry(id: String, useExternalDirectory: Boolean, externalTreeUri: String): Boolean = withContext(Dispatchers.IO) {
+        retryMutex.withLock {
+            // A queued duplicate retry is already satisfied once the original is gone.
+            val record = database.downloadDao().find(id) ?: return@withLock true
+            workManager.cancelAllWorkByTag(id)
+            val created = runCatching {
+                enqueue(
+                    record.sourceUrl,
+                    originalFileName(record.fileName, id),
+                    record.expectedSha256,
+                    useExternalDirectory,
+                    externalTreeUri
+                )
+            }.getOrNull() ?: return@withLock false
+            // 旧记录与旧文件此刻才清：新任务已经落库，清掉不会让用户失去重试入口
+            if (record.ownsTarget) deleteTarget(Uri.parse(record.targetUri))
+            database.downloadDao().delete(id)
+            created.isNotBlank()
+        }
     }
 
     /** 目标文件当前已写入的字节数；不存在或读不到时返回 0 */
@@ -172,4 +220,17 @@ internal fun downloadTargetName(fileName: String, id: String): String {
         .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "download"
     val dot = base.lastIndexOf('.')
     return if (dot > 0) "${base.substring(0, dot)}-$id${base.substring(dot)}" else "$base-$id"
+}
+
+/**
+ * [downloadTargetName] 的逆运算：从落盘名还原用户看到的文件名，
+ * `name-<id>.apk` → `name.apk`。
+ * 重试时用它重新入队，否则文件名会一层层叠上任务后缀。
+ */
+internal fun originalFileName(targetName: String, id: String): String {
+    val dot = targetName.lastIndexOf('.')
+    val stem = if (dot > 0) targetName.substring(0, dot) else targetName
+    val ext = if (dot > 0) targetName.substring(dot) else ""
+    val cleaned = stem.removeSuffix("-$id")
+    return if (cleaned.isBlank()) "download$ext" else cleaned + ext
 }

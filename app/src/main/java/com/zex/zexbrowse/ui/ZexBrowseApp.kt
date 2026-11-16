@@ -166,7 +166,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -209,6 +208,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -2859,7 +2859,9 @@ private fun RecommendationDownloadDialog(
     onDismiss: () -> Unit,
     onCancel: () -> Unit
 ) {
-    val failed = record?.status == "failed" || record?.status == "cancelled"
+    // 取消是用户主动行为，不是失败：只把真正的失败当成错误原因展示
+    val cancelled = record?.status == "cancelled"
+    val failed = record?.status == "failed" || record?.status == "hash_mismatch"
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.s072, app.displayName)) },
@@ -2867,7 +2869,7 @@ private fun RecommendationDownloadDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (finished) {
                     Text(stringResource(R.string.s073))
-                } else if (failed) {
+                } else if (failed || cancelled) {
                     Text(record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed))
                 } else {
                     val progress = record?.progress ?: 0
@@ -3828,22 +3830,22 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                             modifier = Modifier.matchParentSize()
                         )
                     }
-                    // 加载进度条：盖在网页顶端的小细条，不占布局高度，
-                    // 因此网页不会在加载开始/结束时上下跳动
+                    // 加载进度条：盖在网页顶端，不占布局高度，
+                    // 因此网页不会在加载开始/结束时上下跳动。
+                    // 用回波浪条而不是普通细线：一般进度条在高 DPI 屏上细得看不出动，
+                    // 波浪有上下起伏才看得出进度在走；同时把条体压得比原来更薄。
                     if (selectedTab.loading) {
                         val barColor = when {
                             incognitoActive -> IncognitoAccentColor
                             LocalVibrantTheme.current -> vibrantColorAt((selectedTab.progress / 12).toInt())
                             else -> MaterialTheme.colorScheme.primary
                         }
-                        LinearProgressIndicator(
-                            progress = { (selectedTab.progress / 100f).coerceIn(0f, 1f) },
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .fillMaxWidth()
-                                .height(2.dp),
+                        WavyProgressBar(
+                            progress = (selectedTab.progress / 100f).coerceIn(0f, 1f),
+                            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
                             color = barColor,
-                            trackColor = barColor.copy(alpha = 0.15f)
+                            thickness = 3.dp,
+                            wavelength = 18.dp
                         )
                     }
                 }
@@ -4095,6 +4097,7 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
                         onCancel = { viewModel.cancelDownload(item.id) },
                         onPause = { viewModel.pauseDownload(item.id) },
                         onResume = { viewModel.resumeDownload(item.id) },
+                        onRetry = { viewModel.retryDownload(item.id) },
                         onOpen = { openDownload(context, item) },
                         onDelete = { deleteTargets = setOf(item.id); showDeleteConfirmation = true },
                         onViewLog = { logItemId = item.id }
@@ -4321,12 +4324,14 @@ private fun copyDownloadLink(context: android.content.Context, url: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectionMode: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit, onViewLog: () -> Unit) {
+private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectionMode: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onRetry: () -> Unit, onOpen: () -> Unit, onDelete: () -> Unit, onViewLog: () -> Unit) {
     val context = LocalContext.current
     val running = item.status == "queued" || item.status == "downloading"
     val paused = item.status == "paused"
-    // 失败包括：明确的 failed、哈希不符、以及被取消。日志入口只在这几种情况下给
-    val failed = item.status == "failed" || item.status == "hash_mismatch" || item.status == "cancelled"
+    // 真正的失败：中断、网络波动、哈希不符。只有这些情况才有日志可看
+    val failed = item.status == "failed" || item.status == "hash_mismatch"
+    // 取消是用户主动行为，不算失败：只说「已取消」，不报错也不给日志入口
+    val cancelled = item.status == "cancelled"
     val completed = item.status == "completed"
     var menuExpanded by remember { mutableStateOf(false) }
     // 不再用卡片包裹：下载列表应采用「直接贴在页面上」的平铺行，
@@ -4366,8 +4371,10 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                     overflow = TextOverflow.Ellipsis
                 )
                 // 状态行：完成且无错误时不显示任何状态文字（不写「下载成功」）；
-                // 失败只给一句带出路的提示，不在这里倾倒日志
+                // 失败只给一句带出路的提示，不在这里倾倒日志；
+                // 用户自己取消的只说「下载已取消」，用普通文字色，不营造错误观感
                 val subtitle = when {
+                    cancelled -> stringResource(R.string.dl_err_cancelled)
                     failed -> stringResource(R.string.dl_failed_hint)
                     running || paused -> downloadStatus(context, item)
                     else -> null
@@ -4383,9 +4390,13 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                 }
                 if (running || paused) {
                     Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(
-                        progress = { (item.progress / 100f).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(4.dp)
+                    // 与浏览器顶栏用同一种波浪条：进度变化有平滑插值，
+                    // 不会像普通进度条那样一格一格跳
+                    WavyProgressBar(
+                        progress = (item.progress / 100f).coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth(),
+                        thickness = 4.dp,
+                        wavelength = 22.dp
                     )
                     Text(
                         "${item.progress}% · ${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}",
@@ -4420,6 +4431,13 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                             Icon(Icons.Default.OpenInNew, stringResource(R.string.s152), modifier = Modifier.size(20.dp))
                         }
                     }
+                    // 已取消与失败都给重试：这两类都是「没拿到文件但可以再试一次」，
+                    // 重试是用户在这种状态下最想要的动作，放在行内一键直达
+                    failed || cancelled -> {
+                        IconButton(onClick = onRetry, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Refresh, stringResource(R.string.s437), modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
             Box {
@@ -4432,6 +4450,15 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                             text = { Text(stringResource(R.string.dl_view_log)) },
                             leadingIcon = { Icon(Icons.Rounded.Article, null) },
                             onClick = { menuExpanded = false; onViewLog() }
+                        )
+                    }
+                    // 行内只留一个重试图标，菜单里再放一份文字版，
+                    // 否则只看图标不一定能认出这是「重试」
+                    if (failed || cancelled) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.s437)) },
+                            leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                            onClick = { menuExpanded = false; onRetry() }
                         )
                     }
                     if (completed) {
@@ -6999,10 +7026,18 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
  * 加载进度条（波形）。
  *
  * @param color 可选的波浪颜色；无痕页传专属紫，其余页面为 null（跟随主题 primary）
+ * @param thickness 条体总高；调用方按场景给不同尺寸，浏览器顶栏处更薄
+ * @param wavelength 波浪长度；条体变薄时同步缩短，否则一个波峰都看不出来
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier, color: Color? = null) {
+private fun WavyProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    color: Color? = null,
+    thickness: Dp = 4.dp,
+    wavelength: Dp = 24.dp
+) {
     val animated by animateFloatAsState(
         targetValue = progress,
         animationSpec = WavyProgressIndicatorDefaults.ProgressAnimationSpec,
@@ -7013,8 +7048,8 @@ private fun WavyProgressBar(progress: Float, modifier: Modifier = Modifier, colo
     val barTrackColor = color?.copy(alpha = 0.24f) ?: WavyProgressIndicatorDefaults.trackColor
     LinearWavyProgressIndicator(
         progress = { animated },
-        modifier = modifier,
-        wavelength = 24.dp,
+        modifier = modifier.height(thickness),
+        wavelength = wavelength,
         color = barColor,
         trackColor = barTrackColor
     )
