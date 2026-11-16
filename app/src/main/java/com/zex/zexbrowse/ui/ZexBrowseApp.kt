@@ -69,6 +69,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -4070,16 +4071,19 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
         if (downloads.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(stringResource(R.string.s139)) }
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 // 全选入口只在选择模式下出现：默认状态不占位置
                 if (selectionMode) {
                     item {
-                        TextButton(onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() }) {
+                        TextButton(
+                            onClick = { selectedIds = if (selectedIds.size == downloads.size) emptySet() else downloads.map { it.id }.toSet() },
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        ) {
                             Text(stringResource(if (selectedIds.size == downloads.size) R.string.s140 else R.string.s141))
                         }
                     }
                 }
-                items(downloads, key = { it.id }) { item ->
+                itemsIndexed(downloads, key = { _, item -> item.id }) { index, item ->
                     DownloadRecordCard(
                         item = item,
                         selected = item.id in selectedIds,
@@ -4092,6 +4096,13 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
                         onDelete = { deleteTargets = setOf(item.id); showDeleteConfirmation = true },
                         onViewLog = { logItemId = item.id }
                     )
+                    // 平铺列表靠细分割线划出条目边界，最后一条不画
+                    if (index < downloads.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
+                    }
                 }
             }
         }
@@ -4309,22 +4320,22 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
     val failed = item.status == "failed" || item.status == "hash_mismatch" || item.status == "cancelled"
     val completed = item.status == "completed"
     var menuExpanded by remember { mutableStateOf(false) }
-    // 选中态用主题色容器突出，替代原先左侧的方形复选框：
-    // 没进入选择模式时不应该有任何勾选框干扰阅读
-    val container = if (selected) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(containerColor = container)
-    ) {
+    // 不再用卡片包裹：下载列表应采用「直接贴在页面上」的平铺行，
+    // 卡片背景会在密集列表中叠出一堆独立色块，显得碎片化、列表变短。
+    // 选中态用一层淡主题色整行高亮：平铺列表没有卡片底，
+    // 只用主题色很低透明度的叠色，既不跳眼又能与未选中行区分
+    val rowBackground = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+        else Color.Transparent
+    Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
+                .background(rowBackground)
                 .combinedClickable(
                     onClick = { if (selectionMode) onSelect() else if (completed) onOpen() },
                     onLongClick = onSelect
                 )
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 选中标识：只在选择模式下出现，用对勾而非复选框
