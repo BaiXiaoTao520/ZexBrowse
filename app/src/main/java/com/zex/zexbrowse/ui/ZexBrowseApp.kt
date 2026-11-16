@@ -198,6 +198,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
@@ -4129,7 +4130,8 @@ private fun DownloadsScreen(viewModel: BrowserViewModel, onBack: () -> Unit) {
 private fun DownloadLogSheet(item: DownloadEntity, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val logText = remember(item) { buildDownloadLog(context, item) }
+    val configuration = LocalConfiguration.current
+    val logText = remember(item, context, configuration) { buildDownloadLog(context, item) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -4194,15 +4196,20 @@ private fun buildDownloadLog(context: Context, item: DownloadEntity): String = b
     appendLine("ZexBrowse ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
     appendLine("Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
     appendLine()
-    appendLine("文件：${item.fileName}")
-    appendLine("来源：${item.sourceUrl}")
-    appendLine("状态：${downloadStatus(context, item)}")
-    appendLine("进度：${item.progress}%（${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}）")
+    appendLine(context.getString(R.string.dl_log_file, item.fileName))
+    appendLine(context.getString(R.string.dl_log_source, item.sourceUrl))
+    appendLine(context.getString(R.string.dl_log_status, downloadStatus(context, item)))
+    appendLine(context.getString(
+        R.string.dl_log_progress,
+        item.progress.toString(),
+        formatBytes(context, item.downloadedBytes),
+        formatBytes(context, item.totalBytes)
+    ))
     if (item.expectedSha256.isNotBlank()) {
-        appendLine("预期 SHA-256：${item.expectedSha256}")
-        appendLine("实际 SHA-256：${item.sha256.ifBlank { "（未生成）" }}")
+        appendLine(context.getString(R.string.dl_log_expected_sha256, item.expectedSha256))
+        appendLine(context.getString(R.string.dl_log_actual_sha256, item.sha256.ifBlank { context.getString(R.string.dl_log_hash_missing) }))
     } else if (item.sha256.isNotBlank()) {
-        appendLine("SHA-256：${item.sha256}")
+        appendLine(context.getString(R.string.dl_log_sha256, item.sha256))
     }
     appendLine()
     append(item.errorMessage.ifBlank { context.getString(R.string.dl_log_empty) })

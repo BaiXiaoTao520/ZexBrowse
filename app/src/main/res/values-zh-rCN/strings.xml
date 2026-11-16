@@ -171,6 +171,14 @@
     <string name="dl_log_title">下载日志</string>
     <string name="dl_log_share">分享日志</string>
     <string name="dl_log_empty">没有更多日志信息</string>
+    <string name="dl_log_file">文件：%1$s</string>
+    <string name="dl_log_source">来源：%1$s</string>
+    <string name="dl_log_status">状态：%1$s</string>
+    <string name="dl_log_progress">进度：%1$s%%（%2$s / %3$s）</string>
+    <string name="dl_log_expected_sha256">预期 SHA-256：%1$s</string>
+    <string name="dl_log_actual_sha256">实际 SHA-256：%1$s</string>
+    <string name="dl_log_sha256">SHA-256：%1$s</string>
+    <string name="dl_log_hash_missing">（未生成）</string>
     <string name="dl_failed_hint">下载失败，可在「更多」中查看日志</string>
     <string name="dl_open_file">打开</string>
     <string name="dl_cancel_download">取消下载</string>

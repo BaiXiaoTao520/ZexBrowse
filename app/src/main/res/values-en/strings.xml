@@ -171,6 +171,14 @@
     <string name="dl_log_title">Download log</string>
     <string name="dl_log_share">Share log</string>
     <string name="dl_log_empty">No further log details</string>
+    <string name="dl_log_file">File: %1$s</string>
+    <string name="dl_log_source">Source: %1$s</string>
+    <string name="dl_log_status">Status: %1$s</string>
+    <string name="dl_log_progress">Progress: %1$s%% (%2$s / %3$s)</string>
+    <string name="dl_log_expected_sha256">Expected SHA-256: %1$s</string>
+    <string name="dl_log_actual_sha256">Actual SHA-256: %1$s</string>
+    <string name="dl_log_sha256">SHA-256: %1$s</string>
+    <string name="dl_log_hash_missing">(not generated)</string>
     <string name="dl_failed_hint">Download failed. See \"More\" for the log.</string>
     <string name="dl_open_file">Open</string>
     <string name="dl_cancel_download">Cancel download</string>
