@@ -14,7 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import com.zex.zexbrowse.ui.ZexBrowseApp
+import com.zex.zexbrowse.ui.ZeviApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.net.URLDecoder
 
@@ -93,21 +93,21 @@ class MainActivity : ComponentActivity() {
                     showStartupCrash(error)
                 }
             }.also { startupHandler.postDelayed(it, 30_000L) }
-            (application as ZexBrowseApplication).ensureComplianceExtension(
+            (application as ZeviApplication).ensureComplianceExtension(
                 onReady = {
                     runOnUiThread {
                         if (finishStartupAttempt(attempt)) {
                             try {
                                 setContent {
                                     val request by incomingUrl.collectAsState()
-                                    ZexBrowseApp(
+                                    ZeviApp(
                                         incomingUrl = request?.url,
                                         incomingUrlSeq = request?.seq ?: 0L,
                                         onIncomingUrlHandled = { incomingUrl.value = null }
                                     )
                                 }
-                                (application as ZexBrowseApplication).ensureDarkExtension()
-                                (application as ZexBrowseApplication).ensureAdBlockExtension()
+                                (application as ZeviApplication).ensureDarkExtension()
+                                (application as ZeviApplication).ensureAdBlockExtension()
                             } catch (t: Throwable) {
                                 CrashReporter.record(this, t)
                                 CrashReporter.markStarted(this)

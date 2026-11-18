@@ -12,12 +12,12 @@ class UpdateFilesTest {
 
     @Test fun updateAndTemporaryFilesStayInInternalUpdatesDirectory() {
         val directory = File(files.root, "updates").canonicalFile
-        for (name in listOf("ZexBrowse-12.0.apk", "../outside.apk", "a/../../outside.apk", "..\\outside.apk", ".", "..", "")) {
+        for (name in listOf("Zevi-12.0.apk", "../outside.apk", "a/../../outside.apk", "..\\outside.apk", ".", "..", "")) {
             val (destination, temporary) = updateFiles(files.root, name)
             assertEquals(directory, destination.canonicalFile.parentFile)
             assertEquals(directory, temporary.canonicalFile.parentFile)
             assertNotEquals(destination, temporary)
         }
-        assertEquals("ZexBrowse-12.0.apk", updateFiles(files.root, "ZexBrowse-12.0.apk").first.name)
+        assertEquals("Zevi-12.0.apk", updateFiles(files.root, "Zevi-12.0.apk").first.name)
     }
 }

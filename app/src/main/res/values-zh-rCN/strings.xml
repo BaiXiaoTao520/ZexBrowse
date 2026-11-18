@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">ZexBrowse</string>
+    <string name="app_name">Zevi</string>
     <string name="s000">无法访问此网站</string>
     <string name="compliance_title">您即将进入大陆搜索引擎</string>
     <string name="compliance_body">该搜索引擎会记录您的搜索内容与设备信息。若您确认继续，相关请求将由您自行发起与承担。</string>
@@ -44,7 +44,7 @@
     <string name="s032">网站安全检测阻止了本次访问</string>
     <string name="s033">请检查网络连接后重试</string>
     <string name="s034">如果其它网站可以正常打开，请确认该网站本身是否正常运行</string>
-    <string name="s035">请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器</string>
+    <string name="s035">请前往系统设置 → 应用 → 默认应用中将 Zevi 设为浏览器</string>
     <string name="s036">已设置为外部存储</string>
     <string name="s037">自定义搜索</string>
     <string name="s038">建议修改下载目录</string>
@@ -52,7 +52,7 @@
     <string name="s040">设置外部存储</string>
     <string name="s041">稍后</string>
     <string name="s042">设为默认浏览器</string>
-    <string name="s043">将 ZexBrowse 设为默认浏览器后，你从其它应用或分享菜单打开的网页链接会直接由它打开。是否设置完全由你自愿决定，也可以随时在系统设置中改回。</string>
+    <string name="s043">将 Zevi 设为默认浏览器后，你从其它应用或分享菜单打开的网页链接会直接由它打开。是否设置完全由你自愿决定，也可以随时在系统设置中改回。</string>
     <string name="s044">设为默认</string>
     <string name="s045">允许使用麦克风？</string>
     <string name="s046">%1$s 请求使用你的麦克风。</string>
@@ -299,12 +299,12 @@
     <string name="s273">角色</string>
     <string name="s274">默认应用</string>
     <string name="s275">默认浏览器</string>
-    <string name="s276">选择 ZexBrowse 为系统默认浏览器，带来更好使用体验</string>
+    <string name="s276">选择 Zevi 为系统默认浏览器，带来更好使用体验</string>
     <string name="s277">外链诊断</string>
     <string name="s278">外链</string>
     <string name="s279">诊断</string>
     <string name="s280">链接</string>
-    <string name="s281">关于 ZexBrowse</string>
+    <string name="s281">关于 Zevi</string>
     <string name="s282">关于</string>
     <string name="s283">版本</string>
     <string name="s284">许可</string>
@@ -441,14 +441,14 @@
     <string name="s411">检查更新</string>
     <string name="s412">暂无贡献者信息</string>
     <string name="s413">%1$s 次提交</string>
-    <string name="s414">如果 ZexBrowse 用起来顺手，欢迎请作者喝杯咖啡。</string>
-    <string name="s415">ZexBrowse 由个人在业余时间开发维护，持续免费、无广告，也不上架任何应用商店。你的支持会用于后续功能的开发与维护，以及测试设备的开销。</string>
+    <string name="s414">如果 Zevi 用起来顺手，欢迎请作者喝杯咖啡。</string>
+    <string name="s415">Zevi 由个人在业余时间开发维护，持续免费、无广告，也不上架任何应用商店。你的支持会用于后续功能的开发与维护，以及测试设备的开销。</string>
     <string name="s416">赞助完全出于自愿，金额不限；不赞助也完全不影响任何功能的使用。</string>
     <string name="s417">如何支持</string>
     <string name="s418">点击下方按钮，即可前往爱发电赞助页。</string>
     <string name="s419">在爱发电页面选择档位或自定义金额，按提示完成即可，无需截图或扫码。</string>
     <string name="s420">页面可能需要登录，支持微信、支付宝等方式；过程中遇到的问题也可在 GitHub 仓库反馈。</string>
-    <string name="s421">无论是否赞助，感谢你使用 ZexBrowse；遇到问题欢迎在 GitHub 仓库反馈，帮助它变得更好。</string>
+    <string name="s421">无论是否赞助，感谢你使用 Zevi；遇到问题欢迎在 GitHub 仓库反馈，帮助它变得更好。</string>
     <string name="s422">前往赞助</string>
     <string name="s423">柠泽镜像站通道</string>
     <string name="s424">需在网页完成验证后下载</string>
@@ -474,6 +474,7 @@
     <string name="dl_channel_done">下载完成</string>
     <string name="dl_err_invalid_name">文件名不能为空或包含路径分隔符，也不能是 . 或 ..</string>
     <string name="dl_err_cancelled">下载已取消</string>
+    <string name="dl_done_hint">下载已完成</string>
     <string name="dl_err_unknown">未知错误</string>
     <string name="dl_err_empty_body">下载响应内容为空</string>
     <string name="dl_err_incomplete">本地文件不完整，无法继续下载，请重新下载</string>
@@ -489,7 +490,7 @@
     <string name="err_contributors_failed">贡献者加载失败：%1$s</string>
     <string name="err_contributors_empty">贡献者响应为空</string>
     <string name="media_playing">正在播放媒体</string>
-    <string name="media_playing_desc">ZexBrowse 正在播放网页音频或视频</string>
+    <string name="media_playing_desc">Zevi 正在播放网页音频或视频</string>
     <string name="media_channel">媒体播放</string>
     <string name="color_theme_section">颜色主题</string>
     <string name="color_theme_section_desc">更改应用的整体颜色主题</string>
@@ -600,7 +601,7 @@
     <string name="chooser_open_file">打开文件</string>
     <string name="toast_no_file_app">未找到可打开此文件的应用</string>
     <string name="toast_allow_unknown">请在系统设置中允许安装未知应用</string>
-    <string name="toast_default_browser_hint">请前往系统设置 → 应用 → 默认应用中将 ZexBrowse 设为浏览器</string>
+    <string name="toast_default_browser_hint">请前往系统设置 → 应用 → 默认应用中将 Zevi 设为浏览器</string>
     <string name="toast_notif_denied">未授予通知权限，下载进度将只在应用内的下载记录中显示</string>
     <string name="toast_bookmark_deleted">书签已删除</string>
     <string name="toast_bookmark_added">书签已添加</string>
@@ -609,7 +610,7 @@
     <string name="btn_close">关闭</string>
     <string name="btn_bg_download">后台下载</string>
     <string name="s_performance">性能</string>
-    <string name="set_default_sub">选择 ZexBrowse 为系统默认浏览器，带来更好使用体验</string>
+    <string name="set_default_sub">选择 Zevi 为系统默认浏览器，带来更好使用体验</string>
     <string name="web_render_section">网页渲染</string>
     <string name="theme_follow_system">跟随系统</string>
     <string name="theme_light">浅色</string>
@@ -634,14 +635,14 @@
     <string name="crash_log_copied">已复制崩溃日志</string>
     <string name="crash_dialog_dismiss">关闭并清除</string>
     <string name="boot_crash_no_stack">（未捕获到详细栈信息，可能是 native 层崩溃）</string>
-    <string name="boot_crash_title">ZexBrowse 上次启动时崩溃了</string>
+    <string name="boot_crash_title">Zevi 上次启动时崩溃了</string>
     <string name="boot_crash_hint">以下为上次的崩溃信息（可长按选中复制后反馈）：</string>
     <string name="boot_crash_retry">重试启动</string>
-    <string name="startup_crash_title">ZexBrowse 启动失败</string>
+    <string name="startup_crash_title">Zevi 启动失败</string>
     <string name="startup_crash_error">错误信息：</string>
     <string name="startup_crash_saved_to">已自动保存崩溃日志到：</string>
     <string name="startup_crash_hint">请长按选中以下内容复制后反馈：</string>
-    <string name="crash_report_header">===== ZexBrowse 崩溃报告 =====</string>
+    <string name="crash_report_header">===== Zevi 崩溃报告 =====</string>
     <string name="crash_report_time">时间：</string>
     <string name="crash_report_thread">线程：</string>
     <string name="crash_report_version">版本：</string>
@@ -651,7 +652,7 @@
     <string name="crash_report_stack">----- 异常栈 -----</string>
     <string name="crash_report_unknown">未知</string>
     <string name="unsupported_title">抱歉</string>
-    <string name="unsupported_message">很遗憾，ZexBrowse 已停止对 %1$s 设备的支持，无法继续为你提供服务。感谢你的理解。</string>
+    <string name="unsupported_message">很遗憾，Zevi 已停止对 %1$s 设备的支持，无法继续为你提供服务。感谢你的理解。</string>
     <string name="unsupported_exit">退出应用</string>
     <string name="diag_time">时间：</string>
     <string name="diag_extracted">提取结果：</string>
@@ -724,7 +725,7 @@
     <string name="notification_enable">去开启</string>
     <string name="notification_manage">去管理</string>
     <string name="notification_need_permission_title">需要通知权限</string>
-    <string name="notification_need_permission_body">实时通知依附于系统通知。请在系统设置中允许 ZexBrowse 发送通知后，再开启实时通知。</string>
+    <string name="notification_need_permission_body">实时通知依附于系统通知。请在系统设置中允许 Zevi 发送通知后，再开启实时通知。</string>
     <string name="notification_how_it_works">实时通知由系统统一管控，应用无法自行开关。开启后，下载进度会以胶囊、锁屏卡片等系统形式展示；不同系统的名称与样式不同（如实时活动、流体云）。</string>
     <string name="notification_tip_title">提示</string>
     <string name="notification_tip">此处的状态直接读取系统设置，你在系统里改动后返回本页即可看到最新结果。</string>
@@ -732,7 +733,7 @@
     <string name="recommend_offline">网络连接失败，暂时无法加载推荐内容。请检查网络后重试。</string>
     <string name="recommend_retry">重试</string>
     <string name="recommend_notice_title">服务调整说明</string>
-    <string name="recommend_notice_body">根据相关法律法规要求，ZexBrowse 应用推荐中的直链文件下载服务，现已停止对大陆提供服务（此调整仅涉及应用推荐内的直链下载，与浏览器自身的下载功能无关）。</string>
+    <string name="recommend_notice_body">根据相关法律法规要求，Zevi 应用推荐中的直链文件下载服务，现已停止对大陆提供服务（此调整仅涉及应用推荐内的直链下载，与浏览器自身的下载功能无关）。</string>
     <string name="recommend_network_tip">以上下载地址均为境外直链，不保证在大陆地区的下载稳定性；若速度缓慢或无法连接，请酌情更换网络环境后重试。</string>
     <string name="notice_expand">展开</string>
     <string name="notice_collapse">收起</string>

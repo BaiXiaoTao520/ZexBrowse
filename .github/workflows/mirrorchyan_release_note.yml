@@ -26,6 +26,6 @@ jobs:
           version_name: ${{ inputs.tag || github.event.release.tag_name }}
 
           owner: BaiXiaoTao520
-          repo: ZexBrowse
+          repo: Zevi
           github_token: ${{ secrets.GITHUB_TOKEN }}
           upload_token: ${{ secrets.MirrorChyanUploadToken }}

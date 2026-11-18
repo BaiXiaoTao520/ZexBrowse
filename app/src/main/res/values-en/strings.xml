@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">ZexBrowse</string>
+    <string name="app_name">Zevi</string>
     <string name="s000">This site cannot be reached</string>
     <string name="compliance_title">You are about to enter a mainland search engine</string>
     <string name="compliance_body">This search engine records your queries and device information. If you choose to continue, the request is made at your own discretion.</string>
@@ -44,7 +44,7 @@
     <string name="s032">Safe browsing blocked this visit</string>
     <string name="s033">Check your network connection and try again</string>
     <string name="s034">If other sites work, the problem may be on this site\'s side</string>
-    <string name="s035">Go to Settings &gt; Apps &gt; Default apps to set ZexBrowse as your browser</string>
+    <string name="s035">Go to Settings &gt; Apps &gt; Default apps to set Zevi as your browser</string>
     <string name="s036">External storage selected</string>
     <string name="s037">Custom search</string>
     <string name="s038">Change the download folder</string>
@@ -52,7 +52,7 @@
     <string name="s040">Use external storage</string>
     <string name="s041">Later</string>
     <string name="s042">Set as default browser</string>
-    <string name="s043">Once ZexBrowse is your default browser, links opened from other apps or the share menu will open here directly. This is entirely optional and can be reverted in system settings at any time.</string>
+    <string name="s043">Once Zevi is your default browser, links opened from other apps or the share menu will open here directly. This is entirely optional and can be reverted in system settings at any time.</string>
     <string name="s044">Set as default</string>
     <string name="s045">Allow microphone access?</string>
     <string name="s046">%1$s wants to use your microphone.</string>
@@ -299,12 +299,12 @@
     <string name="s273">Role</string>
     <string name="s274">Default app</string>
     <string name="s275">Default browser</string>
-    <string name="s276">Make ZexBrowse your default browser for a smoother experience</string>
+    <string name="s276">Make Zevi your default browser for a smoother experience</string>
     <string name="s277">Link diagnostics</string>
     <string name="s278">External link</string>
     <string name="s279">Diagnostics</string>
     <string name="s280">Link</string>
-    <string name="s281">About ZexBrowse</string>
+    <string name="s281">About Zevi</string>
     <string name="s282">About</string>
     <string name="s283">Version</string>
     <string name="s284">License</string>
@@ -441,14 +441,14 @@
     <string name="s411">Check for updates</string>
     <string name="s412">No contributor information</string>
     <string name="s413">%1$s commits</string>
-    <string name="s414">If ZexBrowse works well for you, consider buying the author a coffee.</string>
-    <string name="s415">ZexBrowse is maintained by an individual in their spare time. It stays free, has no ads, and is not listed on any app store. Your support goes toward ongoing development and maintenance, as well as test devices.</string>
+    <string name="s414">If Zevi works well for you, consider buying the author a coffee.</string>
+    <string name="s415">Zevi is maintained by an individual in their spare time. It stays free, has no ads, and is not listed on any app store. Your support goes toward ongoing development and maintenance, as well as test devices.</string>
     <string name="s416">Sponsorship is entirely voluntary and any amount is welcome; not sponsoring does not affect any feature.</string>
     <string name="s417">How to support</string>
     <string name="s418">Tap the button below to open the Afdian sponsorship page.</string>
     <string name="s419">Pick a tier or enter a custom amount on Afdian and follow the prompts. No screenshots or QR scanning needed.</string>
     <string name="s420">The page may require sign-in and supports WeChat Pay, Alipay and others. Any issue can also be reported on the GitHub repository.</string>
-    <string name="s421">Thank you for using ZexBrowse whether or not you sponsor. Feedback on the GitHub repository is always welcome.</string>
+    <string name="s421">Thank you for using Zevi whether or not you sponsor. Feedback on the GitHub repository is always welcome.</string>
     <string name="s422">Sponsor</string>
     <string name="s423">Lingze mirror channel</string>
     <string name="s424">Requires completing verification on the web page</string>
@@ -481,6 +481,7 @@
     <string name="dl_channel_done">Download complete</string>
     <string name="dl_err_invalid_name">Enter a file name without path separators. . and .. are not allowed.</string>
     <string name="dl_err_cancelled">Download cancelled</string>
+    <string name="dl_done_hint">Download complete</string>
     <string name="dl_err_unknown">Unknown error</string>
     <string name="dl_err_empty_body">The download response was empty</string>
     <string name="dl_err_incomplete">The local file is incomplete and cannot be resumed. Please download again.</string>
@@ -496,7 +497,7 @@
     <string name="err_contributors_failed">Failed to load contributors: %1$s</string>
     <string name="err_contributors_empty">The contributors response was empty</string>
     <string name="media_playing">Playing media</string>
-    <string name="media_playing_desc">ZexBrowse is playing web audio or video</string>
+    <string name="media_playing_desc">Zevi is playing web audio or video</string>
     <string name="media_channel">Media playback</string>
     <string name="color_theme_section">Color theme</string>
     <string name="color_theme_section_desc">Change the app’s overall color theme</string>
@@ -600,7 +601,7 @@
     <string name="chooser_open_file">Open file</string>
     <string name="toast_no_file_app">No app can open this file</string>
     <string name="toast_allow_unknown">Allow installing unknown apps in system settings</string>
-    <string name="toast_default_browser_hint">Go to Settings &gt; Apps &gt; Default apps to set ZexBrowse as your browser</string>
+    <string name="toast_default_browser_hint">Go to Settings &gt; Apps &gt; Default apps to set Zevi as your browser</string>
     <string name="toast_notif_denied">Notification permission not granted. Download progress will only appear in the in-app download list.</string>
     <string name="toast_bookmark_deleted">Bookmark deleted</string>
     <string name="toast_bookmark_added">Bookmark added</string>
@@ -609,7 +610,7 @@
     <string name="btn_close">Close</string>
     <string name="btn_bg_download">Download in background</string>
     <string name="s_performance">Performance</string>
-    <string name="set_default_sub">Set ZexBrowse as your default browser for a better experience</string>
+    <string name="set_default_sub">Set Zevi as your default browser for a better experience</string>
     <string name="web_render_section">Web rendering</string>
     <string name="theme_follow_system">Follow system</string>
     <string name="theme_light">Light</string>
@@ -634,14 +635,14 @@
     <string name="crash_log_copied">Crash log copied</string>
     <string name="crash_dialog_dismiss">Dismiss and clear</string>
     <string name="boot_crash_no_stack">(No detailed stack was captured; this may be a native crash)</string>
-    <string name="boot_crash_title">ZexBrowse crashed on the last launch</string>
+    <string name="boot_crash_title">Zevi crashed on the last launch</string>
     <string name="boot_crash_hint">Crash information from last time (long-press to select and copy):</string>
     <string name="boot_crash_retry">Try again</string>
-    <string name="startup_crash_title">ZexBrowse failed to start</string>
+    <string name="startup_crash_title">Zevi failed to start</string>
     <string name="startup_crash_error">Error:</string>
     <string name="startup_crash_saved_to">Crash log saved to:</string>
     <string name="startup_crash_hint">Long-press to select the text below, copy it, and send it back:</string>
-    <string name="crash_report_header">===== ZexBrowse crash report =====</string>
+    <string name="crash_report_header">===== Zevi crash report =====</string>
     <string name="crash_report_time">Time: </string>
     <string name="crash_report_thread">Thread: </string>
     <string name="crash_report_version">Version: </string>
@@ -651,7 +652,7 @@
     <string name="crash_report_stack">----- Stack trace -----</string>
     <string name="crash_report_unknown">Unknown</string>
     <string name="unsupported_title">Sorry</string>
-    <string name="unsupported_message">ZexBrowse no longer supports %1$s devices and cannot keep serving you. Thank you for understanding.</string>
+    <string name="unsupported_message">Zevi no longer supports %1$s devices and cannot keep serving you. Thank you for understanding.</string>
     <string name="unsupported_exit">Exit app</string>
     <string name="diag_time">Time: </string>
     <string name="diag_extracted">Extracted: </string>
@@ -724,7 +725,7 @@
     <string name="notification_enable">Turn on</string>
     <string name="notification_manage">Manage</string>
     <string name="notification_need_permission_title">Notification permission needed</string>
-    <string name="notification_need_permission_body">Live updates rely on system notifications. Allow ZexBrowse to send notifications in system settings, then turn on live updates.</string>
+    <string name="notification_need_permission_body">Live updates rely on system notifications. Allow Zevi to send notifications in system settings, then turn on live updates.</string>
     <string name="notification_how_it_works">Live updates are controlled by the system; apps cannot toggle them directly. Once enabled, download progress appears as system surfaces such as a status chip or lock-screen card. Names and styles vary by system.</string>
     <string name="notification_tip_title">Note</string>
     <string name="notification_tip">This status is read directly from system settings. Change it in the system and come back to see the updated result.</string>
@@ -732,7 +733,7 @@
     <string name="recommend_offline">Network connection failed, so recommendations cannot be loaded right now. Check your connection and try again.</string>
     <string name="recommend_retry">Retry</string>
     <string name="recommend_notice_title">Service Notice</string>
-    <string name="recommend_notice_body">In accordance with applicable laws and regulations, direct-link file downloads in ZexBrowse App Recommendations are no longer available in mainland China. This affects only direct links inside App Recommendations, not the browser\'s own downloads.</string>
+    <string name="recommend_notice_body">In accordance with applicable laws and regulations, direct-link file downloads in Zevi App Recommendations are no longer available in mainland China. This affects only direct links inside App Recommendations, not the browser\'s own downloads.</string>
     <string name="recommend_network_tip">These download links point directly to overseas servers; download stability in mainland China is not guaranteed. If a transfer is slow or fails to connect, try a different network and retry.</string>
     <string name="notice_expand">Expand</string>
     <string name="notice_collapse">Collapse</string>

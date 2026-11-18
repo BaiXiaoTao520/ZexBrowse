@@ -199,6 +199,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -216,6 +217,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -919,7 +921,7 @@ private fun isAppDefaultBrowser(context: Context): Boolean {
  * 构造系统「默认浏览器选择框」的 Intent（Android 10+ 的角色请求）。
  * 返回 null 表示当前系统不支持该角色，由调用方回退到默认应用设置页。
  *
- * 注意：必须用 ActivityResultLauncher 以 startActivityForResult 形式启动（见 ZexBrowseApp），
+ * 注意：必须用 ActivityResultLauncher 以 startActivityForResult 形式启动（见 ZeviApp），
  * 系统端 RequestRoleActivity 靠 getCallingPackage() 识别请求方，
  * 而该值仅在 startActivityForResult 启动时才非空；用 startActivity 会被系统直接忽略。
  */
@@ -941,7 +943,7 @@ private fun openDefaultAppSettings(context: Context) {
 }
 
 @Composable
-fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUrlHandled: () -> Unit = {}) {
+fun ZeviApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUrlHandled: () -> Unit = {}) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     // 上次运行如果是崩溃退出，启动时把保存的崩溃日志弹出来，方便用户复制反馈
@@ -1013,7 +1015,7 @@ fun ZexBrowseApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncom
     var showLanguageSheet by remember { mutableStateOf(false) }
     // 首次启动引导：提醒下载目录为内部存储（仅首次，读取已持久化的真实值，避免默认初始值误触发）
     var showFirstRunStorageHint by remember { mutableStateOf(false) }
-    // 首启引导第二弹：推荐将 ZexBrowse 设为默认浏览器（在外部存储提示之后，仅首启展示一次）
+    // 首启引导第二弹：推荐将 Zevi 设为默认浏览器（在外部存储提示之后，仅首启展示一次）
     var showDefaultBrowserPrompt by remember { mutableStateOf(false) }
     // 本应用是否已被用户设为默认浏览器（用于决定是否展示设置项入口）
     var isDefaultBrowser by remember { mutableStateOf(isAppDefaultBrowser(context)) }
@@ -1899,7 +1901,7 @@ private fun HomeHeader(tabCount: Int, onTabs: () -> Unit, onHistory: () -> Unit,
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                "ZexBrowse",
+                "Zevi",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -2751,71 +2753,165 @@ private fun RecommendationCard(app: RecommendedApp, iconIndex: Int = 0, onClick:
 }
 
 /**
- * 推荐详情弹窗：展示完整说明，统一一个「下载」按钮：
- * APK 直链走应用内下载，网页/网盘链接交给系统打开。
+ * 推荐详情面板：展示完整说明，底部只有「取消」与「下载」两个动作。
+ *
+ * 用底部面板而不是对话框：介绍文字长短不一，对话框在小屏上要么被截断、
+ * 要么把按钮挤出屏幕；底部面板按内容自适应高度、内部可滚动，与语言选择、
+ * 更新说明保持同一种观感。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecommendationInfoDialog(
     app: RecommendedApp,
     onDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 「取消」需要主动收起面板：先播完隐藏动画再销毁，否则会被立刻从组合中摘下
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 标题区：图标 + 名称与版本，与列表卡片的视觉语言一致
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(app.icon, null)
-                Spacer(Modifier.width(10.dp))
-                Text(app.displayName)
+                val (appBg, appFg) = cardIconColors(LocalVibrantTheme.current, 0)
+                Surface(modifier = Modifier.size(40.dp), color = appBg, shape = MaterialTheme.shapes.medium) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(app.icon, null, tint = appFg, modifier = Modifier.size(22.dp))
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        app.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        app.summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())
+            // 正文：限高可滚，长介绍不会把下面的按钮顶出面板
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
-                Text(app.description)
+                Text(
+                    app.description.ifBlank { app.summary },
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp)
+                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDownload) {
-                Icon(if (app.isApk) Icons.Default.Download else Icons.Default.Language, null)
-                Spacer(Modifier.width(6.dp))
-                Text(if (app.isApk) stringResource(R.string.dl_title) else stringResource(R.string.dl_open_browser))
+            // 只有两个动作：取消在左、下载在右
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(onClick = animateDismiss, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.s071))
+                }
+                Button(onClick = onDownload, modifier = Modifier.weight(1f)) {
+                    Icon(if (app.isApk) Icons.Default.Download else Icons.Default.Language, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (app.isApk) stringResource(R.string.dl_title) else stringResource(R.string.dl_open_browser))
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
-    )
+        }
+    }
 }
 
 /**
- * 网页/网盘下载的二次说明弹窗：打开浏览器前先说明下载步骤或网盘信息（如蓝奏云提取码），
+ * 网页/网盘下载的二次说明面板：打开浏览器前先说明下载步骤或网盘信息（如蓝奏云提取码），
  * 确认后才跳转。对应原项目 ZexNote 中 AppShare / CoolMonitor 的下载说明弹窗。
+ *
+ * 与推荐详情、下载进度保持同一种底部面板形式。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BrowserNoticeDialog(
     notice: BrowserNotice,
     onOpen: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(notice.title)) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                stringResource(notice.title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
-                Text(notice.content)
+                Text(
+                    notice.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp)
+                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onOpen) {
-                Icon(Icons.Default.Language, null)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(notice.confirmLabel))
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(onClick = animateDismiss, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.s071))
+                }
+                Button(onClick = onOpen, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(notice.confirmLabel))
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s071)) } }
-    )
+        }
+    }
 }
 
 /**
@@ -2846,10 +2942,12 @@ private fun RecommendationDownloadDialogHost(
 }
 
 /**
- * 应用内下载进度弹窗：进度直接取自下载记录（与「下载设置 → 下载记录」同一数据源），
+ * 应用内下载进度面板：进度直接取自下载记录（与「下载设置 → 下载记录」同一数据源），
  * 下载完成后原地切换为「安装」。
+ *
+ * 与详情面板同一种底部面板形式，避免同一个推荐流程里一会儿对话框、一会儿面板。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RecommendationDownloadDialog(
     app: RecommendedApp,
@@ -2862,43 +2960,73 @@ private fun RecommendationDownloadDialog(
     // 取消是用户主动行为，不是失败：只把真正的失败当成错误原因展示
     val cancelled = record?.status == "cancelled"
     val failed = record?.status == "failed" || record?.status == "hash_mismatch"
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val animateDismiss: () -> Unit = {
+        scope.launch {
+            runCatching { sheetState.hide() }
+            onDismiss()
+        }
+    }
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.s072, app.displayName)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (finished) {
-                    Text(stringResource(R.string.s073))
-                } else if (failed || cancelled) {
-                    Text(record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed))
-                } else {
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                stringResource(R.string.s072, app.displayName),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            when {
+                finished -> Text(stringResource(R.string.s073), style = MaterialTheme.typography.bodyMedium)
+                failed || cancelled -> Text(
+                    record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                else -> {
                     val progress = record?.progress ?: 0
                     if (progress > 0) {
-                        // 确定态：沿用原来的平滑波浪进度条
+                        // 确定态：平滑插值的波浪条，10% 起波、95% 收平
                         WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
-                        Text(stringResource(R.string.s075, progress))
+                        Text(stringResource(R.string.s075, progress), style = MaterialTheme.typography.bodyMedium)
                     } else {
-                        // 连接中：不确定态波浪进度条，无限滚动
+                        // 连接中：不确定态波浪条，无限滚动
                         LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
-                        Text(stringResource(R.string.s076))
+                        Text(stringResource(R.string.s076), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
-        },
-        confirmButton = {
-            if (finished) {
-                TextButton(onClick = onInstall) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.s077)) }
-            }
-        },
-        dismissButton = {
-            Row {
-                if (!finished) {
-                    TextButton(onClick = onCancel) { Text(stringResource(R.string.s078)) }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (finished) {
+                    OutlinedButton(onClick = animateDismiss, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.btn_close))
+                    }
+                    Button(onClick = onInstall, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.s077))
+                    }
+                } else {
+                    OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.s078))
+                    }
+                    Button(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.btn_bg_download))
+                    }
                 }
-                TextButton(onClick = onDismiss) { Text(if (finished) stringResource(R.string.btn_close) else stringResource(R.string.btn_bg_download)) }
             }
         }
-    )
+    }
 }
 
 /**
@@ -3678,6 +3806,9 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     Modifier.fillMaxWidth()
                         .background(if (incognitoActive) IncognitoTopBarColor else Color.Transparent)
                         .padding(horizontal = 10.dp)
+                        // 底部留白：地址栏不要贴着网页/加载条，给一条呼吸缝。
+                        // 固定 dp 而不是随加载状态变化，所以不会上下跳。
+                        .padding(bottom = 6.dp)
                         // 记录地址栏纵向范围，供「点空白处收起输入」判断
                         .onGloballyPositioned { coords ->
                             val pos = coords.positionInRoot()
@@ -3832,8 +3963,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     }
                     // 加载进度条：盖在网页顶端，不占布局高度，
                     // 因此网页不会在加载开始/结束时上下跳动。
-                    // 用回波浪条而不是普通细线：一般进度条在高 DPI 屏上细得看不出动，
-                    // 波浪有上下起伏才看得出进度在走；同时把条体压得比原来更薄。
+                    // 容器高 10dp 给波浪留出摆动空间，但线体只有 2dp，
+                    // 视觉上仍是一条细线，只是会上下起伏。
                     if (selectedTab.loading) {
                         val barColor = when {
                             incognitoActive -> IncognitoAccentColor
@@ -3844,8 +3975,9 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                             progress = (selectedTab.progress / 100f).coerceIn(0f, 1f),
                             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
                             color = barColor,
-                            thickness = 3.dp,
-                            wavelength = 18.dp
+                            height = 10.dp,
+                            strokeWidth = 2.dp,
+                            wavelength = 20.dp
                         )
                     }
                 }
@@ -4198,7 +4330,7 @@ private fun DownloadLogSheet(item: DownloadEntity, onDismiss: () -> Unit) {
 
 /** 组装一条下载失败的诊断文本：包含文件名、来源、状态与错误信息 */
 private fun buildDownloadLog(context: Context, item: DownloadEntity): String = buildString {
-    appendLine("ZexBrowse ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+    appendLine("Zevi ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
     appendLine("Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
     appendLine()
     appendLine(context.getString(R.string.dl_log_file, item.fileName))
@@ -4372,8 +4504,10 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                 )
                 // 状态行：完成且无错误时不显示任何状态文字（不写「下载成功」）；
                 // 失败只给一句带出路的提示，不在这里倾倒日志；
-                // 用户自己取消的只说「下载已取消」，用普通文字色，不营造错误观感
+                // 用户自己取消的只说「下载已取消」，用普通文字色，不营造错误观感；
+                // 跑满且哈希校验通过后明确告知「下载已完成」，不再什么都不显示
                 val subtitle = when {
+                    completed -> stringResource(R.string.dl_done_hint)
                     cancelled -> stringResource(R.string.dl_err_cancelled)
                     failed -> stringResource(R.string.dl_failed_hint)
                     running || paused -> downloadStatus(context, item)
@@ -4395,8 +4529,9 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                     WavyProgressBar(
                         progress = (item.progress / 100f).coerceIn(0f, 1f),
                         modifier = Modifier.fillMaxWidth(),
-                        thickness = 4.dp,
-                        wavelength = 22.dp
+                        height = 12.dp,
+                        strokeWidth = 2.5.dp,
+                        wavelength = 24.dp
                     )
                     Text(
                         "${item.progress}% · ${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}",
@@ -7025,9 +7160,14 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
 /**
  * 加载进度条（波形）。
  *
+ * 波浪必须给足竖向空间：容器高度就是振幅上限（amplitude 为 1 时波形占满整高）。
+ * 之前把高度压到 3~4dp，和默认描边一样粗，波形被裁成一条直线，
+ * 看起来跟普通进度条没区别，也就看不到「10% 起波、95% 收平」的效果。
+ *
  * @param color 可选的波浪颜色；无痕页传专属紫，其余页面为 null（跟随主题 primary）
- * @param thickness 条体总高；调用方按场景给不同尺寸，浏览器顶栏处更薄
- * @param wavelength 波浪长度；条体变薄时同步缩短，否则一个波峰都看不出来
+ * @param height 容器总高，同时是振幅上限
+ * @param strokeWidth 线体粗细；要明显小于 [height]，波形才有摆动余地
+ * @param wavelength 波浪长度；条体变窄时同步缩短，否则一个波峰都看不出来
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -7035,7 +7175,8 @@ private fun WavyProgressBar(
     progress: Float,
     modifier: Modifier = Modifier,
     color: Color? = null,
-    thickness: Dp = 4.dp,
+    height: Dp = 10.dp,
+    strokeWidth: Dp = 2.dp,
     wavelength: Dp = 24.dp
 ) {
     val animated by animateFloatAsState(
@@ -7046,9 +7187,17 @@ private fun WavyProgressBar(
     // 未指定颜色时沿用它自己的默认 token；指定时同色用于轨道，靠透明度避免抢眼
     val barColor = color ?: WavyProgressIndicatorDefaults.indicatorColor
     val barTrackColor = color?.copy(alpha = 0.24f) ?: WavyProgressIndicatorDefaults.trackColor
+    val density = LocalDensity.current
+    val stroke = remember(strokeWidth, density) {
+        with(density) { Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round) }
+    }
     LinearWavyProgressIndicator(
         progress = { animated },
-        modifier = modifier.height(thickness),
+        modifier = modifier.height(height),
+        stroke = stroke,
+        trackStroke = stroke,
+        // 用 M3 默认振幅策略：≤ 10% 与 ≥ 95% 收为直线，中间才是完整波形。
+        // 不写死成常量振幅，否则开头结尾都会是一条粗直线，没有「展开—收缩」过程。
         wavelength = wavelength,
         color = barColor,
         trackColor = barTrackColor
@@ -7102,7 +7251,7 @@ private fun AboutScreen(
                         }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("ZexBrowse", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Zevi", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text(
                                 stringResource(R.string.s401, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
                                 style = MaterialTheme.typography.bodySmall,
@@ -7133,7 +7282,7 @@ private fun AboutScreen(
                 // 不把仓库地址当作副标题：地址对用户没有意义，只告诉他点进去能做什么
                 subtitle = stringResource(R.string.about_github_sub),
                 painterRes = R.drawable.ic_github,
-                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/ZexBrowse"))) },
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BaiXiaoTao520/Zevi"))) },
                 horizontalPadding = 0.dp,
                 colorIndex = 0
             )
@@ -7698,7 +7847,7 @@ private fun UpdateIntroDialog(
 private fun UpdateDownloadDialog(release: ReleaseInfo, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val fileName = "ZexBrowse-${release.version}.apk"
+    val fileName = "Zevi-${release.version}.apk"
     val effectiveUrl = release.downloadUrl
     val channel = stringResource(R.string.s429)
 
