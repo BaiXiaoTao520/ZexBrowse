@@ -14,7 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.zex.zexbrowse.BuildConfig
 import com.zex.zexbrowse.CrashReporter
 import com.zex.zexbrowse.R
-import com.zex.zexbrowse.ZexBrowseApplication
+import com.zex.zexbrowse.ZeviApplication
 import com.zex.zexbrowse.data.BrowserDatabase
 import com.zex.zexbrowse.data.CUSTOM_SEARCH_PREFIX
 import com.zex.zexbrowse.data.HistoryEntity
@@ -61,8 +61,8 @@ data class BrowserTab(val id: String = UUID.randomUUID().toString(), val session
 // 下载响应体临时捕获结果：bin 为数据文件，done/fail 为完成标记
 class CapturedBody(val bin: File, val done: File, val fail: File)
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
-    private val runtime = (application as ZexBrowseApplication).runtime
-    private fun forceDarkApplication() = getApplication<Application>() as ZexBrowseApplication
+    private val runtime = (application as ZeviApplication).runtime
+    private fun forceDarkApplication() = getApplication<Application>() as ZeviApplication
     // 网页媒体播放期间的前台服务与音频焦点管理（避免后台/锁屏时音频断续）
     private val mediaPlayback = MediaPlaybackController(getApplication())
     private val database = BrowserDatabase.create(application)
@@ -215,7 +215,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     init {
         runCatching { lastColorScheme = runtime.settings.getPreferredColorScheme() }
         // 内存压力：释放可重新捕获的后台标签预览图，保留会话及前进/后退历史。
-        (application as? ZexBrowseApplication)?.onMemoryPressure = { level ->
+        (application as? ZeviApplication)?.onMemoryPressure = { level ->
             if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
                 val activeId = _selectedId.value
                 _tabs.value = _tabs.value.map { tab ->
@@ -815,7 +815,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // 拦截数据库始终开启：关闭拦截后仍要能读到历史累计值（它只记录拦截事件的汇总，
         // 不记录访问内容），否则用户一关开关次数就归零，看起来像数据丢了
         runCatching { runtime.settings.contentBlocking.setContentBlockingDatabaseStatus(true) }
-        runCatching { (getApplication<Application>() as ZexBrowseApplication).setAdBlockExtensionEnabled(enabled) }
+        runCatching { (getApplication<Application>() as ZeviApplication).setAdBlockExtensionEnabled(enabled) }
 
         var changed = false
         _tabs.value.forEach { tab ->

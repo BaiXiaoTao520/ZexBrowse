@@ -16,6 +16,7 @@ import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -295,6 +296,34 @@ val cccodroidRecommendation = RecommendedApp(
     description = "cccodroid is a third-party project and is not affiliated with Anthropic. It runs the official, unmodified Claude Code: downloaded from Anthropic's official channel at install time (or, when that is unreachable, the identical file Anthropic publishes on npm, via a mirror), verified against the official sha256 manifest, never modified."
 )
 
+/**
+ * DSH Go：基于 DeepSeek Harness 的第三方 Android 客户端。
+ *
+ * 说明文案是项目方提供的原文，不做改写：里面的能力边界与限制条款
+ * （远程只支持图片附件、插件管理限于开关等）对使用者是实质信息。
+ * 副标题刻意写短——列表里只是一行导语，详细内容留给详情面板。
+ */
+val dshGoRecommendation = RecommendedApp(
+    name = "DSH Go",
+    version = "v1.1.0",
+    summary = "在手机上跑 DeepSeek Harness 的第三方客户端",
+    downloadUrl = "https://github.com/ccch1mneyyy/dsh-Go/releases/download/v1.1.0/dsh-go-1.1.0-arm64.apk",
+    icon = Icons.Rounded.Terminal,
+    category = RecommendCategory.TOOLS,
+    description = """
+        DSH Go 提供聊天界面、本机运行环境和远程连接，是基于 DeepSeek Harness 的第三方项目。运行在手机上的是 DSH 引擎；模型请求仍由你配置的模型提供方处理。
+
+        本机运行：在 App 内安装 Ubuntu、Node.js 与 DSH 运行环境，无需 Root 或另装 Termux。
+        远程连接：通过 SSH 或李国宝老师开发的 DSHarness Remote 使用电脑、服务器上的 DSH。
+        聊天与工具：切换模型，发送图片、使用语音输入，处理工具审批和提问；支持聊天界面与网页模式。
+        插件界面：使用适配 DSH Go 的原生工具卡、表单和面板；仓库提供 SDK、教程和示例。
+        手机操控：在你开启权限后，让本机引擎读取屏幕、点按和输入，并可随时停止。
+        分享与外观：分享、导出和回放对话，调整主题、图标和桌宠。
+
+        功能随主机和连接方式不同。DSHarness Remote 当前只支持图片附件，不能在 App 内打开网页版，插件管理限于开关，且不支持 DS Bot 和对话日志导出。
+    """.trimIndent()
+)
+
 val astralGameRecommendation = RecommendedApp(
     name = "Astral Game",
     version = "1.6.5",
@@ -327,6 +356,7 @@ val recommendedApps = listOf(
     zalithLauncherRecommendation,
     tomatoRecommendation,
     cccodroidRecommendation,
+    dshGoRecommendation,
     coolMonitorRecommendation,
     twilightToolboxRecommendation,
     wearOsBoxRecommendation,

@@ -131,7 +131,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          git tag -s "$RELEASE_TAG" -m "ZexBrowse ${RELEASE_TAG#v}"
+          git tag -s "$RELEASE_TAG" -m "Zevi ${RELEASE_TAG#v}"
           git verify-tag "$RELEASE_TAG"
           git push origin "refs/tags/$RELEASE_TAG"
           echo "name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"

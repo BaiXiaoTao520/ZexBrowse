@@ -36,6 +36,6 @@ jobs:
           arch: ${{ matrix.arch }}
 
           owner: BaiXiaoTao520
-          repo: ZexBrowse
+          repo: Zevi
           github_token: ${{ secrets.GITHUB_TOKEN }}
           upload_token: ${{ secrets.MirrorChyanUploadToken }}

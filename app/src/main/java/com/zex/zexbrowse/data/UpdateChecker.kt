@@ -176,7 +176,7 @@ class UpdateChecker(
     private suspend fun githubLatestViaApi(): ReleaseInfo? = withContext(Dispatchers.IO) {
         runCatching {
             val request = Request.Builder()
-                .url("https://api.github.com/repos/BaiXiaoTao520/ZexBrowse/releases/latest")
+                .url("https://api.github.com/repos/BaiXiaoTao520/Zevi/releases/latest")
                 .header("Accept", "application/vnd.github+json")
                 .build()
 
@@ -196,7 +196,7 @@ class UpdateChecker(
                     notes = json.optString("body"),
                     downloadUrl = apkAsset?.optString("browser_download_url").orEmpty()
                         // 部分 release 未上传 assets：回退到 releases/latest 的固定下载路径
-                        .ifBlank { "https://github.com/BaiXiaoTao520/ZexBrowse/releases/latest/download/app-release.apk" }
+                        .ifBlank { "https://github.com/BaiXiaoTao520/Zevi/releases/latest/download/app-release.apk" }
                 )
             }
         }.getOrNull()
@@ -211,7 +211,7 @@ class UpdateChecker(
     private suspend fun githubLatestViaAtom(): ReleaseInfo? = withContext(Dispatchers.IO) {
         runCatching {
             val request = Request.Builder()
-                .url("https://github.com/BaiXiaoTao520/ZexBrowse/releases.atom")
+                .url("https://github.com/BaiXiaoTao520/Zevi/releases.atom")
                 .header("Accept", "application/atom+xml")
                 .build()
 
@@ -231,7 +231,7 @@ class UpdateChecker(
                 ReleaseInfo(
                     version = version,
                     notes = atomTextToPlain(content),
-                    downloadUrl = "https://github.com/BaiXiaoTao520/ZexBrowse/releases/latest/download/app-release.apk"
+                    downloadUrl = "https://github.com/BaiXiaoTao520/Zevi/releases/latest/download/app-release.apk"
                 )
             }
         }.getOrNull()
@@ -266,7 +266,7 @@ class UpdateChecker(
     }
 
     suspend fun contributors(): List<Contributor> = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url("https://api.github.com/repos/BaiXiaoTao520/ZexBrowse/contributors").build()
+        val request = Request.Builder().url("https://api.github.com/repos/BaiXiaoTao520/Zevi/contributors").build()
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "HTTP ${response.code}" }
             val body = response.body ?: error("empty body")

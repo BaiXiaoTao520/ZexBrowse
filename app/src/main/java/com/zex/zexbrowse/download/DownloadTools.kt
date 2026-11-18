@@ -26,7 +26,7 @@ data class UpdateDownloadResult(val file: File, val sha256: String)
 internal fun updateFiles(filesDir: File, fileName: String): Pair<File, File> {
     // The version used in fileName comes from release metadata; keep it inside filesDir.
     val safeName = fileName.replace('/', '_').replace('\\', '_')
-        .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "ZexBrowse-update.apk"
+        .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "Zevi-update.apk"
     val destination = File(File(filesDir, "updates"), safeName)
     return destination to File(destination.parentFile, "${destination.name}.download")
 }
