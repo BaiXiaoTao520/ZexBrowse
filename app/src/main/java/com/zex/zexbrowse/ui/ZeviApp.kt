@@ -4007,8 +4007,8 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                     }
                     // 加载进度条：盖在网页顶端，不占布局高度，
                     // 因此网页不会在加载开始/结束时上下跳动。
-                    // 容器高 10dp 给波浪留出摆动空间，但线体只有 2dp，
-                    // 视觉上仍是一条细线，只是会上下起伏。
+                    // 尺寸用 WavyProgressBar 的默认值（容器 10dp / 线体 4dp / 波长 30dp），
+                    // 与下载记录里的进度条完全一致。
                     if (selectedTab.loading) {
                         val barColor = when {
                             incognitoActive -> IncognitoAccentColor
@@ -4018,10 +4018,7 @@ private fun BrowserScreen(viewModel: BrowserViewModel, settings: BrowserSettings
                         WavyProgressBar(
                             progress = (selectedTab.progress / 100f).coerceIn(0f, 1f),
                             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
-                            color = barColor,
-                            height = 10.dp,
-                            strokeWidth = 2.dp,
-                            wavelength = 20.dp
+                            color = barColor
                         )
                     }
                 }
@@ -4572,10 +4569,7 @@ private fun DownloadRecordCard(item: DownloadEntity, selected: Boolean, selectio
                     // 不会像普通进度条那样一格一格跳
                     WavyProgressBar(
                         progress = (item.progress / 100f).coerceIn(0f, 1f),
-                        modifier = Modifier.fillMaxWidth(),
-                        height = 12.dp,
-                        strokeWidth = 2.5.dp,
-                        wavelength = 24.dp
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Text(
                         "${item.progress}% · ${formatBytes(context, item.downloadedBytes)} / ${formatBytes(context, item.totalBytes)}",
@@ -7199,19 +7193,18 @@ private fun DownloadDialog(url: String, skipResolve: Boolean = false, onDownload
     )
 }
 
-// 全局统一的波浪进度条：波长 24dp，振幅沿用官方规则（进度 10% 以下、95% 以上收平为直线，中段才起波），
-// 并对进度变化做平滑过渡，避免每次进度跳变时动效中断产生停顿感（LinearWavyProgressIndicator 默认不做进度过渡动画）
 /**
  * 加载进度条（波形）。
  *
  * 波浪必须给足竖向空间：容器高度就是振幅上限（amplitude 为 1 时波形占满整高）。
- * 之前把高度压到 3~4dp，和默认描边一样粗，波形被裁成一条直线，
- * 看起来跟普通进度条没区别，也就看不到「10% 起波、95% 收平」的效果。
+ * 容器高度与线体粗细取 M3 默认比例（10dp 容器 / 4dp 线），也就是系统里普通
+ * 进度条的粗细，不会显得纤弱；波长用 30dp，一个屏幕宽度上只铺少量波峰，
+ * 波形看得清，不会因为波纹过密而糊成一条毛边。
  *
  * @param color 可选的波浪颜色；无痕页传专属紫，其余页面为 null（跟随主题 primary）
  * @param height 容器总高，同时是振幅上限
  * @param strokeWidth 线体粗细；要明显小于 [height]，波形才有摆动余地
- * @param wavelength 波浪长度；条体变窄时同步缩短，否则一个波峰都看不出来
+ * @param wavelength 波浪长度；越短波纹越密，过密就看不出起伏
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -7220,8 +7213,8 @@ private fun WavyProgressBar(
     modifier: Modifier = Modifier,
     color: Color? = null,
     height: Dp = 10.dp,
-    strokeWidth: Dp = 2.dp,
-    wavelength: Dp = 24.dp
+    strokeWidth: Dp = 4.dp,
+    wavelength: Dp = 30.dp
 ) {
     val animated by animateFloatAsState(
         targetValue = progress,
