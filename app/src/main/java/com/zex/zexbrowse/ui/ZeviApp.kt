@@ -2769,14 +2769,21 @@ private fun RecommendationInfoDialog(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // 「取消」需要主动收起面板：先播完隐藏动画再销毁，否则会被立刻从组合中摘下
     val scope = rememberCoroutineScope()
+    var isDismissing by remember { mutableStateOf(false) }
     val animateDismiss: () -> Unit = {
-        scope.launch {
-            runCatching { sheetState.hide() }
-            onDismiss()
+        if (!isDismissing) {
+            isDismissing = true
+            scope.launch {
+                runCatching { sheetState.hide() }
+                onDismiss()
+            }
         }
     }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            isDismissing = true
+            onDismiss()
+        },
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2835,7 +2842,10 @@ private fun RecommendationInfoDialog(
                 OutlinedButton(onClick = animateDismiss, modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.s071))
                 }
-                Button(onClick = onDownload, modifier = Modifier.weight(1f)) {
+                Button(onClick = {
+                    if (isDismissing) return@Button
+                    onDownload()
+                }, modifier = Modifier.weight(1f)) {
                     Icon(if (app.isApk) Icons.Default.Download else Icons.Default.Language, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(if (app.isApk) stringResource(R.string.dl_title) else stringResource(R.string.dl_open_browser))
@@ -2860,14 +2870,21 @@ private fun BrowserNoticeDialog(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    var isDismissing by remember { mutableStateOf(false) }
     val animateDismiss: () -> Unit = {
-        scope.launch {
-            runCatching { sheetState.hide() }
-            onDismiss()
+        if (!isDismissing) {
+            isDismissing = true
+            scope.launch {
+                runCatching { sheetState.hide() }
+                onDismiss()
+            }
         }
     }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            isDismissing = true
+            onDismiss()
+        },
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2883,7 +2900,7 @@ private fun BrowserNoticeDialog(
                 fontWeight = FontWeight.SemiBold
             )
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                 shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
@@ -2904,7 +2921,10 @@ private fun BrowserNoticeDialog(
                 OutlinedButton(onClick = animateDismiss, modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.s071))
                 }
-                Button(onClick = onOpen, modifier = Modifier.weight(1f)) {
+                Button(onClick = {
+                    if (isDismissing) return@Button
+                    onOpen()
+                }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(notice.confirmLabel))
@@ -2962,14 +2982,21 @@ private fun RecommendationDownloadDialog(
     val failed = record?.status == "failed" || record?.status == "hash_mismatch"
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    var isDismissing by remember { mutableStateOf(false) }
     val animateDismiss: () -> Unit = {
-        scope.launch {
-            runCatching { sheetState.hide() }
-            onDismiss()
+        if (!isDismissing) {
+            isDismissing = true
+            scope.launch {
+                runCatching { sheetState.hide() }
+                onDismiss()
+            }
         }
     }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            isDismissing = true
+            onDismiss()
+        },
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2984,22 +3011,28 @@ private fun RecommendationDownloadDialog(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            when {
-                finished -> Text(stringResource(R.string.s073), style = MaterialTheme.typography.bodyMedium)
-                failed || cancelled -> Text(
-                    record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                else -> {
-                    val progress = record?.progress ?: 0
-                    if (progress > 0) {
-                        // 确定态：平滑插值的波浪条，10% 起波、95% 收平
-                        WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
-                        Text(stringResource(R.string.s075, progress), style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        // 连接中：不确定态波浪条，无限滚动
-                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
-                        Text(stringResource(R.string.s076), style = MaterialTheme.typography.bodyMedium)
+            Column(
+                Modifier.fillMaxWidth().weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                when {
+                    finished -> Text(stringResource(R.string.s073), style = MaterialTheme.typography.bodyMedium)
+                    failed || cancelled -> Text(
+                        record?.errorMessage?.ifBlank { stringResource(R.string.dl_status_failed) } ?: stringResource(R.string.dl_status_failed),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    else -> {
+                        val progress = record?.progress ?: 0
+                        if (progress > 0) {
+                            // 确定态：平滑插值的波浪条，10% 起波、95% 收平
+                            WavyProgressBar(progress = progress / 100f, modifier = Modifier.fillMaxWidth())
+                            Text(stringResource(R.string.s075, progress), style = MaterialTheme.typography.bodyMedium)
+                        } else {
+                            // 连接中：不确定态波浪条，无限滚动
+                            LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth(), amplitude = 0.5f, wavelength = 24.dp)
+                            Text(stringResource(R.string.s076), style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
             }
@@ -3011,16 +3044,27 @@ private fun RecommendationDownloadDialog(
                     OutlinedButton(onClick = animateDismiss, modifier = Modifier.weight(1f)) {
                         Text(stringResource(R.string.btn_close))
                     }
-                    Button(onClick = onInstall, modifier = Modifier.weight(1f)) {
+                    Button(onClick = {
+                        if (isDismissing) return@Button
+                        onInstall()
+                    }, modifier = Modifier.weight(1f)) {
                         Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.s077))
                     }
                 } else {
-                    OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = {
+                        if (isDismissing) return@OutlinedButton
+                        isDismissing = true
+                        onCancel()
+                    }, modifier = Modifier.weight(1f)) {
                         Text(stringResource(R.string.s078))
                     }
-                    Button(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Button(onClick = {
+                        if (isDismissing) return@Button
+                        isDismissing = true
+                        onDismiss()
+                    }, modifier = Modifier.weight(1f)) {
                         Text(stringResource(R.string.btn_bg_download))
                     }
                 }
