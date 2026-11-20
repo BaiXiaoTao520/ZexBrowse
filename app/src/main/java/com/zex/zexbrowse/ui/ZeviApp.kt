@@ -107,6 +107,7 @@ import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Cookie
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.ContactSupport
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Folder
@@ -196,6 +197,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -1328,8 +1330,26 @@ fun ZeviApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUr
             Box(Modifier.fillMaxSize()) {
                 // 下层：手势进行中预先渲染目标页，让滑走时能看到真实的目标页面而不是空白。
                 // 仅在 beginBack() 之后有内容，平时完全不参与组合，不影响性能。
+                //
+                // 下层随手势从暗到亮：上层滑走时下方页面逐渐显现，观感上像揭幕，
+                // 而不是「上面一张灰卡片飘走，下面本来就是亮的」。
+                // 起点用 0.45 的黑色遮罩：一眼就能看清目标页内容，
+                // 只保留轻微明暗过渡，不会让人以为切到了另一个暗色页面。
                 if (backActive) {
-                    Box(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            // 页面保持不透明，压暗由内容上方的黑色遮罩完成。
+                            alpha = 1f
+                            // 残留属性显式复位：该 layer 可能被复用
+                            translationX = 0f
+                            scaleX = 1f
+                            scaleY = 1f
+                            shadowElevation = 0f
+                        }.drawWithContent {
+                            drawContent()
+                            drawRect(Color.Black.copy(alpha = 0.45f * (1f - backProgress.value)))
+                        }
+                    ) {
                         if (canPreviewTarget) {
                             PageContent(
                                 destination = backTarget,
@@ -1359,25 +1379,28 @@ fun ZeviApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUr
                     }
                 }
 
-                // 上层：当前页。手势期间随手指整体右移，并按 Miuix（HyperOS）风格
-                // 缩放、收拢圆角、投下阴影，营造「页面被拎起退回上层」的层级感。
-                // 不做透明度渐变：透明淡出会让下层页面「从暗渐亮」，观感上像蒙了层纱。
+                // 上层：当前页。手势期间随手指整体右移，按 Miuix 的平面样式：
+                // 不缩放、不收圆角、不投阴影，只做纯水平位移，再配上一层轻度压暗。
+                // 之前是「缩放 + 收圆角 + 阴影」的卡片式退场，页面会像一张卡片被拎起来，
+                // 在平铺式的浏览器界面里显得很跳，改用平面位移后与系统手势更一致。
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
                         val progress = backProgress.value
                         // 每次都显式赋值全部属性，不能只在 progress > 0 时设。
-                        // graphicsLayer 会沿用上一次的值：若回零时不重置 clip/shape/translationX，
-                        // 下一帧就会带着残留的位移与裁剪继续绘制，表现为「返回后停留一帧原页面」。
+                        // graphicsLayer 会沿用上一次的值：若回零时不重置 translationX / alpha，
+                        // 下一帧就会带着残留的位移与压暗继续绘制，表现为「返回后停留一帧原页面」。
                         translationX = size.width * progress
-                        val scale = 1f - 0.16f * progress
-                        scaleX = scale
-                        scaleY = scale
-                        // Miuix 风格：跟手缩放时边缘圆角收拢并投下阴影
-                        shape = RoundedCornerShape((24f * progress).dp)
-                        clip = progress > 0f
-                        shadowElevation = (14f * progress).dp.toPx()
-                        ambientShadowColor = Color.Black.copy(alpha = 0.35f)
-                        spotShadowColor = Color.Black.copy(alpha = 0.35f)
+                        // 压暗而非淡出：页面滑走时自身稍微变暗，与下层逐渐亮起形成对比，
+                        // 层次感靠明暗而非缩放获得，不会改变页面尺寸。
+                        alpha = 1f
+                        // 残留属性复位：早前版本在这里设过 scale/shape/clip/shadowElevation，
+                        // 必须显式写回中性值，否则复用同一 layer 时会沿用旧值。
+                        scaleX = 1f
+                        scaleY = 1f
+                        shadowElevation = 0f
+                    }.drawWithContent {
+                        drawContent()
+                        drawRect(Color.Black.copy(alpha = 0.12f * backProgress.value))
                     }
                 ) {
                     // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
@@ -7242,7 +7265,7 @@ private fun WavyProgressBar(
 }
 
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun AboutScreen(
     settings: BrowserSettings,
@@ -7332,7 +7355,8 @@ private fun AboutScreen(
             SettingsEntry(
                 title = stringResource(R.string.s285),
                 subtitle = stringResource(R.string.about_contributors_sub),
-                icon = Icons.Rounded.ContactSupport,
+                // 贡献者是「一群人」的列表，Groups 比单个客服头像更贴切
+                icon = Icons.Rounded.Groups,
                 onClick = {
                     val request = ++contributorsRequest
                     contributors = null
@@ -7401,10 +7425,32 @@ private fun AboutScreen(
 
     val dismissContributors = { contributorsRequest++; contributors = null; contributorsLoading = false }
     if (contributors != null || contributorsLoading) {
-        AlertDialog(
+        // 与推荐、更新说明等其他面板保持同一种形式：上两角圆角、拖拽横条、
+        // 点遮罩收起；名单较长时列表内部自己滚，不会把面板撑满屏幕。
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val sheetScope = rememberCoroutineScope()
+        val animateDismissContributors: () -> Unit = {
+            sheetScope.launch {
+                runCatching { sheetState.hide() }
+                dismissContributors()
+            }
+        }
+        ModalBottomSheet(
             onDismissRequest = dismissContributors,
-            title = { Text(stringResource(R.string.s285)) },
-            text = {
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    stringResource(R.string.s285),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
                 val list = contributors
                 if (list == null) {
                     Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
@@ -7413,27 +7459,34 @@ private fun AboutScreen(
                         ContainedLoadingIndicator(modifier = Modifier.size(48.dp))
                     }
                 } else if (list.isEmpty()) {
-                    Text(stringResource(R.string.s412))
+                    Text(stringResource(R.string.s412), style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    LazyColumn { items(list) { contributor ->
-                        val homepage = "https://github.com/${contributor.name}"
-                        Row(
-                            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable { openInBrowser(context, homepage) }.padding(vertical = 6.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(model = contributor.avatarUrl, contentDescription = contributor.name, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(contributor.name)
-                                Text(stringResource(R.string.s413, contributor.contributions), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // 名单限高：贡献者再多也只占这么多，内部自行滚动
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 360.dp)) {
+                        items(list) { contributor ->
+                            val homepage = "https://github.com/${contributor.name}"
+                            Row(
+                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                                    .clickable { openInBrowser(context, homepage) }
+                                    .padding(vertical = 6.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AsyncImage(model = contributor.avatarUrl, contentDescription = contributor.name, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(contributor.name)
+                                    Text(stringResource(R.string.s413, contributor.contributions), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    } }
+                    }
                 }
-            },
-            confirmButton = { TextButton(onClick = dismissContributors) { Text(stringResource(R.string.s127)) } }
-        )
+                OutlinedButton(onClick = animateDismissContributors, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.s127))
+                }
+            }
+        }
     }
 
     update?.let { release -> UpdateDialog(release = release, onDismiss = { update = null }) }
@@ -7524,10 +7577,13 @@ private fun UpdateSettingsSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (checking) {
+                    // 检查中按钮同时是 disabled：底色会从 primary 变成禁用色，
+                    // 而禁用色在深色模式下很暗，深色的 onPrimary 转圈根本看不见。
+                    // 用 onSurface 而不是 onPrimary：它在两种主题下都与禁用底色有足够对比。
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.width(8.dp))
                 }
