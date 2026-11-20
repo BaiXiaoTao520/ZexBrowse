@@ -197,6 +197,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -1332,19 +1333,21 @@ fun ZeviApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUr
                 //
                 // 下层随手势从暗到亮：上层滑走时下方页面逐渐显现，观感上像揭幕，
                 // 而不是「上面一张灰卡片飘走，下面本来就是亮的」。
-                // 起点不用全黑（0.55 而非 0.2）：一眼就能看清目标页内容，
+                // 起点用 0.45 的黑色遮罩：一眼就能看清目标页内容，
                 // 只保留轻微明暗过渡，不会让人以为切到了另一个暗色页面。
                 if (backActive) {
                     Box(
                         Modifier.fillMaxSize().graphicsLayer {
-                            val progress = backProgress.value
-                            // 压暗层逐渐退去，同时轻微上浮定位：越接近完成越是「正常页面」
-                            alpha = 0.55f + 0.45f * progress
+                            // 页面保持不透明，压暗由内容上方的黑色遮罩完成。
+                            alpha = 1f
                             // 残留属性显式复位：该 layer 可能被复用
                             translationX = 0f
                             scaleX = 1f
                             scaleY = 1f
                             shadowElevation = 0f
+                        }.drawWithContent {
+                            drawContent()
+                            drawRect(Color.Black.copy(alpha = 0.45f * (1f - backProgress.value)))
                         }
                     ) {
                         if (canPreviewTarget) {
@@ -1389,12 +1392,15 @@ fun ZeviApp(incomingUrl: String? = null, incomingUrlSeq: Long = 0L, onIncomingUr
                         translationX = size.width * progress
                         // 压暗而非淡出：页面滑走时自身稍微变暗，与下层逐渐亮起形成对比，
                         // 层次感靠明暗而非缩放获得，不会改变页面尺寸。
-                        alpha = 1f - 0.12f * progress
+                        alpha = 1f
                         // 残留属性复位：早前版本在这里设过 scale/shape/clip/shadowElevation，
                         // 必须显式写回中性值，否则复用同一 layer 时会沿用旧值。
                         scaleX = 1f
                         scaleY = 1f
                         shadowElevation = 0f
+                    }.drawWithContent {
+                        drawContent()
+                        drawRect(Color.Black.copy(alpha = 0.12f * backProgress.value))
                     }
                 ) {
                     // 页面跳转动效：前进时新页从右滑入、旧页向左滑出；后退时相反。
@@ -7456,7 +7462,7 @@ private fun AboutScreen(
                     Text(stringResource(R.string.s412), style = MaterialTheme.typography.bodyMedium)
                 } else {
                     // 名单限高：贡献者再多也只占这么多，内部自行滚动
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 360.dp)) {
                         items(list) { contributor ->
                             val homepage = "https://github.com/${contributor.name}"
                             Row(

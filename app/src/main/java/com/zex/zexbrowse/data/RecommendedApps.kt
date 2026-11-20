@@ -304,7 +304,7 @@ val cccodroidRecommendation = RecommendedApp(
  */
 val starRingRecommendation = RecommendedApp(
     name = "星环 - 标准版",
-    version = "标准版",
+    version = "",
     summary = "新一代星环，不止是浏览器，更是你的生活伴侣",
     downloadUrl = "https://roamexplore.rth1.xyz/",
     icon = Icons.Rounded.Public,
