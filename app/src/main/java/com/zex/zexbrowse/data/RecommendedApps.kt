@@ -14,6 +14,7 @@ import androidx.compose.material.icons.rounded.Chat
 import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MonitorHeart
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.Terminal
@@ -297,6 +298,25 @@ val cccodroidRecommendation = RecommendedApp(
 )
 
 /**
+ * 星环（标准版）：官方分发的网页入口，不提供 APK 直链。
+ *
+ * 子描述与介绍为项目方提供的原文，不做改写。
+ */
+val starRingRecommendation = RecommendedApp(
+    name = "星环 - 标准版",
+    version = "标准版",
+    summary = "新一代星环，不止是浏览器，更是你的生活伴侣",
+    downloadUrl = "https://roamexplore.rth1.xyz/",
+    icon = Icons.Rounded.Public,
+    category = RecommendCategory.TOOLS,
+    description = """
+        星环由 Hairouse 于 2021 年首次发布，现已衍生数十款产品，吸引全球近千万用户。
+
+        它凭借丝滑的浏览体验与领先的交互设计，为全球用户带来极致的体验。
+    """.trimIndent()
+)
+
+/**
  * DSH Go：基于 DeepSeek Harness 的第三方 Android 客户端。
  *
  * 说明文案是项目方提供的原文，不做改写：里面的能力边界与限制条款
@@ -356,6 +376,7 @@ val recommendedApps = listOf(
     zalithLauncherRecommendation,
     tomatoRecommendation,
     cccodroidRecommendation,
+    starRingRecommendation,
     dshGoRecommendation,
     coolMonitorRecommendation,
     twilightToolboxRecommendation,
